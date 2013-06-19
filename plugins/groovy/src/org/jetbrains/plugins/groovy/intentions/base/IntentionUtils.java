@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package org.jetbrains.plugins.groovy.intentions.base;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.daemon.impl.quickfix.CreateFromUsageUtils;
 import com.intellij.codeInsight.daemon.impl.quickfix.CreateMethodFromUsageFix;
 import com.intellij.codeInsight.template.*;
@@ -34,6 +34,7 @@ import org.jetbrains.plugins.groovy.annotator.intentions.QuickfixUtil;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrStatement;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod;
 import org.jetbrains.plugins.groovy.lang.psi.expectedTypes.TypeConstraint;
 import org.jetbrains.plugins.groovy.template.expressions.ChooseTypeExpression;
 import org.jetbrains.plugins.groovy.template.expressions.ParameterNameExpression;
@@ -85,13 +86,18 @@ public class IntentionUtils {
       builder.replaceElement(parameterTypeElement, paramTypesExpressions[i]);
       builder.replaceElement(parameter.getNameIdentifier(), new ParameterNameExpression(null));
     }
-    PsiCodeBlock body = method.getBody();
-    assert body != null;
-    PsiElement lbrace = body.getLBrace();
-    assert lbrace != null;
-    builder.setEndVariableAfter(lbrace);
 
-    method = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(method);
+    PsiCodeBlock body = method.getBody();
+    if (body != null) {
+      PsiElement lbrace = body.getLBrace();
+      assert lbrace != null;
+      builder.setEndVariableAfter(lbrace);
+    }
+    else {
+      builder.setEndVariableAfter(method.getParameterList());
+    }
+
+    method = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(method);
     Template template = builder.buildTemplate();
 
     final PsiFile targetFile = owner.getContainingFile();
@@ -129,7 +135,16 @@ public class IntentionUtils {
             }
             if (method != null) {
               try {
-                CreateFromUsageUtils.setupMethodBody(method);
+                final boolean hasNoReturnType = method.getReturnTypeElement() == null && method instanceof GrMethod;
+                if (hasNoReturnType) {
+                  ((GrMethod)method).setReturnType(PsiType.VOID);
+                }
+                if (method.getBody() != null) {
+                  CreateFromUsageUtils.setupMethodBody(method);
+                }
+                if (hasNoReturnType) {
+                  ((GrMethod)method).setReturnType(null);
+                }
               }
               catch (IncorrectOperationException e) {
                 LOG.error(e);

@@ -42,6 +42,7 @@ import java.util.Map;
 public abstract class FileOrDirectoryTreeNode extends AbstractTreeNode implements VirtualFilePointerListener, Disposable {
   private static final Map<FileStatus, SimpleTextAttributes> myFileStatusToAttributeMap = new HashMap<FileStatus, SimpleTextAttributes>();
   private final SimpleTextAttributes myInvalidAttributes;
+  @NotNull
   private final Project myProject;
   protected final File myFile;
   private final String myName;
@@ -76,13 +77,14 @@ public abstract class FileOrDirectoryTreeNode extends AbstractTreeNode implement
   @Override
   public void validityChanged(@NotNull VirtualFilePointer[] pointers) {
     if (!getFilePointer().isValid()) {
-      AbstractTreeNode parent = (AbstractTreeNode) getParent();
+      AbstractTreeNode parent = (AbstractTreeNode)getParent();
       if (parent != null && parent.getSupportsDeletion()) {
         getTreeModel().removeNodeFromParent(this);
       }
       else {
-        if (getTree() != null)
+        if (getTree() != null) {
           getTree().repaint();
+        }
       }
     }
   }
@@ -114,7 +116,8 @@ public abstract class FileOrDirectoryTreeNode extends AbstractTreeNode implement
     VirtualFile file = getFilePointer().getFile();
     FileStatusManager fileStatusManager = FileStatusManager.getInstance(myProject);
     FileStatus status = fileStatusManager.getStatus(file);
-    return getAttributesFor(status);
+    SimpleTextAttributes attributes = getAttributesFor(status);
+    return myFilterAttributes == null ? attributes : SimpleTextAttributes.merge(myFilterAttributes, attributes);
   }
 
   @NotNull
@@ -136,5 +139,10 @@ public abstract class FileOrDirectoryTreeNode extends AbstractTreeNode implement
 
   @Override
   public void dispose() {
+  }
+
+  @NotNull
+  public Project getProject() {
+    return myProject;
   }
 }

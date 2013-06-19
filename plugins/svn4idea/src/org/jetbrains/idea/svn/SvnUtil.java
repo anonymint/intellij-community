@@ -16,6 +16,7 @@
 package org.jetbrains.idea.svn;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -29,6 +30,7 @@ import com.intellij.openapi.vcs.AbstractVcsHelper;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
+import com.intellij.openapi.vcs.impl.ContentRevisionCache;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -37,6 +39,7 @@ import com.intellij.openapi.wm.impl.status.StatusBarUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.MultiMap;
+import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -45,15 +48,16 @@ import org.jetbrains.idea.svn.dialogs.LockDialog;
 import org.tmatesoft.svn.core.*;
 import org.tmatesoft.svn.core.internal.util.SVNPathUtil;
 import org.tmatesoft.svn.core.internal.wc.SVNFileUtil;
-import org.tmatesoft.svn.core.internal.wc.admin.SVNEntry;
-import org.tmatesoft.svn.core.internal.wc.admin.SVNWCAccess;
 import org.tmatesoft.svn.core.internal.wc2.SvnWcGeneration;
 import org.tmatesoft.svn.core.io.SVNCapability;
 import org.tmatesoft.svn.core.io.SVNRepository;
 import org.tmatesoft.svn.core.wc.*;
 import org.tmatesoft.svn.core.wc2.SvnOperationFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.*;
 
 public class SvnUtil {
@@ -62,6 +66,7 @@ public class SvnUtil {
   @NonNls public static final String WC_DB_FILE_NAME = "wc.db";
   @NonNls public static final String DIR_PROPS_FILE_NAME = "dir-props";
   @NonNls public static final String PATH_TO_LOCK_FILE = SVN_ADMIN_DIR_NAME + "/lock";
+  private static final Logger LOG = Logger.getInstance("#org.jetbrains.idea.svn.SvnUtil");
 
   private SvnUtil() { }
 
@@ -298,7 +303,7 @@ public class SvnUtil {
   }
 
   public static Collection<List<Change>> splitChangesIntoWc(final SvnVcs vcs, final List<Change> changes) {
-    return splitIntoWc(vcs, changes, new Convertor<Change, File>() {
+    return splitIntoRepositories(vcs, changes, new Convertor<Change, File>() {
       @Override
       public File convert(Change o) {
         return ChangesUtil.getFilePath(o).getIOFile();
@@ -306,16 +311,30 @@ public class SvnUtil {
     });
   }
 
-  public static Collection<List<File>> splitFilesIntoWc(final SvnVcs vcs, final List<File> committables) {
-    return splitIntoWc(vcs, committables, Convertor.SELF);
+  public static Collection<List<File>> splitFilesIntoRepositories(final SvnVcs vcs, final List<File> committables) {
+    return splitIntoRepositories(vcs, committables, Convertor.SELF);
   }
 
-  public static <T> Collection<List<T>> splitIntoWc(final SvnVcs vcs, final List<T> committables,
-                                                    Convertor<T, File> convertor) {
+  public static <T> Collection<List<T>> splitIntoRepositories(final SvnVcs vcs, final List<T> committables,
+                                                              Convertor<T, File> convertor) {
     if (committables.size() == 1) {
       return Collections.singletonList(committables);
     }
 
+    final MultiMap<Pair<SVNURL, WorkingCopyFormat>, T> result = splitIntoRepositoriesMap(vcs, committables, convertor);
+
+    if (result.size() == 1) {
+      return Collections.singletonList(committables);
+    }
+    final Collection<List<T>> result2 = new ArrayList<List<T>>();
+    for (Map.Entry<Pair<SVNURL, WorkingCopyFormat>, Collection<T>> entry : result.entrySet()) {
+      result2.add((List<T>)entry.getValue());
+    }
+    return result2;
+  }
+
+  public static <T> MultiMap<Pair<SVNURL, WorkingCopyFormat>, T> splitIntoRepositoriesMap(SvnVcs vcs,
+    List<T> committables, Convertor<T, File> convertor) {
     final MultiMap<Pair<SVNURL, WorkingCopyFormat>, T> result = new MultiMap<Pair<SVNURL, WorkingCopyFormat>, T>() {
       @Override
       protected Collection<T> createCollection() {
@@ -330,15 +349,7 @@ public class SvnUtil {
         result.putValue(new Pair<SVNURL, WorkingCopyFormat>(path.getRepositoryUrlUrl(), path.getFormat()), committable);
       }
     }
-
-    if (result.size() == 1) {
-      return Collections.singletonList(committables);
-    }
-    final Collection<List<T>> result2 = new ArrayList<List<T>>();
-    for (Map.Entry<Pair<SVNURL, WorkingCopyFormat>, Collection<T>> entry : result.entrySet()) {
-      result2.add((List<T>)entry.getValue());
-    }
-    return result2;
+    return result;
   }
 
   private static class LocationsCrawler implements SvnWCRootCrawler {
@@ -422,10 +433,6 @@ public class SvnUtil {
   @Nullable
   public static SVNURL getRepositoryRoot(final SvnVcs vcs, final SVNURL url, boolean allowRemote) throws SVNException {
     final SVNWCClient client = vcs.createWCClient();
-    SVNInfo localInfo = client.doInfo(url, SVNRevision.UNDEFINED, SVNRevision.WORKING);
-    if (localInfo != null && localInfo.getRepositoryRootURL() != null || ! allowRemote) {
-      return localInfo == null ? null : localInfo.getRepositoryRootURL();
-    }
     SVNInfo info = client.doInfo(url, SVNRevision.UNDEFINED, SVNRevision.HEAD);
     return (info == null) ? null : info.getRepositoryRootURL();
   }
@@ -582,24 +589,22 @@ public class SvnUtil {
     return false;
   }
 
+  public static SVNURL getCommittedURL(final SvnVcs vcs, final File file) {
+    final File root = getWorkingCopyRoot(file);
+    if (root == null) return null;
+    return getUrl(vcs, root);
+  }
+
   @Nullable
-  public static SVNURL getUrl(final File file) {
-    SVNWCAccess wcAccess = SVNWCAccess.newInstance(null);
+  public static SVNURL getUrl(final SvnVcs vcs, final File file) {
     try {
-      wcAccess.probeOpen(file, false, 0);
-      SVNEntry entry = wcAccess.getVersionedEntry(file, false);
-      return entry.getSVNURL();
-    } catch (SVNException e) {
-      //
-    } finally {
-      try {
-        wcAccess.close();
-      }
-      catch (SVNException e) {
-        //
-      }
+      final SVNInfo info = vcs.createWCClient().doInfo(file, SVNRevision.UNDEFINED);
+      return info == null ? null : info.getURL(); // todo for moved items?
     }
-    return null;
+    catch (SVNException e) {
+      LOG.debug(e);
+      return null;
+    }
   }
 
   public static boolean doesRepositorySupportMergeInfo(final SvnVcs vcs, final SVNURL url) {
@@ -638,12 +643,22 @@ public class SvnUtil {
   }
 
   public static File getWcDb(final File file) {
-    return new File(file, ".svn/wc.db");
+    return new File(file, SVN_ADMIN_DIR_NAME + "/wc.db");
   }
 
   @Nullable
   public static File getWcCopyRootIf17(final File file, @Nullable final File upperBound) {
     File current = file;
+    boolean wcDbFound = false;
+    while (current != null) {
+      File wcDb;
+      if ((wcDb = getWcDb(current)).exists() && ! wcDb.isDirectory()) {
+        wcDbFound = true;
+        break;
+      }
+      current = current.getParentFile();
+    }
+    if (! wcDbFound) return null;
     while (current != null) {
       try {
         final SvnWcGeneration svnWcGeneration = SvnOperationFactory.detectWcGeneration(current, false);
@@ -687,4 +702,45 @@ public class SvnUtil {
     }
     return result;
   }
+
+  public static byte[] getFileContents(final SvnVcs vcs, final String path, final boolean isUrl, final SVNRevision revision,
+                                       final SVNRevision pegRevision)
+    throws VcsException {
+    final int maxSize = VcsUtil.getMaxVcsLoadedFileSize();
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream() {
+      @Override
+      public synchronized void write(int b) {
+        if (size() > maxSize) throw new FileTooBigRuntimeException();
+        super.write(b);
+      }
+
+      @Override
+      public synchronized void write(byte[] b, int off, int len) {
+        if (size() > maxSize) throw new FileTooBigRuntimeException();
+        super.write(b, off, len);
+      }
+
+      @Override
+      public synchronized void writeTo(OutputStream out) throws IOException {
+        if (size() > maxSize) throw new FileTooBigRuntimeException();
+        super.writeTo(out);
+      }
+    };
+    SVNWCClient wcClient = vcs.createWCClient();
+    try {
+      if (isUrl) {
+        wcClient.doGetFileContents(SVNURL.parseURIEncoded(path), pegRevision, revision, true, buffer);
+      } else {
+        wcClient.doGetFileContents(new File(path), pegRevision, revision, true, buffer);
+      }
+      ContentRevisionCache.checkContentsSize(path, buffer.size());
+    } catch (FileTooBigRuntimeException e) {
+      ContentRevisionCache.checkContentsSize(path, buffer.size());
+    } catch (SVNException e) {
+      throw new VcsException(e);
+    }
+    return buffer.toByteArray();
+  }
+
+  private static class FileTooBigRuntimeException extends RuntimeException {}
 }

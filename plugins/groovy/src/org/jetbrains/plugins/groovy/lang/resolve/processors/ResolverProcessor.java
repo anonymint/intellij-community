@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.jetbrains.plugins.groovy.lang.resolve.processors;
 
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.impl.source.tree.java.PsiLocalVariableImpl;
 import com.intellij.psi.scope.ElementClassHint;
 import com.intellij.psi.scope.NameHint;
@@ -27,7 +28,6 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.psi.api.GroovyResolveResult;
 import org.jetbrains.plugins.groovy.lang.psi.api.SpreadState;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrField;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrAccessorMethod;
 import org.jetbrains.plugins.groovy.lang.psi.api.toplevel.imports.GrImportStatement;
 import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyResolveResultImpl;
@@ -60,8 +60,8 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
   private List<GroovyResolveResult> myCandidates;
 
   protected ResolverProcessor(@Nullable String name,
-                              EnumSet<ResolveKind> resolveTargets,
-                              PsiElement place,
+                              @NotNull EnumSet<ResolveKind> resolveTargets,
+                              @NotNull PsiElement place,
                               @NotNull PsiType[] typeArguments) {
     myName = name;
     myResolveTargetKinds = resolveTargets;
@@ -69,7 +69,7 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
     myTypeArguments = typeArguments;
   }
 
-  public boolean execute(@NotNull PsiElement element, ResolveState state) {
+  public boolean execute(@NotNull PsiElement element, @NotNull ResolveState state) {
     if (element instanceof PsiLocalVariableImpl) { //todo a better hack
       return true; // the debugger creates a Java code block context and our expressions to evaluate resolve there
     }
@@ -89,7 +89,7 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
         substitutor = substitutor.putAll((PsiClass)namedElement, myTypeArguments);
       }
 
-      if (namedElement instanceof PsiClass) {
+      if (namedElement instanceof PsiClass  && !(namedElement instanceof PsiTypeParameter)) {
         final PsiClass aClass = (PsiClass)namedElement;
         if (myProcessedClasses == null) myProcessedClasses = new HashSet<String>();
         if (!myProcessedClasses.add(aClass.getQualifiedName())) {
@@ -102,25 +102,39 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
       final SpreadState spreadState = state.get(SpreadState.SPREAD_STATE);
       boolean isStaticsOK = isStaticsOK(namedElement, resolveContext, true);
       addCandidate(new GroovyResolveResultImpl(namedElement, resolveContext, spreadState, substitutor, isAccessible, isStaticsOK));
-      return !isAccessible || !isStaticsOK;
+      return !(isAccessible && isStaticsOK);
     }
 
     return true;
   }
 
-  protected final void addCandidate(GroovyResolveResult candidate) {
+  protected final void addCandidate(@NotNull GroovyResolveResult candidate) {
     PsiElement element = candidate.getElement();
-    assert element == null || element.isValid() : "invalid resolve candidate: " + element.getClass();
+    assert element == null || element.isValid() : getElementInfo(element);
 
     if (myCandidates == null) myCandidates = new ArrayList<GroovyResolveResult>();
     myCandidates.add(candidate);
   }
 
+  @NotNull
+  private static String getElementInfo(@NotNull PsiElement element) {
+    String text;
+    if (element instanceof LightElement) {
+      final PsiElement context = element.getContext();
+      text = context != null ? context.getText() : null;
+    }
+    else {
+      text = element.getText();
+    }
+    return "invalid resolve candidate: " + element.getClass() + ", text: " + text;
+  }
+
+  @NotNull
   protected List<GroovyResolveResult> getCandidatesInternal() {
     return myCandidates == null ? Collections.<GroovyResolveResult>emptyList() : myCandidates;
   }
 
-  protected boolean isAccessible(PsiNamedElement namedElement) {
+  protected boolean isAccessible(@NotNull PsiNamedElement namedElement) {
     if (namedElement instanceof GrField) {
       final GrField field = (GrField)namedElement;
       if (PsiUtil.isAccessible(myPlace, field)) {
@@ -144,7 +158,7 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
            PsiUtil.isAccessible(myPlace, ((PsiMember)namedElement));
   }
 
-  protected boolean isStaticsOK(PsiNamedElement element, PsiElement resolveContext, boolean filterStaticAfterInstanceQualifier) {
+  protected boolean isStaticsOK(@NotNull PsiNamedElement element, @Nullable PsiElement resolveContext, boolean filterStaticAfterInstanceQualifier) {
     if (resolveContext instanceof GrImportStatement) return true;
 
     if (element instanceof PsiModifierListOwner) {
@@ -206,7 +220,6 @@ public class ResolverProcessor implements PsiScopeProcessor, NameHint, ClassHint
   @Nullable
   private static ResolveKind getResolveKind(PsiElement element) {
     if (element instanceof PsiVariable) return PROPERTY;
-    if (element instanceof GrReferenceExpression) return PROPERTY;
     if (element instanceof PsiMethod) return METHOD;
     if (element instanceof PsiPackage) return PACKAGE;
     if (element instanceof PsiClass) return CLASS;

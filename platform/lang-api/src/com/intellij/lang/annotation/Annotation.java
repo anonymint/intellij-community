@@ -17,8 +17,7 @@ package com.intellij.lang.annotation;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInsight.intention.IntentionAction;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.codeInspection.*;
 import com.intellij.openapi.editor.HighlighterColors;
 import com.intellij.openapi.editor.colors.CodeInsightColors;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
@@ -58,7 +57,7 @@ public final class Annotation implements Segment {
   private boolean myIsFileLevelAnnotation = false;
   private GutterIconRenderer myGutterIconRenderer;
   @Nullable
-  private String myProblemGroup;
+  private ProblemGroup myProblemGroup;
   private List<QuickFixInfo> myBatchFixes;
 
   public static class QuickFixInfo {
@@ -75,7 +74,7 @@ public final class Annotation implements Segment {
       this.options = options;
     }
 
-    public QuickFixInfo(final IntentionAction fix, final TextRange range, @Nullable final HighlightDisplayKey key) {
+    public QuickFixInfo(@NotNull IntentionAction fix, final TextRange range, @Nullable final HighlightDisplayKey key) {
       this.key = key;
       quickFix = fix;
       textRange = range;
@@ -123,6 +122,16 @@ public final class Annotation implements Segment {
     registerFix(fix,range, null);
   }
 
+  public void registerFix(@NotNull LocalQuickFix fix, TextRange range, HighlightDisplayKey key, @NotNull ProblemDescriptor problemDescriptor) {
+    if (range == null) {
+      range = new TextRange(myStartOffset, myEndOffset);
+    }
+    if (myQuickFixes == null) {
+      myQuickFixes = new ArrayList<QuickFixInfo>();
+    }
+    myQuickFixes.add(new QuickFixInfo(new LocalQuickFixAsIntentionAdapter(fix, problemDescriptor), range, key));
+  }
+
   /**
    * Registers a quick fix for the annotation which is only available on a particular range of text
    * within the annotation.
@@ -159,8 +168,8 @@ public final class Annotation implements Segment {
   }
 
   /**
-   * Registers a quickfix which would be available during batch mode only, 
-   * in particular during com.intellij.codeInspection.DefaultHighlightVisitorBasedInspection run 
+   * Registers a quickfix which would be available during batch mode only,
+   * in particular during com.intellij.codeInspection.DefaultHighlightVisitorBasedInspection run
    */
   public <T extends IntentionAction & LocalQuickFix> void registerBatchFix(@NotNull T fix, @Nullable TextRange range, @Nullable final HighlightDisplayKey key) {
     if (range == null) {
@@ -259,7 +268,6 @@ public final class Annotation implements Segment {
     if (myHighlightType == ProblemHighlightType.GENERIC_ERROR_OR_WARNING) {
       if (mySeverity == HighlightSeverity.ERROR) return CodeInsightColors.ERRORS_ATTRIBUTES;
       if (mySeverity == HighlightSeverity.WARNING) return CodeInsightColors.WARNINGS_ATTRIBUTES;
-      if (mySeverity == HighlightSeverity.INFO) return CodeInsightColors.INFO_ATTRIBUTES;
       if (mySeverity == HighlightSeverity.WEAK_WARNING) return CodeInsightColors.WEAK_WARNING_ATTRIBUTES;
     }
 
@@ -302,7 +310,7 @@ public final class Annotation implements Segment {
   public List<QuickFixInfo> getQuickFixes() {
     return myQuickFixes;
   }
-  
+
   @Nullable
   public List<QuickFixInfo> getBatchFixes() {
     return myBatchFixes;
@@ -374,7 +382,7 @@ public final class Annotation implements Segment {
   }
 
   /**
-   * File level annoations are visualized differently than lesser range annotations by showing a title bar on top of the
+   * File level annotations are visualized differently than lesser range annotations by showing a title bar on top of the
    * editor rather than applying text attributes to the text range.
    * @return <code>true</code> if this particular annotation have been defined as file level.
    */
@@ -383,7 +391,7 @@ public final class Annotation implements Segment {
   }
 
   /**
-   * File level annoations are visualized differently than lesser range annotations by showing a title bar on top of the
+   * File level annotations are visualized differently than lesser range annotations by showing a title bar on top of the
    * editor rather than applying text attributes to the text range.
    * @param isFileLevelAnnotation <code>true</code> if this particular annotation should be visualized at file level.
    */
@@ -411,21 +419,21 @@ public final class Annotation implements Segment {
   }
 
   /**
-   * Gets the unique string, which is the same for all of the problems of this group
+   * Gets the unique object, which is the same for all of the problems of this group
    *
    * @return the problem group
    */
   @Nullable
-  public String getProblemGroup() {
+  public ProblemGroup getProblemGroup() {
     return myProblemGroup;
   }
 
   /**
-   * Sets the unique string, which is the same for all of the problems of this group
+   * Sets the unique object, which is the same for all of the problems of this group
    *
    * @param problemGroup the problem group
    */
-  public void setProblemGroup(@Nullable String problemGroup) {
+  public void setProblemGroup(@Nullable ProblemGroup problemGroup) {
     myProblemGroup = problemGroup;
   }
 

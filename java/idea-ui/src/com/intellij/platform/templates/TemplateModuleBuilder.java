@@ -18,22 +18,27 @@ package com.intellij.platform.templates;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.configurations.ModuleBasedConfiguration;
 import com.intellij.execution.configurations.RunConfiguration;
+import com.intellij.ide.fileTemplates.FileTemplateManager;
+import com.intellij.ide.fileTemplates.FileTemplateUtil;
 import com.intellij.ide.util.newProjectWizard.modes.ImportImlMode;
-import com.intellij.ide.util.projectWizard.ModuleBuilder;
-import com.intellij.ide.util.projectWizard.ModuleWizardStep;
-import com.intellij.ide.util.projectWizard.WizardContext;
+import com.intellij.ide.util.projectWizard.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.module.*;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
+import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.NullableComputable;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.io.StreamUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -45,8 +50,12 @@ import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Properties;
 import java.util.zip.ZipInputStream;
 
 /**
@@ -55,21 +64,17 @@ import java.util.zip.ZipInputStream;
 */
 public class TemplateModuleBuilder extends ModuleBuilder {
 
-  private static final NullableFunction<String,String> PATH_CONVERTOR = new NullableFunction<String, String>() {
-    @Nullable
-    @Override
-    public String fun(String s) {
-      return s.contains(".idea") ? null : s;
-    }
-  };
+  public static final String UTF_8 = "UTF-8";
 
   private final ModuleType myType;
+  private List<WizardInputField> myAdditionalFields;
   private ArchivedProjectTemplate myTemplate;
   private boolean myProjectMode;
 
-  public TemplateModuleBuilder(ArchivedProjectTemplate template, ModuleType moduleType) {
+  public TemplateModuleBuilder(ArchivedProjectTemplate template, ModuleType moduleType, List<WizardInputField> additionalFields) {
     myTemplate = template;
     myType = moduleType;
+    myAdditionalFields = additionalFields;
   }
 
   @Override
@@ -79,7 +84,14 @@ public class TemplateModuleBuilder extends ModuleBuilder {
 
   @Override
   public ModuleWizardStep[] createWizardSteps(WizardContext wizardContext, ModulesProvider modulesProvider) {
-    return myType.createModuleBuilder().createWizardSteps(wizardContext, modulesProvider);
+    ModuleBuilder builder = myType.createModuleBuilder();
+    builder.setAvailableFrameworks(Collections.<String, Boolean>emptyMap());
+    return builder.createWizardSteps(wizardContext, modulesProvider);
+  }
+
+  @Override
+  protected List<WizardInputField> getAdditionalFields() {
+    return myAdditionalFields;
   }
 
   @Override
@@ -93,17 +105,30 @@ public class TemplateModuleBuilder extends ModuleBuilder {
           public void run() {
             try {
               setupModule(module);
-              ModifiableModuleModel modifiableModuleModel = ModuleManager.getInstance(project).getModifiableModel();
-              modifiableModuleModel.renameModule(module, module.getProject().getName());
-              modifiableModuleModel.commit();
-              fixModuleName(module);
             }
             catch (ConfigurationException e) {
               LOG.error(e);
             }
-            catch (ModuleWithNameAlreadyExists exists) {
-              // do nothing
-            }
+          }
+        });
+
+        StartupManager.getInstance(project).registerPostStartupActivity(new Runnable() {
+          @Override
+          public void run() {
+            ApplicationManager.getApplication().runWriteAction(new Runnable() {
+              @Override
+              public void run() {
+                try {
+                  ModifiableModuleModel modifiableModuleModel = ModuleManager.getInstance(project).getModifiableModel();
+                  modifiableModuleModel.renameModule(module, module.getProject().getName());
+                  modifiableModuleModel.commit();
+                  fixModuleName(module);
+                }
+                catch (ModuleWithNameAlreadyExists exists) {
+                  // do nothing
+                }
+              }
+            });
           }
         });
         return module;
@@ -115,9 +140,20 @@ public class TemplateModuleBuilder extends ModuleBuilder {
     }
   }
 
+  @Nullable
+  @Override
+  public String getBuilderId() {
+    return myTemplate.getName();
+  }
+
   @Override
   public ModuleType getModuleType() {
     return myType;
+  }
+
+  @Override
+  public Icon getNodeIcon() {
+    return myTemplate.getIcon();
   }
 
   @NotNull
@@ -125,8 +161,9 @@ public class TemplateModuleBuilder extends ModuleBuilder {
   public Module createModule(@NotNull ModifiableModuleModel moduleModel)
     throws InvalidDataException, IOException, ModuleWithNameAlreadyExists, JDOMException, ConfigurationException {
     final String path = getContentEntryPath();
-    unzip(path, true);
-    Module module = ImportImlMode.setUpLoader(getModuleFilePath()).createModule(moduleModel);
+    final ExistingModuleLoader loader = ImportImlMode.setUpLoader(getModuleFilePath());
+    unzip(loader.getName(), path, true);
+    Module module = loader.createModule(moduleModel);
     if (myProjectMode) {
       moduleModel.renameModule(module, module.getProject().getName());
     }
@@ -134,21 +171,54 @@ public class TemplateModuleBuilder extends ModuleBuilder {
     return module;
   }
 
-  private static void fixModuleName(Module module) {
+  private void fixModuleName(Module module) {
     RunConfiguration[] configurations = RunManager.getInstance(module.getProject()).getAllConfigurations();
     for (RunConfiguration configuration : configurations) {
       if (configuration instanceof ModuleBasedConfiguration) {
         ((ModuleBasedConfiguration)configuration).getConfigurationModule().setModule(module);
       }
     }
+    ModifiableRootModel model = ModuleRootManager.getInstance(module).getModifiableModel();
+    for (WizardInputField field : myAdditionalFields) {
+      ProjectTemplateParameterFactory factory = WizardInputField.getFactoryById(field.getId());
+      factory.applyResult(field.getValue(), model);
+    }
+    model.commit();
   }
 
-  private void unzip(String path, boolean moduleMode) {
+  private WizardInputField getBasePackageField() {
+    for (WizardInputField field : getAdditionalFields()) {
+      if (ProjectTemplateParameterFactory.IJ_BASE_PACKAGE.equals(field.getId())) {
+        return field;
+      }
+    }
+    return null;
+  }
+
+  private void unzip(final @Nullable String projectName, String path, final boolean moduleMode) {
     File dir = new File(path);
     ZipInputStream zipInputStream = null;
+    final WizardInputField basePackage = getBasePackageField();
     try {
       zipInputStream = myTemplate.getStream();
-      ZipUtil.unzip(ProgressManager.getInstance().getProgressIndicator(), dir, zipInputStream, moduleMode ? PATH_CONVERTOR : null);
+      NullableFunction<String, String> pathConvertor = new NullableFunction<String, String>() {
+        @Nullable
+        @Override
+        public String fun(String path) {
+          if (moduleMode && path.contains(Project.DIRECTORY_STORE_FOLDER)) return null;
+          if (basePackage != null) {
+            return path.replace(getPathFragment(basePackage.getDefaultValue()), getPathFragment(basePackage.getValue()));
+          }
+          return path;
+        }
+      };
+      ZipUtil.unzip(ProgressManager.getInstance().getProgressIndicator(), dir, zipInputStream, pathConvertor, new ZipUtil.ContentProcessor() {
+        @Override
+        public byte[] processContent(byte[] content, File file) throws IOException {
+          FileType fileType = FileTypeManager.getInstance().getFileTypeByExtension(FileUtilRt.getExtension(file.getName()));
+          return fileType.isBinary() ? content : processTemplates(projectName, new String(content), file);
+        }
+      }, true);
       String iml = ContainerUtil.find(dir.list(), new Condition<String>() {
         @Override
         public boolean value(String s) {
@@ -176,11 +246,34 @@ public class TemplateModuleBuilder extends ModuleBuilder {
     }
   }
 
+  private static String getPathFragment(String value) {
+    return "/" + value.replace('.', '/') + "/";
+  }
+
+  @SuppressWarnings("UseOfPropertiesAsHashtable")
+  @Nullable
+  private byte[] processTemplates(@Nullable String projectName, String content, File file) throws IOException {
+    for (WizardInputField field : myAdditionalFields) {
+      if (!field.acceptFile(file)) {
+        return null;
+      }
+    }
+    Properties properties = FileTemplateManager.getInstance().getDefaultProperties();
+    for (WizardInputField field : myAdditionalFields) {
+      properties.putAll(field.getValues());
+    }
+    if (projectName != null) {
+      properties.put(ProjectTemplateParameterFactory.IJ_PROJECT_NAME, projectName);
+    }
+    String merged = FileTemplateUtil.mergeTemplate(properties, content, true);
+    return merged.replace("\\$", "$").replace("\\#", "#").getBytes(UTF_8);
+  }
+
   @Nullable
   @Override
   public Project createProject(String name, final String path) {
     myProjectMode = true;
-    unzip(path, false);
+    unzip(name, path, false);
     return ApplicationManager.getApplication().runWriteAction(new NullableComputable<Project>() {
       @Nullable
       @Override

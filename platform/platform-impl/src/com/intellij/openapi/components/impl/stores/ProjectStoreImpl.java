@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.ide.highlighter.WorkspaceFileType;
 import com.intellij.notification.NotificationsManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
@@ -35,6 +36,7 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.util.containers.OrderedSet;
@@ -104,6 +106,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
       }
 
       ApplicationManager.getApplication().runWriteAction(new Runnable() {
+        @Override
         public void run() {
           try {
             VirtualFile projectDir = projectFile.getParent();
@@ -156,11 +159,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
   }
 
   @Override
-  public void setProjectFilePath(final String filePath) {
-    if (filePath == null) {
-      return;
-    }
-
+  public void setProjectFilePath(@NotNull final String filePath) {
     final StateStorageManager stateStorageManager = getStateStorageManager();
     final LocalFileSystem fs = LocalFileSystem.getInstance();
 
@@ -180,7 +179,12 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
       stateStorageManager.addMacro(StoragePathMacros.getMacroName(StoragePathMacros.PROJECT_CONFIG_DIR), dirStore.getPath());
 
-      VfsUtil.markDirtyAndRefresh(false, true, true, fs.refreshAndFindFileByIoFile(dirStore));
+      ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+        @Override
+        public void run() {
+          VfsUtil.markDirtyAndRefresh(false, true, true, fs.refreshAndFindFileByIoFile(dirStore));
+        }
+      }, ModalityState.defaultModalityState());
     }
     else {
       myScheme = StorageScheme.DEFAULT;
@@ -190,15 +194,20 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
       final String workspacePath = composeWsPath(filePath);
       stateStorageManager.addMacro(StoragePathMacros.getMacroName(StoragePathMacros.WORKSPACE_FILE), workspacePath);
 
-      VfsUtil.markDirtyAndRefresh(false, true, false, fs.refreshAndFindFileByPath(filePath), fs.refreshAndFindFileByPath(workspacePath));
+      ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+        @Override
+        public void run() {
+          VfsUtil.markDirtyAndRefresh(false, true, false, fs.refreshAndFindFileByPath(filePath), fs.refreshAndFindFileByPath(workspacePath));
+        }
+      }, ModalityState.defaultModalityState());
     }
-    
+
     myCachedLocation = null;
     myPresentableUrl = null;
   }
 
   private static boolean isIprPath(final File file) {
-    return ProjectFileType.DEFAULT_EXTENSION.equals(FileUtil.getExtension(file.getName()));
+    return FileUtilRt.extensionEquals(file.getName(), ProjectFileType.DEFAULT_EXTENSION);
   }
 
   private static String composeWsPath(String filePath) {
@@ -287,7 +296,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
       final VirtualFile ideaDir = baseDir.findChild(Project.DIRECTORY_STORE_FOLDER);
       if (ideaDir != null && ideaDir.isValid()) {
-        final VirtualFile nameFile = ideaDir.findChild(".name");
+        final VirtualFile nameFile = ideaDir.findChild(ProjectImpl.NAME_FILE);
         if (nameFile != null && nameFile.isValid()) {
           try {
             BufferedReader in = new BufferedReader(new InputStreamReader(nameFile.getInputStream(), "UTF-8"));
@@ -359,7 +368,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
   }
 
   @Override
-  public void loadProjectFromTemplate(final ProjectImpl defaultProject) {
+  public void loadProjectFromTemplate(@NotNull final ProjectImpl defaultProject) {
     final StateStorage stateStorage = getStateStorageManager().getFileStateStorage(DEFAULT_STATE_STORAGE);
 
     assert stateStorage instanceof XmlElementStorage;
@@ -399,6 +408,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
     return storage;
   }
 
+  @NotNull
   @Override
   protected StateStorageManager createStateStorageManager() {
     return new ProjectStateStorageManager(PathMacroManager.getInstance(getComponentManager()).createTrackingSubstitutor(), myProject);
@@ -418,6 +428,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
       myProject = storageData.myProject;
     }
 
+    @Override
     public StorageData clone() {
       return new ProjectStorageData(this);
     }
@@ -432,6 +443,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
       super(storageData);
     }
 
+    @Override
     public StorageData clone() {
       return new WsStorageData(this);
     }
@@ -446,6 +458,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
       super(storageData);
     }
 
+    @Override
     public void load(@NotNull final Element root) throws IOException {
       final String v = root.getAttributeValue(VERSION_OPTION);
       //noinspection AssignmentToStaticFieldFromInstanceMethod
@@ -461,6 +474,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
     protected void convert(final Element root, final int originalVersion) {
     }
 
+    @Override
     public StorageData clone() {
       return new IprStorageData(this);
     }
@@ -475,6 +489,8 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
     ProjectSaveSession() throws StateStorageException {
     }
 
+    @NotNull
+    @Override
     public List<IFile> getAllStorageFilesToSave(final boolean includingSubStructures) throws IOException {
       List<IFile> result = new ArrayList<IFile>();
 
@@ -489,6 +505,8 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
     protected void collectSubfilesToSave(final List<IFile> result) throws IOException { }
 
+    @NotNull
+    @Override
     public SaveSession save() throws IOException {
       final ProjectImpl.UnableToSaveProjectNotification[] notifications =
         NotificationsManager.getNotificationsManager().getNotificationsOfType(ProjectImpl.UnableToSaveProjectNotification.class, myProject);
@@ -515,6 +533,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
     private ReadonlyStatusHandler.OperationStatus ensureConfigFilesWritable() {
       return ApplicationManager.getApplication().runReadAction(new Computable<ReadonlyStatusHandler.OperationStatus>() {
+        @Override
         public ReadonlyStatusHandler.OperationStatus compute() {
           final List<IFile> filesToSave;
           try {
@@ -537,7 +556,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
             final VirtualFile baseDir = getProjectBaseDir();
             if (baseDir != null && baseDir.isValid()) {
               filesToSave.add(FileSystem.FILE_SYSTEM
-                                .createFile(new File(new File(baseDir.getPath(), Project.DIRECTORY_STORE_FOLDER), ".name").getPath()));
+                                .createFile(new File(new File(baseDir.getPath(), Project.DIRECTORY_STORE_FOLDER), ProjectImpl.NAME_FILE).getPath()));
             }
           }
 
@@ -551,7 +570,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
               }
             }
           }
-          
+
           if (readonlyFiles.size() == 0) {
             final VirtualFile projectBaseDir = getProjectBaseDir();
             if (projectBaseDir != null && projectBaseDir.isValid()) {
@@ -586,6 +605,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
 
   private final StateStorageChooser myStateStorageChooser = new StateStorageChooser() {
+    @Override
     public Storage[] selectStorages(final Storage[] storages, final Object component, final StateStorageOperation operation) {
       if (operation == StateStorageOperation.READ) {
         OrderedSet<Storage> result = new OrderedSet<Storage>();
@@ -650,36 +670,44 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
 
   @SuppressWarnings("ClassExplicitlyAnnotation")
   private static class MyStorage implements Storage {
+    @Override
     public String id() {
       return "___Default___";
     }
 
+    @Override
     public boolean isDefault() {
       return true;
     }
 
+    @Override
     public String file() {
       return DEFAULT_STATE_STORAGE;
     }
 
+    @Override
     public StorageScheme scheme() {
       return  StorageScheme.DEFAULT;
     }
 
+    @Override
     public Class<? extends StateStorage> storageClass() {
       return StorageAnnotationsDefaultValues.NullStateStorage.class;
     }
 
+    @Override
     public Class<? extends StateSplitter> stateSplitter() {
       return StorageAnnotationsDefaultValues.NullStateSplitter.class;
     }
 
+    @Override
     public Class<? extends Annotation> annotationType() {
       throw new UnsupportedOperationException("Method annotationType not implemented in " + getClass());
     }
   }
 
-  public boolean reload(final Set<Pair<VirtualFile, StateStorage>> changedFiles) throws IOException, StateStorageException {
+  @Override
+  public boolean reload(@NotNull final Set<Pair<VirtualFile, StateStorage>> changedFiles) throws IOException, StateStorageException {
     final SaveSession saveSession = startSave();
 
     final Set<String> componentNames;
@@ -694,9 +722,7 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
         }
       }
 
-      if (!componentNames.isEmpty()) {
-        StorageUtil.logStateDiffInfo(changedFiles, componentNames);
-      }
+      StorageUtil.logStateDiffInfo(changedFiles, componentNames);
 
       if (!isReloadPossible(componentNames)) {
         return false;
@@ -721,4 +747,3 @@ class ProjectStoreImpl extends BaseFileConfigurableStoreImpl implements IProject
     return true;
   }
 }
-

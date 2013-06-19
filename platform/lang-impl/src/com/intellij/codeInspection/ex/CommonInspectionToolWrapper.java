@@ -35,18 +35,20 @@ import java.util.Map;
 import java.util.Set;
 
 public class CommonInspectionToolWrapper extends InspectionToolWrapper<InspectionTool, InspectionEP> {
-  public CommonInspectionToolWrapper(InspectionEP ep) {
+  public CommonInspectionToolWrapper(@NotNull InspectionEP ep) {
     super(ep);
   }
 
-  CommonInspectionToolWrapper(InspectionTool tool) {
+  public CommonInspectionToolWrapper(@NotNull InspectionTool tool) {
     super(tool);
+    assert !(tool instanceof InspectionToolWrapper);
   }
 
-  private CommonInspectionToolWrapper(CommonInspectionToolWrapper other) {
+  private CommonInspectionToolWrapper(@NotNull CommonInspectionToolWrapper other) {
     super(other);
   }
 
+  @NotNull
   @Override
   public CommonInspectionToolWrapper createCopy() {
     return new CommonInspectionToolWrapper(this);
@@ -57,6 +59,7 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
     getTool().runInspection(scope, manager);
   }
 
+  @NotNull
   @Override
   public RefManager getRefManager() {
     return getTool().getRefManager();
@@ -69,7 +72,7 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
 
   @NotNull
   @Override
-  public JobDescriptor[] getJobDescriptors(GlobalInspectionContext globalInspectionContext) {
+  public JobDescriptor[] getJobDescriptors(@NotNull GlobalInspectionContext globalInspectionContext) {
     return getTool().getJobDescriptors(globalInspectionContext);
   }
 
@@ -93,11 +96,13 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
     return getTool().getContent();
   }
 
+  @NotNull
   @Override
   public GlobalInspectionContextImpl getContext() {
     return getTool().getContext();
   }
 
+  @NotNull
   @Override
   public HTMLComposerImpl getComposer() {
     return getTool().getComposer();
@@ -115,13 +120,14 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
 
   @Nullable
   @Override
-  public QuickFixAction[] getQuickFixes(RefEntity[] refElements) {
+  public QuickFixAction[] getQuickFixes(@NotNull RefEntity[] refElements) {
     return getTool().getQuickFixes(refElements);
   }
 
+  @NotNull
   @Override
-  public InspectionNode createToolNode(InspectionRVContentProvider provider,
-                                       InspectionTreeNode parentNode,
+  public InspectionNode createToolNode(@NotNull InspectionRVContentProvider provider,
+                                       @NotNull InspectionTreeNode parentNode,
                                        boolean showStructure) {
     return getTool().createToolNode(provider, parentNode, showStructure);
   }
@@ -134,10 +140,11 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
   }
 
   @Override
-  public HighlightSeverity getCurrentSeverity(RefElement element) {
+  public HighlightSeverity getCurrentSeverity(@NotNull RefElement element) {
     return getTool().getCurrentSeverity(element);
   }
 
+  @NotNull
   @Override
   public FileStatus getElementStatus(RefEntity element) {
     return getTool().getElementStatus(element);
@@ -166,12 +173,12 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
   }
 
   @Override
-  public boolean queryExternalUsagesRequests(InspectionManager manager) {
+  public boolean queryExternalUsagesRequests(@NotNull InspectionManager manager) {
     return getTool().queryExternalUsagesRequests(manager);
   }
 
   @Override
-  public void exportResults(@NotNull Element parentNode, RefEntity refEntity) {
+  public void exportResults(@NotNull Element parentNode, @NotNull RefEntity refEntity) {
     getTool().exportResults(parentNode, refEntity);
   }
 
@@ -190,11 +197,13 @@ public class CommonInspectionToolWrapper extends InspectionToolWrapper<Inspectio
     getTool().ignoreCurrentElement(refElement);
   }
 
+  @NotNull
   @Override
   public Collection<RefEntity> getIgnoredRefElements() {
     return getTool().getIgnoredRefElements();
   }
 
+  @Override
   @Nullable
   public SuppressIntentionAction[] getSuppressActions() {
     return getTool().getSuppressActions();

@@ -28,6 +28,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -47,8 +48,9 @@ public class PlainModuleTemplatesFactory extends ProjectTemplatesFactory {
         return builder.getGroupName();
       }
     });
-    groups.add(OTHER_GROUP);
-    return ArrayUtil.toStringArray(groups);
+    HashSet<String> set = new HashSet<String>(groups);
+    set.add(OTHER_GROUP);
+    return ArrayUtil.toStringArray(set);
   }
 
   @NotNull
@@ -70,14 +72,15 @@ public class PlainModuleTemplatesFactory extends ProjectTemplatesFactory {
         }
       })};
     }
-    ModuleBuilder[] builders = context.getAllBuilders();
-    return ContainerUtil.mapNotNull(builders, new NullableFunction<ModuleBuilder, ProjectTemplate>() {
+    List<ModuleBuilder> builders = ModuleBuilder.getAllBuilders();
+    List<ProjectTemplate> templates = ContainerUtil.mapNotNull(builders, new NullableFunction<ModuleBuilder, ProjectTemplate>() {
       @Nullable
       @Override
       public ProjectTemplate fun(ModuleBuilder builder) {
         return builder.getGroupName().equals(group) ? new BuilderBasedTemplate(builder) : null;
       }
-    }, ProjectTemplate.EMPTY_ARRAY);
+    });
+    return templates.toArray(new ProjectTemplate[templates.size()]);
   }
 
   @Override
@@ -89,5 +92,16 @@ public class PlainModuleTemplatesFactory extends ProjectTemplatesFactory {
       }
     }
     return null;
+  }
+
+  @Override
+  public int getGroupWeight(String group) {
+    List<ModuleBuilder> builders = ModuleBuilder.getAllBuilders();
+    for (int i = 0; i < builders.size(); i++) {
+      if (group.equals(builders.get(i).getGroupName())) {
+        return builders.size() - i;
+      }
+    }
+    return 0;
   }
 }

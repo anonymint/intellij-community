@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,128 +23,53 @@ import com.intellij.ide.startup.StartupActionScriptManager;
 import com.intellij.idea.Main;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.lang.UrlClassLoader;
 import com.intellij.util.text.StringTokenizer;
 import org.jetbrains.annotations.NonNls;
 
-import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class ClassloaderUtil {
-  @NonNls static final String FILE_CACHE = "fileCache";
-  @NonNls static final String URL_CACHE = "urlCache";// See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=4167874
+public class ClassloaderUtil extends ClassUtilCore {
   @NonNls public static final String PROPERTY_IGNORE_CLASSPATH = "ignore.classpath";
 
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  private static final String ERROR = "Error";
-
   private ClassloaderUtil() {}
-
-  public static void clearJarURLCache() {
-    try {
-      /*
-      new URLConnection(null) {
-        public void connect() throws IOException {
-          throw new UnsupportedOperationException();
-        }
-      }.setDefaultUseCaches(false);
-      */
-
-      Class jarFileFactory = Class.forName("sun.net.www.protocol.jar.JarFileFactory");
-
-      Field fileCache = jarFileFactory.getDeclaredField(FILE_CACHE);
-      Field urlCache = jarFileFactory.getDeclaredField(URL_CACHE);
-
-      fileCache.setAccessible(true);
-      fileCache.set(null, new HashMap());
-
-      urlCache.setAccessible(true);
-      urlCache.set(null, new HashMap());
-    }
-    catch (Exception e) {
-      System.out.println("Failed to clear URL cache");
-      // Do nothing.
-    }
-  }
 
   public static Logger getLogger() {
     return Logger.getInstance("ClassloaderUtil");
   }
 
-  public static UrlClassLoader initClassloader(final List<URL> classpathElements) {
+  public static UrlClassLoader initClassloader(final List<URL> classpathElements) throws Exception {
     PathManager.loadProperties();
 
-    try {
-      addParentClasspath(classpathElements);
-      addIDEALibraries(classpathElements);
-      addAdditionalClassPath(classpathElements);
-    }
-    catch (IllegalArgumentException e) {
-      if (Main.isHeadless()) {
-        getLogger().error(e);
-      } else {
-        JOptionPane
-          .showMessageDialog(JOptionPane.getRootFrame(), e.getMessage(), ERROR, JOptionPane.INFORMATION_MESSAGE);
-      }
-      System.exit(1);
-    }
-    catch (MalformedURLException e) {
-      if (Main.isHeadless()) {
-        getLogger().error(e.getMessage());
-      } else {
-        JOptionPane
-          .showMessageDialog(JOptionPane.getRootFrame(), e.getMessage(), ERROR, JOptionPane.INFORMATION_MESSAGE);
-      }
-      System.exit(1);
-    }
+    addParentClasspath(classpathElements);
+    addIDEALibraries(classpathElements);
+    addAdditionalClassPath(classpathElements);
 
     filterClassPath(classpathElements);
+    UrlClassLoader newClassLoader = new UrlClassLoader(classpathElements, null, true, true);
 
-    UrlClassLoader newClassLoader = null;
-    try {
-      newClassLoader = new UrlClassLoader(classpathElements, null, true, true);
-
-      // prepare plugins
-      if (!isLoadingOfExternalPluginsDisabled()) {
-        try {
-          StartupActionScriptManager.executeActionScript();
-        }
-        catch (IOException e) {
-          final String errorMessage = "Error executing plugin installation script: " + e.getMessage();
-          if (Main.isHeadless()) {
-            System.out.println(errorMessage);
-          } else {
-            JOptionPane
-              .showMessageDialog(JOptionPane.getRootFrame(), errorMessage, ERROR, JOptionPane.INFORMATION_MESSAGE);
-          }
-        }
+    // prepare plugins
+    if (!isLoadingOfExternalPluginsDisabled()) {
+      try {
+        StartupActionScriptManager.executeActionScript();
       }
-
-      Thread.currentThread().setContextClassLoader(newClassLoader);
-
-    }
-    catch (Exception e) {
-      Logger logger = getLogger();
-      if (logger == null) {
-        e.printStackTrace(System.err);
-      }
-      else {
-        logger.error(e);
+      catch (IOException e) {
+        Main.showMessage("Plugin Installation Error", e);
       }
     }
+
+    Thread.currentThread().setContextClassLoader(newClassLoader);
     return newClassLoader;
   }
 
@@ -238,7 +163,7 @@ public class ClassloaderUtil {
     final File[] files = fromDir.listFiles();
     if (files != null) {
       for (final File file : files) {
-        if (!isJarOrZip(file)) {
+        if (!FileUtil.isJarOrZip(file)) {
           continue;
         }
         final URL url = file.toURI().toURL();
@@ -248,15 +173,6 @@ public class ClassloaderUtil {
         classPath.add(url);
       }
     }
-  }
-
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public static boolean isJarOrZip(File file) {
-    if (file.isDirectory()) {
-      return false;
-    }
-    final String name = file.getName();
-    return StringUtil.endsWithIgnoreCase(name, ".jar") || StringUtil.endsWithIgnoreCase(name, ".zip");
   }
 
   public static void addAdditionalClassPath(List<URL> classPath) {
@@ -271,10 +187,5 @@ public class ClassloaderUtil {
     catch (MalformedURLException e) {
       getLogger().error(e);
     }
-  }
-
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public static boolean isLoadingOfExternalPluginsDisabled() {
-    return !"true".equalsIgnoreCase(System.getProperty("idea.plugins.load", "true"));
   }
 }

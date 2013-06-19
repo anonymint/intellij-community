@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -119,6 +119,30 @@ private boolean onWinOrMacOS() {
 ''', MissingReturnInspection)
   }
 
+  void testMissingReturnInUnary() {
+    testHighlighting('''\
+boolean foo(def list) {
+  !list
+}
+
+boolean bar(def list) {
+  if (list) !list
+<warning descr="Not all execution paths return a value">}</warning>
+''', MissingReturnInspection)
+  }
+
+  void testMissingReturnInBinary() {
+    testHighlighting('''\
+boolean foo(def list) {
+  !list && list
+}
+
+boolean bar(def list) {
+  if (list) !list && list
+<warning descr="Not all execution paths return a value">}</warning>
+''', MissingReturnInspection)
+  }
+
   void testReassignedVarInClosureInspection() {
     addCompileStatic()
     testHighlighting("""\
@@ -200,5 +224,41 @@ class I{
     }
 }
 ''', GrMethodMayBeStaticInspection)
+  }
+
+  void testDelegatesTo() {
+    testHighlighting('''
+
+def with1(@DelegatesTo.Target() Object target, @DelegatesTo() Closure arg) { //unused
+    arg.delegate = target
+    arg()
+}
+
+def with2(@<warning descr="@Target is unused">DelegatesTo.Target</warning>('abc') Object target, @DelegatesTo() Closure arg) { //unused
+    arg.delegate = target
+    arg()
+}
+
+def with3(@DelegatesTo.Target('abc') Object target, @DelegatesTo(target='abc') Closure arg) { //unused
+    arg.delegate = target
+    arg()
+}
+
+def with4(@<warning descr="@Target is unused">DelegatesTo.Target</warning>('abcd') Object target, @DelegatesTo(target=<warning descr="Target 'abc' does not exist">'abc'</warning>) Closure arg) { //unused
+    arg.delegate = target
+    arg()
+}
+
+def with5(@<warning descr="@Target is unused">DelegatesTo.Target</warning>() Object target, @DelegatesTo(target=<warning descr="Target 'abc' does not exist">'abc'</warning>) Closure arg) { //unused
+    arg.delegate = target
+    arg()
+}
+
+def with6(@<warning descr="@Target is unused">DelegatesTo.Target</warning>() Object target, @DelegatesTo(String) Closure arg) {
+    arg.delegate = target
+    arg()
+}
+
+''', DelegatesToInspection)
   }
 }

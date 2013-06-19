@@ -65,7 +65,7 @@ public class InferNullityAnnotationsAction extends BaseAnalysisAction {
   }
 
   @Override
-  protected void analyze(@NotNull final Project project, final AnalysisScope scope) {
+  protected void analyze(@NotNull final Project project, @NotNull final AnalysisScope scope) {
     final ProgressManager progressManager = ProgressManager.getInstance();
     final int totalFiles = scope.getFileCount();
 
@@ -147,6 +147,7 @@ public class InferNullityAnnotationsAction extends BaseAnalysisAction {
                                                     " IntelliJ IDEA nullity annotations are freely usable and redistributable under the Apache 2.0 license. Would you like to do it now?",
                                            INFER_NULLITY_ANNOTATIONS, Messages.getErrorIcon()) == DialogWrapper.OK_EXIT_CODE) {
         ApplicationManager.getApplication().invokeLater(new Runnable() {
+          @Override
           public void run() {
             final LocateLibraryDialog dialog =
               new LocateLibraryDialog(modulesWithoutAnnotations.iterator().next(), PathManager.getLibPath(), "annotations.jar",
@@ -155,6 +156,7 @@ public class InferNullityAnnotationsAction extends BaseAnalysisAction {
             if (dialog.isOK()) {
               final String path = dialog.getResultingLibraryPath();
               new WriteCommandAction(project) {
+                @Override
                 protected void run(final Result result) throws Throwable {
                   for (Module module : modulesWithoutAnnotations) {
                     OrderEntryFix.addBundledJarToRoots(project, null, module, null, AnnotationUtil.NOT_NULL, path);

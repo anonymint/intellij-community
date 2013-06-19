@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import com.intellij.ui.tabs.JBTabs;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.ui.tabs.impl.JBTabsImpl;
 import org.jdom.Element;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -91,14 +92,15 @@ public class DockableEditorTabbedContainer implements DockContainer.Persistent {
     return root != null ? new RelativeRectangle(root) : new RelativeRectangle(mySplitters);
   }
 
+  @NotNull
   @Override
-  public boolean canAccept(DockableContent content, RelativePoint point) {
-    return getTabsAt(content, point) != null;
+  public ContentResponse getContentResponse(@NotNull DockableContent content, RelativePoint point) {
+    return getTabsAt(content, point) != null ? ContentResponse.ACCEPT_MOVE : ContentResponse.DENY;
   }
 
   @Nullable
   private JBTabs getTabsAt(DockableContent content, RelativePoint point) {
-    if (content instanceof EditorTabbedContainer.MyDragOutDelegate.DockableEditor) {
+    if (content instanceof EditorTabbedContainer.DockableEditor) {
       JBTabs targetTabs = mySplitters.getTabsAt(point);
       if (targetTabs != null) {
         return targetTabs;
@@ -124,7 +126,7 @@ public class DockableEditorTabbedContainer implements DockContainer.Persistent {
   }
 
   @Override
-  public void add(DockableContent content, RelativePoint dropTarget) {
+  public void add(@NotNull DockableContent content, RelativePoint dropTarget) {
     EditorWindow window = null;
     if (myCurrentOver != null) {
       final DataProvider provider = myCurrentOver.getDataProvider();
@@ -133,7 +135,7 @@ public class DockableEditorTabbedContainer implements DockContainer.Persistent {
       }
     }
 
-    final EditorTabbedContainer.MyDragOutDelegate.DockableEditor dockableEditor = (EditorTabbedContainer.MyDragOutDelegate.DockableEditor)content;
+    final EditorTabbedContainer.DockableEditor dockableEditor = (EditorTabbedContainer.DockableEditor)content;
     VirtualFile file = dockableEditor.getFile();
 
 
@@ -152,12 +154,12 @@ public class DockableEditorTabbedContainer implements DockContainer.Persistent {
   }
 
   @Override
-  public Image startDropOver(DockableContent content, RelativePoint point) {
+  public Image startDropOver(@NotNull DockableContent content, RelativePoint point) {
     return null;
   }
 
   @Override
-  public Image processDropOver(DockableContent content, RelativePoint point) {
+  public Image processDropOver(@NotNull DockableContent content, RelativePoint point) {
     JBTabs current = getTabsAt(content, point);
 
     if (myCurrentOver != null && myCurrentOver != current) {
@@ -179,7 +181,7 @@ public class DockableEditorTabbedContainer implements DockContainer.Persistent {
   }
 
   @Override
-  public void resetDropOver(DockableContent content) {
+  public void resetDropOver(@NotNull DockableContent content) {
     if (myCurrentOver != null) {
       myCurrentOver.resetDropOver(myCurrentOverInfo);
       myCurrentOver = null;

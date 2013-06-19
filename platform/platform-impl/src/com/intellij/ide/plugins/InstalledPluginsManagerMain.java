@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,27 +57,14 @@ public class InstalledPluginsManagerMain extends PluginManagerMain {
     super(uiSettings);
     init();
     myActionsPanel.setLayout(new FlowLayout(FlowLayout.LEFT));
+    final JButton jbButton = new JButton("Install JetBrains plugin...");
+    jbButton.setMnemonic('j');
+    jbButton.addActionListener(new BrowseRepoListener("JetBrains"));
+    myActionsPanel.add(jbButton);
+
     final JButton button = new JButton("Browse repositories...");
     button.setMnemonic('b');
-    button.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        final PluginManagerConfigurable configurable = createAvailableConfigurable();
-        final SingleConfigurableEditor configurableEditor =
-          new SingleConfigurableEditor(myActionsPanel, configurable, ShowSettingsUtilImpl.createDimensionKey(configurable), false) {
-            {
-              setOKButtonText(CommonBundle.message("close.action.name"));
-              setOKButtonMnemonic('C');
-            }
-
-            @Override
-            protected Action[] createActions() {
-              return new Action[]{getOKAction()};
-            }
-          };
-        configurableEditor.show();
-      }
-    });
+    button.addActionListener(new BrowseRepoListener(null));
     myActionsPanel.add(button);
 
     final JButton installPluginFromFileSystem = new JButton("Install plugin from disk...");
@@ -109,6 +96,10 @@ public class InstalledPluginsManagerMain extends PluginManagerMain {
                   final IdeaPluginDescriptorImpl pluginDescriptor = PluginDownloader.loadDescriptionFromJar(file);
                   if (pluginDescriptor == null) {
                     Messages.showErrorDialog("Fail to load plugin descriptor from file " + file.getName(), CommonBundle.getErrorTitle());
+                    return;
+                  }
+                  if (PluginManager.isIncompatible(pluginDescriptor)) {
+                    Messages.showErrorDialog("Plugin " + pluginDescriptor.getName() + " is incompatible with current installation", CommonBundle.getErrorTitle());
                     return;
                   }
                   final IdeaPluginDescriptor alreadyInstalledPlugin = PluginManager.getPlugin(pluginDescriptor.getPluginId());
@@ -195,19 +186,19 @@ public class InstalledPluginsManagerMain extends PluginManagerMain {
   }
 
   @Override
-  protected void propagateUpdates(ArrayList<IdeaPluginDescriptor> list) {
+  protected void propagateUpdates(List<IdeaPluginDescriptor> list) {
   }
 
-  private PluginManagerConfigurable createAvailableConfigurable() {
+  private PluginManagerConfigurable createAvailableConfigurable(final String vendorFilter) {
     return new PluginManagerConfigurable(PluginManagerUISettings.getInstance(), true) {
       @Override
       protected PluginManagerMain createPanel() {
-        return new AvailablePluginsManagerMain(InstalledPluginsManagerMain.this, myUISettings);
+        return new AvailablePluginsManagerMain(InstalledPluginsManagerMain.this, myUISettings, vendorFilter);
       }
 
       @Override
       public String getDisplayName() {
-        return "Browse Repositories";
+        return vendorFilter != null ? "Browse " + vendorFilter + " Plugins " : "Browse Repositories";
       }
     };
   }
@@ -316,7 +307,20 @@ public class InstalledPluginsManagerMain extends PluginManagerMain {
   @Override
   protected String canApply() {
     final Map<PluginId, Set<PluginId>> dependentToRequiredListMap =
-      ((InstalledPluginsTableModel)pluginsModel).getDependentToRequiredListMap();
+      new HashMap<PluginId, Set<PluginId>>(((InstalledPluginsTableModel)pluginsModel).getDependentToRequiredListMap());
+    for (Iterator<PluginId> iterator = dependentToRequiredListMap.keySet().iterator(); iterator.hasNext(); ) {
+      final PluginId id = iterator.next();
+      boolean hasNonModuleDeps = false;
+      for (PluginId pluginId : dependentToRequiredListMap.get(id)) {
+        if (!PluginManager.isModuleDependency(pluginId)) {
+          hasNonModuleDeps = true;
+          break;
+        }
+      }
+      if (!hasNonModuleDeps) {
+        iterator.remove();
+      }
+    }
     if (!dependentToRequiredListMap.isEmpty()) {
       final StringBuffer sb = new StringBuffer("<html><body style=\"padding: 5px;\">Unable to apply changes: plugin")
         .append(dependentToRequiredListMap.size() == 1 ? " " : "s ");
@@ -377,4 +381,31 @@ public class InstalledPluginsManagerMain extends PluginManagerMain {
     }
   }
 
+  private class BrowseRepoListener implements ActionListener {
+
+    private final String myVendor;
+
+    public BrowseRepoListener(String vendor) {
+      myVendor = vendor;
+    }
+
+    @Override
+    public void actionPerformed(ActionEvent e) {
+      final PluginManagerConfigurable configurable = createAvailableConfigurable(myVendor);
+      final SingleConfigurableEditor configurableEditor =
+        new SingleConfigurableEditor(myActionsPanel, configurable, ShowSettingsUtilImpl.createDimensionKey(configurable), false) {
+          {
+            setOKButtonText(CommonBundle.message("close.action.name"));
+            setOKButtonMnemonic('C');
+          }
+
+          @NotNull
+          @Override
+          protected Action[] createActions() {
+            return new Action[]{getOKAction()};
+          }
+        };
+      configurableEditor.show();
+    }
+  }
 }

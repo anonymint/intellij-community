@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,10 @@
 package org.jetbrains.plugins.groovy.lang.psi.impl.statements;
 
 import com.intellij.lang.ASTNode;
+import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyElementVisitor;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrSynchronizedStatement;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrOpenBlock;
@@ -41,11 +44,25 @@ public class GrSynchronizedStatementImpl extends GroovyPsiElementImpl implements
     return "Synchronized statement";
   }
 
+  @Nullable
   public GrExpression getMonitor() {
-    return findChildByClass(GrExpression.class);
+    return findExpressionChild(this);
   }
 
+  @Nullable
   public GrOpenBlock getBody() {
     return findChildByClass(GrOpenBlock.class);
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getLParenth() {
+    return findChildByType(GroovyTokenTypes.mLPAREN);
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getRParenth() {
+    return findChildByType(GroovyTokenTypes.mRPAREN);
   }
 }

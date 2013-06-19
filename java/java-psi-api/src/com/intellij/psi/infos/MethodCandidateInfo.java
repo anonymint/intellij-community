@@ -15,7 +15,10 @@
  */
 package com.intellij.psi.infos;
 
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.projectRoots.JavaVersionService;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.RecursionGuard;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.DefaultParameterTypeInferencePolicy;
@@ -26,7 +29,6 @@ import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
-import java.util.Set;
 
 /**
  * @author ik, dsl
@@ -39,7 +41,6 @@ public class MethodCandidateInfo extends CandidateInfo{
   private final PsiType[] myTypeArguments;
   private PsiSubstitutor myCalcedSubstitutor = null;
   private final LanguageLevel myLanguageLevel;
-  private static final Object LOCK = new Object();
 
   public MethodCandidateInfo(PsiElement candidate,
                              PsiSubstitutor substitutor,
@@ -97,27 +98,15 @@ public class MethodCandidateInfo extends CandidateInfo{
       PsiSubstitutor incompleteSubstitutor = super.getSubstitutor();
       PsiMethod method = getElement();
       if (myTypeArguments == null) {
-        Map<PsiElement, Pair<PsiMethod, PsiSubstitutor>> map;
-        synchronized (LOCK) {
-          map = CURRENT_CANDIDATE.get();
-          if (map == null) {
-            map = new ConcurrentWeakHashMap<PsiElement,  Pair<PsiMethod, PsiSubstitutor>>();
-            CURRENT_CANDIDATE.set(map);
-          }
-        }
-        map.put(myArgumentList, Pair.create(getElement(), incompleteSubstitutor));
-        try {
+        final RecursionGuard.StackStamp stackStamp = PsiDiamondType.ourDiamondGuard.markStack();
 
-          final Set<PsiParameterList> lists = LambdaUtil.ourParams.get();
-          if (lists != null && !lists.isEmpty()) {
-            return inferTypeArguments(DefaultParameterTypeInferencePolicy.INSTANCE);
-          }
+        final PsiSubstitutor inferredSubstitutor = inferTypeArguments(DefaultParameterTypeInferencePolicy.INSTANCE);
 
-          myCalcedSubstitutor = inferTypeArguments(DefaultParameterTypeInferencePolicy.INSTANCE);
+         if (!stackStamp.mayCacheNow()) {
+          return inferredSubstitutor;
         }
-        finally {
-          map.remove(myArgumentList);
-        }
+
+        myCalcedSubstitutor = inferredSubstitutor;
       }
       else {
         PsiTypeParameter[] typeParams = method.getTypeParameters();
@@ -136,7 +125,7 @@ public class MethodCandidateInfo extends CandidateInfo{
     final PsiMethod psiMethod = getElement();
     PsiTypeParameter[] typeParams = psiMethod.getTypeParameters();
     if (myTypeArguments != null && typeParams.length != myTypeArguments.length && !PsiUtil.isLanguageLevel7OrHigher(psiMethod)){
-      return false;
+      return typeParams.length == 0 && JavaVersionService.getInstance().isAtLeast(psiMethod, JavaSdkVersion.JDK_1_7);
     }
     PsiSubstitutor substitutor = getSubstitutor();
     return GenericsUtil.isTypeArgumentsApplicable(typeParams, substitutor, getParent());
@@ -162,22 +151,50 @@ public class MethodCandidateInfo extends CandidateInfo{
                                       : PsiExpression.EMPTY_ARRAY);
   }
 
-  public PsiSubstitutor inferTypeArguments(final ParameterTypeInferencePolicy policy, final PsiExpression[] arguments) {
-    PsiMethod method = getElement();
-    PsiTypeParameter[] typeParameters = method.getTypeParameters();
-
-    JavaPsiFacade javaPsiFacade = JavaPsiFacade.getInstance(method.getProject());
-    if (!method.hasModifierProperty(PsiModifier.STATIC)) {
-      final PsiClass containingClass = method.getContainingClass();
-      if (containingClass != null && PsiUtil.isRawSubstitutor(containingClass, mySubstitutor)) {
-        return javaPsiFacade.getElementFactory().createRawSubstitutor(mySubstitutor, typeParameters);
-      }
+  public PsiSubstitutor inferSubstitutorFromArgs(final ParameterTypeInferencePolicy policy, final PsiExpression[] arguments) {
+    if (myTypeArguments == null) {
+      return inferTypeArguments(policy, arguments);
     }
+    else {
+      PsiSubstitutor incompleteSubstitutor = super.getSubstitutor();
+      PsiMethod method = getElement();
+      if (method != null) {
+        PsiTypeParameter[] typeParams = method.getTypeParameters();
+        for (int i = 0; i < myTypeArguments.length && i < typeParams.length; i++) {
+          incompleteSubstitutor = incompleteSubstitutor.put(typeParams[i], myTypeArguments[i]);
+        }
+      }
+      return incompleteSubstitutor;
+    }
+  }
+  
+  public PsiSubstitutor inferTypeArguments(final ParameterTypeInferencePolicy policy, final PsiExpression[] arguments) {
+    Map<PsiElement, Pair<PsiMethod, PsiSubstitutor>> map = CURRENT_CANDIDATE.get();
+    if (map == null) {
+      map = new ConcurrentWeakHashMap<PsiElement, Pair<PsiMethod, PsiSubstitutor>>();
+      CURRENT_CANDIDATE.set(map);
+    }
+    final PsiMethod method = getElement();
+    final Pair<PsiMethod, PsiSubstitutor> alreadyThere = map.put(myArgumentList, Pair.create(method, super.getSubstitutor()));
+    try {
+      PsiTypeParameter[] typeParameters = method.getTypeParameters();
 
-    final PsiElement parent = getParent();
-    if (parent == null) return PsiSubstitutor.EMPTY;
-    return javaPsiFacade.getResolveHelper()
-      .inferTypeArguments(typeParameters, method.getParameterList().getParameters(), arguments, mySubstitutor, parent, policy);
+      JavaPsiFacade javaPsiFacade = JavaPsiFacade.getInstance(method.getProject());
+      if (!method.hasModifierProperty(PsiModifier.STATIC)) {
+        final PsiClass containingClass = method.getContainingClass();
+        if (containingClass != null && PsiUtil.isRawSubstitutor(containingClass, mySubstitutor)) {
+          return javaPsiFacade.getElementFactory().createRawSubstitutor(mySubstitutor, typeParameters);
+        }
+      }
+
+      final PsiElement parent = getParent();
+      if (parent == null) return PsiSubstitutor.EMPTY;
+      return javaPsiFacade.getResolveHelper()
+        .inferTypeArguments(typeParameters, method.getParameterList().getParameters(), arguments, mySubstitutor, parent, policy);
+    }
+    finally {
+      if (alreadyThere == null) map.remove(myArgumentList);
+    }
   }
 
   public boolean isInferencePossible() {

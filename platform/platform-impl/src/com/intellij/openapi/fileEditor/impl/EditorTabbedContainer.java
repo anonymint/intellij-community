@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import com.intellij.openapi.wm.ex.ToolWindowManagerAdapter;
 import com.intellij.openapi.wm.ex.ToolWindowManagerEx;
 import com.intellij.ui.InplaceButton;
 import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.docking.DockContainer;
 import com.intellij.ui.docking.DockManager;
 import com.intellij.ui.docking.DockableContent;
 import com.intellij.ui.docking.DragSession;
@@ -70,7 +71,7 @@ import java.util.Map;
  * @author Anton Katilin
  * @author Vladimir Kondratyev
  */
-final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget {
+public final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget {
   private final EditorWindow myWindow;
   private final Project myProject;
   private final JBEditorTabs myTabs;
@@ -83,7 +84,7 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
     myWindow = window;
     myProject = project;
     final ActionManager actionManager = ActionManager.getInstance();
-    myTabs = new JBEditorTabs(project, actionManager, IdeFocusManager.getInstance(project), this); 
+    myTabs = new JBEditorTabs(project, actionManager, IdeFocusManager.getInstance(project), this);
     myTabs.setDataProvider(new MyDataProvider()).setPopupGroup(new Getter<ActionGroup>() {
       public ActionGroup get() {
         return (ActionGroup)CustomActionsSchema.getInstance().getCorrectedAction(IdeActions.GROUP_EDITOR_TAB_POPUP);
@@ -111,8 +112,9 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
         }
       }).setAdditionalSwitchProviderWhenOriginal(new MySwitchProvider())
     .setSelectionChangeHandler(new JBTabs.SelectionChangeHandler() {
+      @NotNull
       @Override
-      public ActionCallback execute(TabInfo info, boolean requestFocus, final ActiveRunnable doChangeSelection) {
+      public ActionCallback execute(TabInfo info, boolean requestFocus, @NotNull final ActiveRunnable doChangeSelection) {
         final ActionCallback result = new ActionCallback();
         CommandProcessor.getInstance().executeCommand(myProject, new Runnable() {
           @Override
@@ -124,6 +126,16 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
         return result;
       }
     }).getPresentation().setRequestFocusOnLastFocusedComponent(true);
+    myTabs.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        if (myTabs.findInfo(e) != null || isFloating()) return;
+        if (!e.isPopupTrigger() && SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 2) {
+          final ActionManager mgr = ActionManager.getInstance();
+          mgr.tryToExecute(mgr.getAction("HideAllWindows"), e, null, ActionPlaces.UNKNOWN, true);
+        }
+      }
+    });
 
     setTabPlacement(UISettings.getInstance().EDITOR_TAB_PLACEMENT);
 
@@ -161,6 +173,11 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
     return myTabs.select(myTabs.getTabAt(indexToSelect), focusEditor);
   }
 
+
+  public static DockableEditor createDockableEditor(Project project, Image image, VirtualFile file, Presentation presentation, EditorWindow window) {
+    return new DockableEditor(project, image, file, presentation, window);
+  }
+
   private void updateTabBorder() {
     if (!myProject.isOpen()) return;
 
@@ -177,7 +194,7 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
     List<String> rightIds = mgr.getIdsOn(ToolWindowAnchor.RIGHT);
     List<String> leftIds = mgr.getIdsOn(ToolWindowAnchor.LEFT);
 
-    if (!uiSettings.HIDE_TOOL_STRIPES) {
+    if (!uiSettings.HIDE_TOOL_STRIPES && !uiSettings.PRESENTATION_MODE) {
       border.top = topIds.size() > 0 ? 1 : 0;
       border.bottom = bottom.size() > 0 ? 1 : 0;
       border.left = leftIds.size() > 0 ? 1 : 0;
@@ -496,7 +513,7 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
         if (!(deepestComponent instanceof InplaceButton)) {
           myActionClickCount++;
         }
-        if (myActionClickCount == 2 && !isFloating()) {
+        if (myActionClickCount > 1 && !isFloating()) {
           final ActionManager mgr = ActionManager.getInstance();
           mgr.tryToExecute(mgr.getAction("HideAllWindows"), e, null, ActionPlaces.UNKNOWN, true);
         }
@@ -581,7 +598,7 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
       myFile = (VirtualFile)info.getObject();
       Presentation presentation = new Presentation(info.getText());
       presentation.setIcon(info.getIcon());
-      mySession = getDockManager().createDragSession(mouseEvent, new DockableEditor(img, myFile, presentation, myWindow));
+      mySession = getDockManager().createDragSession(mouseEvent, createDockableEditor(myProject, img, myFile, presentation, myWindow));
     }
 
     private DockManager getDockManager() {
@@ -595,7 +612,7 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
 
     @Override
     public void dragOutFinished(MouseEvent event, TabInfo source) {
-      boolean copy = event.isMetaDown() || (!SystemInfo.isMac && event.isControlDown());
+      boolean copy = UIUtil.isControlKeyDown(event) || mySession.getResponse(event) == DockContainer.ContentResponse.ACCEPT_COPY;
       if (!copy) {
         myFile.putUserData(FileEditorManagerImpl.CLOSING_TO_REOPEN, Boolean.TRUE);
         FileEditorManagerEx.getInstanceEx(myProject).closeFile(myFile, myWindow);
@@ -624,63 +641,64 @@ final class EditorTabbedContainer implements Disposable, CloseAction.CloseTarget
       mySession = null;
     }
 
-    class DockableEditor implements DockableContent<VirtualFile> {
-      final Image myImg;
-      private DockableEditorTabbedContainer myContainer;
-      private Presentation myPresentation;
-      private EditorWindow myEditorWindow;
-      private Dimension myPreferredSize;
-      private boolean myPinned;
+  }
 
+  public static class DockableEditor implements DockableContent<VirtualFile> {
+    final Image myImg;
+    private DockableEditorTabbedContainer myContainer;
+    private Presentation myPresentation;
+    private EditorWindow myEditorWindow;
+    private Dimension myPreferredSize;
+    private boolean myPinned;
+    private VirtualFile myFile;
 
-      public DockableEditor(Image img, VirtualFile file, Presentation presentation, EditorWindow window) {
-        myImg = img;
-        myFile = file;
-        myPresentation = presentation;
-        myContainer = new DockableEditorTabbedContainer(myProject);
-        myEditorWindow = window;
-        myPreferredSize = myEditorWindow.getSize();
-        myPinned = window.isFilePinned(file);
-      }
+    public DockableEditor(Project project, Image img, VirtualFile file, Presentation presentation, EditorWindow window) {
+      myImg = img;
+      myFile = file;
+      myPresentation = presentation;
+      myContainer = new DockableEditorTabbedContainer(project);
+      myEditorWindow = window;
+      myPreferredSize = myEditorWindow.getSize();
+      myPinned = window.isFilePinned(file);
+    }
 
-      @NotNull
-      @Override
-      public VirtualFile getKey() {
-        return myFile;
-      }
+    @NotNull
+    @Override
+    public VirtualFile getKey() {
+      return myFile;
+    }
 
-      @Override
-      public Image getPreviewImage() {
-        return myImg;
-      }
+    @Override
+    public Image getPreviewImage() {
+      return myImg;
+    }
 
-      @Override
-      public Dimension getPreferredSize() {
-        return myPreferredSize;
-      }
+    @Override
+    public Dimension getPreferredSize() {
+      return myPreferredSize;
+    }
 
-      @Override
-      public String getDockContainerType() {
-        return DockableEditorContainerFactory.TYPE;
-      }
+    @Override
+    public String getDockContainerType() {
+      return DockableEditorContainerFactory.TYPE;
+    }
 
-      @Override
-      public Presentation getPresentation() {
-        return myPresentation;
-      }
+    @Override
+    public Presentation getPresentation() {
+      return myPresentation;
+    }
 
-      @Override
-      public void close() {
-        myContainer.close(myFile);
-      }
+    @Override
+    public void close() {
+      myContainer.close(myFile);
+    }
 
-      public VirtualFile getFile() {
-        return myFile;
-      }
+    public VirtualFile getFile() {
+      return myFile;
+    }
 
-      public boolean isPinned() {
-        return myPinned;
-      }
+    public boolean isPinned() {
+      return myPinned;
     }
   }
 

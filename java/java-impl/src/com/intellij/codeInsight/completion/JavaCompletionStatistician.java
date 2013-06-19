@@ -16,11 +16,16 @@
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.ExpectedTypeInfo;
+import com.intellij.codeInsight.ExpectedTypeInfoImpl;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupItem;
 import com.intellij.psi.*;
 import com.intellij.psi.statistics.JavaStatisticsManager;
 import com.intellij.psi.statistics.StatisticsInfo;
+import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.util.containers.ContainerUtil;
+
+import java.util.List;
 
 /**
  * @author peter
@@ -31,7 +36,7 @@ public class JavaCompletionStatistician extends CompletionStatistician{
   public StatisticsInfo serialize(final LookupElement element, final CompletionLocation location) {
     Object o = element.getObject();
 
-    if (o instanceof PsiLocalVariable || o instanceof PsiParameter || o instanceof PsiThisExpression) {
+    if (o instanceof PsiLocalVariable || o instanceof PsiParameter || o instanceof PsiThisExpression || o instanceof PsiKeyword) {
       return StatisticsInfo.EMPTY;
     }
 
@@ -41,24 +46,31 @@ public class JavaCompletionStatistician extends CompletionStatistician{
     PsiType qualifierType = JavaCompletionUtil.getQualifierType(item);
 
     if (o instanceof PsiMember) {
+      final ExpectedTypeInfo[] infos = JavaCompletionUtil.EXPECTED_TYPES.getValue(location);
+      final ExpectedTypeInfo firstInfo = infos != null && infos.length > 0 ? infos[0] : null;
       String key2 = JavaStatisticsManager.getMemberUseKey2((PsiMember)o);
       if (o instanceof PsiClass) {
-        final ExpectedTypeInfo[] infos = JavaCompletionUtil.EXPECTED_TYPES.getValue(location);
-        PsiType expectedType = infos != null && infos.length > 0 ? infos[0].getDefaultType() : null;
+        PsiType expectedType = firstInfo != null ? firstInfo.getDefaultType() : null;
         return new StatisticsInfo(JavaStatisticsManager.getAfterNewKey(expectedType), key2);
       }
 
-      if (o instanceof PsiMethod) {
-        o = RecursionWeigher.findDeepestSuper((PsiMethod)o);
-      }
-      
       PsiClass containingClass = ((PsiMember)o).getContainingClass();
       if (containingClass != null) {
-        if (CommonClassNames.JAVA_LANG_OBJECT.equals(containingClass.getQualifiedName())) {
-          return StatisticsInfo.EMPTY;
+        String expectedName = firstInfo instanceof ExpectedTypeInfoImpl ? ((ExpectedTypeInfoImpl)firstInfo).expectedName.compute() : null;
+        String contextPrefix = expectedName == null ? "" : "expectedName=" + expectedName + "###";
+        String context = contextPrefix + JavaStatisticsManager.getMemberUseKey2(containingClass);
+
+        if (o instanceof PsiMethod) {
+          String memberValue = JavaStatisticsManager.getMemberUseKey2(RecursionWeigher.findDeepestSuper((PsiMethod)o));
+
+          List<StatisticsInfo> superMethodInfos = ContainerUtil.newArrayList(new StatisticsInfo(contextPrefix + context, memberValue));
+          for (PsiClass superClass : InheritanceUtil.getSuperClasses(containingClass)) {
+            superMethodInfos.add(new StatisticsInfo(contextPrefix + JavaStatisticsManager.getMemberUseKey2(superClass), memberValue));
+          }
+          return StatisticsInfo.createComposite(superMethodInfos);
         }
 
-        return new StatisticsInfo(JavaStatisticsManager.getMemberUseKey2(containingClass), key2);
+        return new StatisticsInfo(context, key2);
       }
     }
 

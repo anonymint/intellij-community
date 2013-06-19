@@ -58,11 +58,11 @@ public class NavigateFromSourceTest extends BaseProjectViewTestCase {
     sortClassesByName(classes);
     PsiClass psiClass = classes[0];
 
-    final AbstractProjectViewPSIPane pane = createPane();
+    final AbstractProjectViewPSIPane pane = myStructure.createPane();
     final PsiFile containingFile = psiClass.getContainingFile();
     final VirtualFile virtualFile = containingFile.getVirtualFile();
 
-    checkNavigateFromSourceBehaviour(psiClass, virtualFile, pane);
+    myStructure.checkNavigateFromSourceBehaviour(psiClass, virtualFile, pane);
 
     PlatformTestUtil.assertTreeEqual(pane.getTree(), "-Project\n" +
                                                      " -PsiDirectory: showClassMembers\n" +

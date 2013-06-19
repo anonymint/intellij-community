@@ -19,6 +19,7 @@ package com.intellij.util.xmlb;
 import com.intellij.util.xmlb.annotations.Attribute;
 import org.jdom.Content;
 import org.jdom.Text;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class AttributeBinding implements Binding {
@@ -31,6 +32,7 @@ public class AttributeBinding implements Binding {
     myAttribute = attribute;
   }
 
+  @Override
   public Object serialize(Object o, Object context, SerializationFilter filter) {
     final Object v = myAccessor.read(o);
     final Object node = myBinding.serialize(v, context, filter);
@@ -38,8 +40,9 @@ public class AttributeBinding implements Binding {
     return new org.jdom.Attribute(myAttribute.value(), ((Content)node).getValue());
   }
 
+  @Override
   @Nullable
-  public Object deserialize(Object context, Object... nodes) {
+  public Object deserialize(Object context, @NotNull Object... nodes) {
     assert nodes.length == 1;
     Object node = nodes[0];
     assert isBoundTo(node);
@@ -51,14 +54,17 @@ public class AttributeBinding implements Binding {
     return context;
   }
 
+  @Override
   public boolean isBoundTo(Object node) {
     return node instanceof org.jdom.Attribute && ((org.jdom.Attribute)node).getName().equals(myAttribute.value());
   }
 
+  @Override
   public Class getBoundNodeType() {
     return org.jdom.Attribute.class;
   }
 
+  @Override
   public void init() {
     myBinding = XmlSerializerImpl.getBinding(myAccessor);
     if (!Text.class.isAssignableFrom(myBinding.getBoundNodeType())) {

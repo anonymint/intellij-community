@@ -16,16 +16,13 @@
 package com.intellij.psi.stubs;
 
 import com.intellij.openapi.diagnostic.LogUtil;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.LowMemoryWatcher;
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream;
-import com.intellij.util.containers.SLRUCache;
+import com.intellij.util.containers.RecentStringInterner;
 import com.intellij.util.io.AbstractStringEnumerator;
 import com.intellij.util.io.DataInputOutputUtil;
 import com.intellij.util.io.IOUtil;
 import gnu.trove.TIntObjectHashMap;
 import gnu.trove.TObjectIntHashMap;
-import jsr166e.SequenceLock;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,20 +32,17 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.locks.Lock;
 
 /**
  * Author: dmitrylomov
  */
 public class StubSerializationHelper {
-
-  private final static Logger LOG = Logger.getInstance(StubSerializationHelper.class);
-  private AbstractStringEnumerator myNameStorage;
+  private final AbstractStringEnumerator myNameStorage;
 
   protected final TIntObjectHashMap<ObjectStubSerializer> myIdToSerializer = new TIntObjectHashMap<ObjectStubSerializer>();
   protected final TObjectIntHashMap<ObjectStubSerializer> mySerializerToId = new TObjectIntHashMap<ObjectStubSerializer>();
 
-  public StubSerializationHelper(AbstractStringEnumerator nameStorage) {
+  public StubSerializationHelper(@NotNull AbstractStringEnumerator nameStorage) {
     myNameStorage = nameStorage;
   }
 
@@ -62,13 +56,10 @@ public class StubSerializationHelper {
   }
 
   private int persistentId(@NotNull final ObjectStubSerializer serializer) throws IOException {
-    if (myNameStorage == null) {
-      throw new IOException("SerializationManager's name storage failed to initialize");
-    }
     return myNameStorage.enumerate(serializer.getExternalId());
   }
 
-  private void doSerialize(final Stub rootStub, final StubOutputStream stream) throws IOException {
+  private void doSerialize(@NotNull Stub rootStub, @NotNull StubOutputStream stream) throws IOException {
     final ObjectStubSerializer serializer = StubSerializationUtil.getSerializer(rootStub);
 
     DataInputOutputUtil.writeINT(stream, getClassId(serializer));
@@ -82,7 +73,7 @@ public class StubSerializationHelper {
     }
   }
 
-  public void serialize(Stub rootStub, OutputStream stream) throws IOException {
+  public void serialize(@NotNull Stub rootStub, @NotNull OutputStream stream) throws IOException {
     BufferExposingByteArrayOutputStream out = new BufferExposingByteArrayOutputStream();
     FileLocalStringEnumerator storage = new FileLocalStringEnumerator();
     StubOutputStream stubOutputStream = new StubOutputStream(out, storage);
@@ -103,59 +94,10 @@ public class StubSerializationHelper {
     return idValue;
   }
 
-  private static class RecentStringInterner {
-    private final int myStripeMask;
-    private final SLRUCache<String, String>[] myInterns;
-    private final Lock[] myStripeLocks;
-    private final LowMemoryWatcher myClearingCallback;
+  private final RecentStringInterner myStringInterner = new RecentStringInterner();
 
-    private RecentStringInterner(int capacity) {
-      final int stripes = 16;
-      myInterns = new SLRUCache[stripes];
-      myStripeLocks = new Lock[myInterns.length];
-      for(int i = 0; i < myInterns.length; ++i) {
-        myInterns[i] = new SLRUCache<String, String>(capacity / stripes, capacity / stripes) {
-          @NotNull
-          @Override
-          public String createValue(String key) {
-            return key;
-          }
-        };
-        myStripeLocks[i] = new SequenceLock();
-      }
-
-      assert Integer.highestOneBit(stripes) == stripes;
-      myStripeMask = stripes - 1;
-      myClearingCallback = LowMemoryWatcher.register(new Runnable() {
-        @Override
-        public void run() {
-          clear();
-        };
-      });
-    }
-
-    String get(String s) {
-      final int stripe = Math.abs(s.hashCode()) & myStripeMask;
-      try {
-        myStripeLocks[stripe].lock();
-        return myInterns[stripe].get(s);
-      } finally {
-        myStripeLocks[stripe].unlock();
-      }
-    }
-
-    void clear() {
-      for(int i = 0; i < myInterns.length; ++i) {
-        myStripeLocks[i].lock();
-        myInterns[i].clear();
-        myStripeLocks[i].unlock();
-      }
-    }
-  }
-
-  private final RecentStringInterner myStringInterner = new RecentStringInterner(8192);
-
-  public Stub deserialize(InputStream stream) throws IOException, SerializerNotFoundException {
+  @NotNull
+  public Stub deserialize(@NotNull InputStream stream) throws IOException, SerializerNotFoundException {
     FileLocalStringEnumerator storage = new FileLocalStringEnumerator();
     StubInputStream inputStream = new StubInputStream(stream, storage);
     final int size = DataInputOutputUtil.readINT(inputStream);
@@ -171,7 +113,12 @@ public class StubSerializationHelper {
     return deserialize(inputStream, null);
   }
 
-  private Stub deserialize(StubInputStream stream, @Nullable Stub parentStub) throws IOException, SerializerNotFoundException {
+  String intern(String str) {
+    return myStringInterner.get(str);
+  }
+
+  @NotNull
+  private Stub deserialize(@NotNull StubInputStream stream, @Nullable Stub parentStub) throws IOException, SerializerNotFoundException {
     final int id = DataInputOutputUtil.readINT(stream);
     final ObjectStubSerializer serializer = getClassById(id);
     if (serializer == null) {

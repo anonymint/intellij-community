@@ -19,6 +19,7 @@ import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
+import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
 import com.intellij.psi.PsiFile;
@@ -570,6 +571,26 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
     doDuplicatesTest();
   }
 
+  public void testCastWhenDuplicateReplacement() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testCheckQualifierMapping() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testArrayReturnType() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testOverloadedMethods() throws Exception {
+    doDuplicatesTest();
+  }
+
+  public void testTargetAnonymous() throws Exception {
+    doTest();
+  }
+
   private void doTestDisabledParam() throws PrepareFailedException {
     final CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(getProject());
     settings.ELSE_ON_NEW_LINE = true;
@@ -677,6 +698,7 @@ public class ExtractMethodTest extends LightCodeInsightTestCase {
       final List<Match> duplicates = processor.getDuplicates();
       for (final Match match : duplicates) {
         if (!match.getMatchStart().isValid() || !match.getMatchEnd().isValid()) continue;
+        PsiDocumentManager.getInstance(project).commitAllDocuments();
         processor.processMatch(match);
       }
     }

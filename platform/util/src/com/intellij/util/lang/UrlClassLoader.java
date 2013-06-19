@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@
 package com.intellij.util.lang;
 
 import com.intellij.openapi.diagnostic.Logger;
-import gnu.trove.THashSet;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -25,14 +26,17 @@ import sun.misc.Resource;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
 
 public class UrlClassLoader extends ClassLoader {
   private final ClassPath myClassPath;
   private final List<URL> myURLs;
-  private final Set<String> myNotFound = new THashSet<String>();
   @NonNls static final String CLASS_EXTENSION = ".class";
   protected static final boolean myDebugTime = false;
   protected static final long NS_THRESHOLD = 10000000;
@@ -50,14 +54,35 @@ public class UrlClassLoader extends ClassLoader {
   }
 
   public UrlClassLoader(List<URL> urls, @Nullable ClassLoader parent, boolean canLockJars, boolean canUseCache) {
-    this(urls, parent, canLockJars, canUseCache, false);
+    this(urls, parent, canLockJars, canUseCache, false, true);
   }
 
-  public UrlClassLoader(List<URL> urls, @Nullable ClassLoader parent, boolean canLockJars, boolean canUseCache, boolean acceptUnescapedUrls) {
+  public UrlClassLoader(List<URL> urls, @Nullable ClassLoader parent, boolean canLockJars, boolean canUseCache, boolean acceptUnescapedUrls, final boolean preloadJarContents) {
     super(parent);
 
-    myClassPath = new ClassPath(urls.toArray(new URL[urls.size()]), canLockJars, canUseCache, acceptUnescapedUrls);
-    myURLs = new ArrayList<URL>(urls);
+    List<URL> list = ContainerUtil.map(urls, new Function<URL, URL>() {
+      @Override
+      public URL fun(URL url) {
+        return internProtocol(url);
+      }
+    });
+    myClassPath = new ClassPath(list.toArray(new URL[list.size()]), canLockJars, canUseCache, acceptUnescapedUrls, preloadJarContents);
+    myURLs = list;
+  }
+
+  @NotNull
+  public static URL internProtocol(@NotNull URL url) {
+    try {
+      final String protocol = url.getProtocol();
+      if ("file".equals(protocol) || "jar".equals(protocol)) {
+        return new URL(protocol.intern(), url.getHost(), url.getPort(), url.getFile());
+      }
+      return url;
+    }
+    catch (MalformedURLException e) {
+      LOG.error(e);
+      return null;
+    }
   }
 
   public void addURL(URL url) {
@@ -69,13 +94,10 @@ public class UrlClassLoader extends ClassLoader {
     return Collections.unmodifiableList(myURLs);
   }
 
+  @Override
   protected Class findClass(final String name) throws ClassNotFoundException {
-    if (myNotFound.contains(name)) {
-      throw new ClassNotFoundException(name);
-    }
     Resource res = myClassPath.getResource(name.replace('.', '/').concat(CLASS_EXTENSION), false);
     if (res == null) {
-      myNotFound.add(name);
       throw new ClassNotFoundException(name);
     }
 
@@ -88,12 +110,13 @@ public class UrlClassLoader extends ClassLoader {
   }
 
 
+  @Override
   protected Class<?> loadClass(final String name, final boolean resolve) throws ClassNotFoundException {
     return super.loadClass(name, resolve);
   }
 
   @Nullable
-  protected Class _findClass(final String name) {
+  protected Class _findClass(@NotNull String name) {
     Resource res = myClassPath.getResource(name.replace('.', '/').concat(CLASS_EXTENSION), false);
     if (res == null) {
       return null;
@@ -131,6 +154,7 @@ public class UrlClassLoader extends ClassLoader {
     return defineClass(name, b, 0, b.length);
   }
 
+  @Override
   @Nullable  // Accessed from PluginClassLoader via reflection // TODO do we need it?
   public URL findResource(final String name) {
     final long started = myDebugTime ? System.nanoTime():0;
@@ -173,6 +197,7 @@ public class UrlClassLoader extends ClassLoader {
   }
 
   // Accessed from PluginClassLoader via reflection // TODO do we need it?
+  @Override
   protected Enumeration<URL> findResources(String name) throws IOException {
     return myClassPath.getResources(name, true);
   }

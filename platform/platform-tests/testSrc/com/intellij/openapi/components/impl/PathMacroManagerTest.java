@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,7 @@ public class PathMacroManagerTest {
         allowing(myApplication).isUnitTestMode(); will(returnValue(false));
         allowing(myApplication).getName(); will(returnValue("IDEA"));
 
-        //some tests leave invokeLaters after them...
+        // some tests leave invokeLater()'s after them
         allowing(myApplication).invokeLater(with(any(Runnable.class)), with(any(ModalityState.class)));
 
         allowing(myApplication).runReadAction(with(any(Runnable.class)));
@@ -217,6 +217,7 @@ public class PathMacroManagerTest {
     }
   }
 
+  @SuppressWarnings("SpellCheckingInspection")
   @Test
   public void testProjectUnderUserHome_ReplaceRecursively() {
     setUpMocks("/home/user/foo");

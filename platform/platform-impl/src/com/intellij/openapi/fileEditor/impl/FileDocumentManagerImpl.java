@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,8 @@ import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorImpl;
 import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.UnknownFileType;
 import com.intellij.openapi.project.*;
 import com.intellij.openapi.project.ex.ProjectEx;
 import com.intellij.openapi.ui.DialogBuilder;
@@ -78,6 +80,8 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.*;
 import java.util.List;
+
+import static com.intellij.reference.SoftReference.dereference;
 
 public class FileDocumentManagerImpl extends FileDocumentManager implements ApplicationComponent, VirtualFileListener,
                                                                             ProjectManagerListener, SafeWriteRequestor {
@@ -226,16 +230,7 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
   @Override
   @Nullable
   public Document getCachedDocument(@NotNull VirtualFile file) {
-    Reference<Document> reference = file.getUserData(DOCUMENT_KEY);
-    Document document = reference == null ? null : reference.get();
-
-    if (document != null && isBinaryWithoutDecompiler(file)) {
-      file.putUserData(DOCUMENT_KEY, null);
-      document.putUserData(FILE_KEY, null);
-      return null;
-    }
-
-    return document;
+    return dereference(file.getUserData(DOCUMENT_KEY));
   }
 
   public static void registerDocument(@NotNull final Document document, @NotNull VirtualFile virtualFile) {
@@ -292,23 +287,35 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
 
   @Override
   public void saveAllDocuments() {
+    saveAllDocuments(true);
+  }
+
+  /**
+   * @param isExplicit caused by user directly (Save action) or indirectly (e.g. Compile)
+   */
+  public void saveAllDocuments(boolean isExplicit) {
     ApplicationManager.getApplication().assertIsDispatchThread();
 
     myMultiCaster.beforeAllDocumentsSaving();
     if (myUnsavedDocuments.isEmpty()) return;
 
     final Map<Document, IOException> failedToSave = new HashMap<Document, IOException>();
+    final Set<Document> vetoed = new HashSet<Document>();
     while (true) {
       int count = 0;
 
       for (Document document : myUnsavedDocuments) {
         if (failedToSave.containsKey(document)) continue;
+        if (vetoed.contains(document)) continue;
         try {
-          doSaveDocument(document);
+          doSaveDocument(document, isExplicit);
         }
         catch (IOException e) {
           //noinspection ThrowableResultOfMethodCallIgnored
           failedToSave.put(document, e);
+        }
+        catch (SaveVetoException e) {
+          vetoed.add(document);
         }
         count++;
       }
@@ -327,10 +334,12 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
     if (!myUnsavedDocuments.contains(document)) return;
 
     try {
-      doSaveDocument(document);
+      doSaveDocument(document, true);
     }
     catch (IOException e) {
       handleErrorsOnSave(Collections.singletonMap(document, e));
+    }
+    catch (SaveVetoException ignored) {
     }
   }
 
@@ -351,7 +360,9 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
     }
   }
 
-  private void doSaveDocument(@NotNull final Document document) throws IOException {
+  private static class SaveVetoException extends Exception {}
+
+  private void doSaveDocument(@NotNull final Document document, boolean isExplicit) throws IOException, SaveVetoException {
     VirtualFile file = getFile(document);
 
     if (file == null || file instanceof LightVirtualFile || file.isValid() && !isFileModified(file)) {
@@ -362,6 +373,12 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
     if (file.isValid() && needsRefresh(file)) {
       file.refresh(false, false);
       if (!myUnsavedDocuments.contains(document)) return;
+    }
+
+    for (FileDocumentSynchronizationVetoer vetoer : Extensions.getExtensions(FileDocumentSynchronizationVetoer.EP_NAME)) {
+      if (!vetoer.maySaveDocument(document, isExplicit)) {
+        throw new SaveVetoException();
+      }
     }
 
     final AccessToken token = ApplicationManager.getApplication().acquireWriteActionLock(getClass());
@@ -390,12 +407,6 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
       removeFromUnsaved(document);
       updateModifiedProperty(file);
       return;
-    }
-
-    for (FileDocumentSynchronizationVetoer vetoer : Extensions.getExtensions(FileDocumentSynchronizationVetoer.EP_NAME)) {
-      if (!vetoer.maySaveDocument(document)) {
-        return;
-      }
     }
 
     myMultiCaster.beforeDocumentSaving(document);
@@ -449,7 +460,8 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
     return fs instanceof NewVirtualFileSystem && file.getTimeStamp() != ((NewVirtualFileSystem)fs).getTimeStamp(file);
   }
 
-  private static String getLineSeparator(Document document, VirtualFile file) {
+  @NotNull
+  public static String getLineSeparator(@NotNull Document document, @NotNull VirtualFile file) {
     String lineSeparator = LoadTextUtil.getDetectedLineSeparator(file);
     if (lineSeparator == null) {
       lineSeparator = document.getUserData(LINE_SEPARATOR_KEY);
@@ -461,16 +473,14 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
   @Override
   @NotNull
   public String getLineSeparator(@Nullable VirtualFile file, @Nullable Project project) {
-    String lineSeparator = file != null ? LoadTextUtil.getDetectedLineSeparator(file) : null;
+    String lineSeparator = file == null ? null : LoadTextUtil.getDetectedLineSeparator(file);
     if (lineSeparator == null) {
       CodeStyleFacade settingsManager = project == null
                                         ? CodeStyleFacade.getInstance()
                                         : CodeStyleFacade.getInstance(project);
-      return settingsManager.getLineSeparator();
+      lineSeparator = settingsManager.getLineSeparator();
     }
-    else {
-      return lineSeparator;
-    }
+    return lineSeparator;
   }
 
   @Override
@@ -521,21 +531,32 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
   }
 
   @Override
-  public void propertyChanged(final VirtualFilePropertyEvent event) {
+  public void propertyChanged(VirtualFilePropertyEvent event) {
+    final VirtualFile file = event.getFile();
     if (VirtualFile.PROP_WRITABLE.equals(event.getPropertyName())) {
-      final VirtualFile file = event.getFile();
       final Document document = getCachedDocument(file);
-      if (document == null) return;
-
-      ApplicationManager.getApplication().runWriteAction(
-        new ExternalChangeAction() {
+      if (document != null) {
+        ApplicationManager.getApplication().runWriteAction(new ExternalChangeAction() {
           @Override
           public void run() {
-            document.setReadOnly(!event.getFile().isWritable());
+            document.setReadOnly(!file.isWritable());
           }
+        });
+      }
+    }
+    else if (VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
+      Document document = getCachedDocument(file);
+      if (document != null) {
+        FileType type = file.getFileType();
+        if (type == UnknownFileType.INSTANCE) {
+          // a file is linked to a document - chances are it is an "unknown text file" now
+          FileTypeManager.getInstance().detectFileTypeFromContent(file);
         }
-      );
-      //myUnsavedDocuments.remove(document); //?
+        if (isBinaryWithoutDecompiler(file)) {
+          file.putUserData(DOCUMENT_KEY, null);
+          document.putUserData(FILE_KEY, null);
+        }
+      }
     }
   }
 
@@ -566,7 +587,7 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
     long documentStamp = document.getModificationStamp();
     long oldFileStamp = event.getOldModificationStamp();
     if (documentStamp != oldFileStamp) {
-      LOG.info("reload from disk?");
+      LOG.info("reload " + file.getName() + " from disk?");
       LOG.info("  documentStamp:" + documentStamp);
       LOG.info("  oldFileStamp:" + oldFileStamp);
 
@@ -601,6 +622,7 @@ public class FileDocumentManagerImpl extends FileDocumentManager implements Appl
               boolean wasWritable = document.isWritable();
               DocumentEx documentEx = (DocumentEx)document;
               documentEx.setReadOnly(false);
+              LoadTextUtil.setCharsetWasDetectedFromBytes(file, null);
               documentEx.replaceText(LoadTextUtil.loadText(file), file.getModificationStamp());
               documentEx.setReadOnly(!wasWritable);
             }

@@ -31,6 +31,7 @@ import org.jboss.netty.util.Version;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.asm4.ClassVisitor;
 import org.jetbrains.asm4.ClassWriter;
+import org.jetbrains.jps.builders.java.JavaSourceTransformer;
 import org.jetbrains.jps.javac.JavacServer;
 import org.jetbrains.jps.model.JpsModel;
 import org.jetbrains.jps.model.impl.JpsModelImpl;
@@ -130,7 +131,7 @@ public class ClasspathBootstrap {
     return ContainerUtil.newArrayList(cp);
   }
 
-  public static List<File> getJavacServerClasspath(String sdkHome) {
+  public static List<File> getJavacServerClasspath(String sdkHome, boolean useEclipseCompiler) {
     final Set<File> cp = new LinkedHashSet<File>();
     cp.add(getResourceFile(JavacServer.class)); // self
     // util
@@ -187,6 +188,23 @@ public class ClasspathBootstrap {
       catch (Throwable th) {
         LOG.info(th);
       }
+    }
+
+    if (useEclipseCompiler) {
+      // eclipse compiler
+      for (JavaCompiler javaCompiler : ServiceLoader.load(JavaCompiler.class)) { // Eclipse compiler
+        final File compilerResource = getResourceFile(javaCompiler.getClass());
+        final String name = compilerResource.getName();
+        if (name.startsWith("ecj-") && name.endsWith(".jar")) {
+          cp.add(compilerResource);
+        }
+      }
+    }
+
+    final Class<JavaSourceTransformer> transformerClass = JavaSourceTransformer.class;
+    final ServiceLoader<JavaSourceTransformer> loader = ServiceLoader.load(transformerClass, transformerClass.getClassLoader());
+    for (JavaSourceTransformer t : loader) {
+      cp.add(getResourceFile(t.getClass()));
     }
 
     return new ArrayList<File>(cp);

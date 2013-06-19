@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.jetbrains.plugins.groovy.annotator.intentions;
 
-import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.ide.util.SuperMethodWarningUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
@@ -55,7 +54,7 @@ import java.util.Set;
 /**
  * @author Max Medvedev
  */
-public class CreateParameterFromUsageFix extends Intention implements IntentionAction, MethodOrClosureScopeChooser.JBPopupOwner {
+public class CreateParameterFromUsageFix extends Intention implements MethodOrClosureScopeChooser.JBPopupOwner {
   private final String myName;
   private JBPopup myEnclosingMethodsPopup = null;
 
@@ -138,7 +137,7 @@ public class CreateParameterFromUsageFix extends Intention implements IntentionA
       public void run() {
         if (project.isDisposed()) return;
 
-        final String name = ref.getName();
+        final String name = ref.getReferenceName();
         final Set<PsiType> types = GroovyExpectedTypesProvider.getDefaultExpectedTypes(ref);
 
         PsiType unboxed = types.isEmpty() ? null : TypesUtil.unboxPrimitiveTypeWrapper(types.iterator().next());

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,6 +60,8 @@ import com.intellij.openapi.project.impl.ProjectImpl;
 import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.impl.DirectoryIndex;
+import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
@@ -120,7 +122,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   public static Thread ourTestThread;
   private static LightProjectDescriptor ourProjectDescriptor;
   @NonNls private static final String LIGHT_PROJECT_MARK = "Light project: ";
-  private final Map<String, InspectionTool> myAvailableInspectionTools = new THashMap<String, InspectionTool>();
+  private final Map<String, InspectionToolWrapper> myAvailableInspectionTools = new THashMap<String, InspectionToolWrapper>();
   private static boolean ourHaveShutdownHook;
   private ThreadTracker myThreadTracker;
 
@@ -156,7 +158,13 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   @TestOnly
   public static void disposeApplication() {
     if (ourApplication != null) {
-      Disposer.dispose(ourApplication);
+      ApplicationManager.getApplication().runWriteAction(new Runnable() {
+        @Override
+        public void run() {
+          Disposer.dispose(ourApplication);
+        }
+      });
+
       ourApplication = null;
     }
   }
@@ -190,7 +198,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return creationPlace != null && StringUtil.startsWith(creationPlace, LIGHT_PROJECT_MARK);
   }
 
-  private static void initProject(final LightProjectDescriptor descriptor) throws Exception {
+  private static void initProject(@NotNull final LightProjectDescriptor descriptor) throws Exception {
     ourProjectDescriptor = descriptor;
     final File projectFile = FileUtil.createTempFile("light_temp_", ProjectFileType.DOT_DEFAULT_EXTENSION);
 
@@ -329,10 +337,11 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     filePointerManager.storePointers();
   }
 
-  public static void doSetup(final LightProjectDescriptor descriptor,
-                             final LocalInspectionTool[] localInspectionTools, final Map<String, InspectionTool> availableInspectionTools)
+  public static void doSetup(@NotNull LightProjectDescriptor descriptor,
+                             @NotNull LocalInspectionTool[] localInspectionTools,
+                             @NotNull final Map<String, InspectionToolWrapper> availableInspectionTools)
     throws Exception {
-    assertNull("Previous test " + ourTestCase + " hasn't called tearDown(). Probably overriden without super call.", ourTestCase);
+    assertNull("Previous test " + ourTestCase + " hasn't called tearDown(). Probably overridden without super call.", ourTestCase);
     IdeaLogger.ourErrorsOccurred = null;
 
     if (ourProject == null || !ourProjectDescriptor.equals(descriptor)) {
@@ -352,19 +361,17 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     final InspectionProfileImpl profile = new InspectionProfileImpl(PROFILE) {
       @Override
       @NotNull
-      public InspectionProfileEntry[] getInspectionTools(PsiElement element) {
-        if (availableInspectionTools != null) {
-          final Collection<InspectionTool> tools = availableInspectionTools.values();
-          return tools.toArray(new InspectionTool[tools.size()]);
-        }
-        return new InspectionTool[0];
+      public InspectionToolWrapper[] getInspectionTools(PsiElement element) {
+        final Collection<InspectionToolWrapper> tools = availableInspectionTools.values();
+        return tools.toArray(new InspectionToolWrapper[tools.size()]);
       }
 
+      @NotNull
       @Override
-      public List<ToolsImpl> getAllEnabledInspectionTools(Project project) {
-        List<ToolsImpl> result = new ArrayList<ToolsImpl>();
-        for (InspectionProfileEntry entry : getInspectionTools(null)) {
-          result.add(new ToolsImpl(entry, entry.getDefaultLevel(), true));
+      public List<Tools> getAllEnabledInspectionTools(Project project) {
+        List<Tools> result = new ArrayList<Tools>();
+        for (InspectionToolWrapper toolWrapper : getInspectionTools(null)) {
+          result.add(new ToolsImpl(toolWrapper, toolWrapper.getDefaultLevel(), true));
         }
         return result;
       }
@@ -376,24 +383,18 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
 
       @Override
       public HighlightDisplayLevel getErrorLevel(@NotNull HighlightDisplayKey key, PsiElement element) {
-        InspectionTool localInspectionTool = availableInspectionTools.get(key.toString());
-        return localInspectionTool != null ? localInspectionTool.getDefaultLevel() : HighlightDisplayLevel.WARNING;
+        InspectionToolWrapper toolWrapper = availableInspectionTools.get(key.toString());
+        return toolWrapper == null ? HighlightDisplayLevel.WARNING : toolWrapper.getDefaultLevel();
       }
 
       @Override
-      public InspectionTool getInspectionTool(@NotNull String shortName, @NotNull PsiElement element) {
-        if (availableInspectionTools.containsKey(shortName)) {
-          return availableInspectionTools.get(shortName);
-        }
-        return null;
+      public InspectionToolWrapper getInspectionTool(@NotNull String shortName, @NotNull PsiElement element) {
+        return availableInspectionTools.get(shortName);
       }
 
       @Override
-      public InspectionProfileEntry getToolById(String id, @NotNull PsiElement element) {
-        if (availableInspectionTools.containsKey(id)) {
-          return availableInspectionTools.get(id);
-        }
-        return null;
+      public InspectionToolWrapper getToolById(@NotNull String id, @NotNull PsiElement element) {
+        return availableInspectionTools.get(id);
       }
     };
     final InspectionProfileManager inspectionProfileManager = InspectionProfileManager.getInstance();
@@ -410,14 +411,10 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     catch (Exception e) {
 
     }
-    assertTrue("open: " +
-               getProject().isOpen() +
-               "; disposed:" +
-               getProject().isDisposed() +
-               "; startup passed:" +
-               passed +
-               "; all open projects: " +
-               Arrays.asList(ProjectManager.getInstance().getOpenProjects()), getProject().isInitialized());
+    assertTrue("open: " + getProject().isOpen() +
+               "; disposed:" + getProject().isDisposed() +
+               "; startup passed:" + passed +
+               "; all open projects: " + Arrays.asList(ProjectManager.getInstance().getOpenProjects()), getProject().isInitialized());
 
     CodeStyleSettingsManager.getInstance(getProject()).setTemporarySettings(new CodeStyleSettings());
 
@@ -465,22 +462,15 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     }
   }
 
+  protected void enableInspectionTool(@NotNull InspectionToolWrapper wrapper) {
+    enableInspectionTool(myAvailableInspectionTools, wrapper);
+  }
   protected void enableInspectionTool(@NotNull InspectionProfileEntry tool) {
-    if (tool instanceof InspectionTool) {
-      enableInspectionTool(myAvailableInspectionTools, (InspectionTool)tool);
-    }
-    else if (tool instanceof LocalInspectionTool) {
-      enableInspectionTool(myAvailableInspectionTools, new LocalInspectionToolWrapper((LocalInspectionTool)tool));
-    }
-    else if (tool instanceof GlobalInspectionTool) {
-      enableInspectionTool(myAvailableInspectionTools, new GlobalInspectionToolWrapper((GlobalInspectionTool)tool));
-    }
-    else {
-      throw new IllegalArgumentException("Unexpected inspection type: " + tool);
-    }
+    assert !(tool instanceof InspectionToolWrapper) : tool;
+    enableInspectionTool(myAvailableInspectionTools, InspectionToolRegistrar.wrapTool(tool));
   }
 
-  private static void enableInspectionTool(final Map<String, InspectionTool> availableLocalTools, InspectionTool wrapper) {
+  private static void enableInspectionTool(@NotNull Map<String, InspectionToolWrapper> availableLocalTools, @NotNull InspectionToolWrapper wrapper) {
     final String shortName = wrapper.getShortName();
     final HighlightDisplayKey key = HighlightDisplayKey.find(shortName);
     if (key == null) {
@@ -491,6 +481,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     availableLocalTools.put(shortName, wrapper);
   }
 
+  @NotNull
   protected LocalInspectionTool[] configureLocalInspectionTools() {
     return LocalInspectionTool.EMPTY_ARRAY;
   }
@@ -552,6 +543,8 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
         if (manager instanceof FileDocumentManagerImpl) {
           ((FileDocumentManagerImpl)manager).dropAllUnsavedDocuments();
         }
+
+        ((DirectoryIndexImpl)DirectoryIndex.getInstance(project)).assertAncestorConsistent();
       }
     }.execute().throwException();
 
@@ -590,18 +583,18 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     if (isLight(project)) {
       // mark temporarily as disposed so that rogue component trying to access it will fail
       ((ProjectImpl)project).setTemporarilyDisposed(true);
-      documentManager.clearUncommitedDocuments();
+      documentManager.clearUncommittedDocuments();
     }
   }
 
   public static PsiDocumentManagerImpl clearUncommittedDocuments(@NotNull Project project) {
     PsiDocumentManagerImpl documentManager = (PsiDocumentManagerImpl)PsiDocumentManager.getInstance(project);
-    documentManager.clearUncommitedDocuments();
+    documentManager.clearUncommittedDocuments();
 
     ProjectManagerImpl projectManager = (ProjectManagerImpl)ProjectManager.getInstance();
     if (projectManager.isDefaultProjectInitialized()) {
       Project defaultProject = projectManager.getDefaultProject();
-      ((PsiDocumentManagerImpl)PsiDocumentManager.getInstance(defaultProject)).clearUncommitedDocuments();
+      ((PsiDocumentManagerImpl)PsiDocumentManager.getInstance(defaultProject)).clearUncommittedDocuments();
     }
     return documentManager;
   }
@@ -744,7 +737,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     String name = getName();
     assertTrue("Test name should start with 'test': " + name, name.startsWith("test"));
     name = name.substring("test".length());
-    if (name.length() > 0 && lowercaseFirstLetter && !UsefulTestCase.isAllUppercaseName(name)) {
+    if (!name.isEmpty() && lowercaseFirstLetter && !UsefulTestCase.isAllUppercaseName(name)) {
       name = Character.toLowerCase(name.charAt(0)) + name.substring(1);
     }
     return name;

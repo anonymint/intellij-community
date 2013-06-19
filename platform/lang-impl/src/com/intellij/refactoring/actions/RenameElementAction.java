@@ -25,6 +25,7 @@ import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.SyntheticElement;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.rename.RenameHandlerRegistry;
+import org.jetbrains.annotations.NotNull;
 
 public class RenameElementAction extends BaseRefactoringAction {
 
@@ -32,36 +33,41 @@ public class RenameElementAction extends BaseRefactoringAction {
     setInjectedContext(true);
   }
 
+  @Override
   public boolean isAvailableInEditorOnly() {
     return false;
   }
 
-  public boolean isEnabledOnElements(PsiElement[] elements) {
+  @Override
+  public boolean isEnabledOnElements(@NotNull PsiElement[] elements) {
     if (elements.length != 1) return false;
 
     PsiElement element = elements[0];
     return element instanceof PsiNamedElement && !(element instanceof SyntheticElement);
   }
 
-  public RefactoringActionHandler getHandler(DataContext dataContext) {
+  @Override
+  public RefactoringActionHandler getHandler(@NotNull DataContext dataContext) {
     return RenameHandlerRegistry.getInstance().getRenameHandler(dataContext);
   }
 
   @Override
-  protected boolean hasAvailableHandler(DataContext dataContext) {
+  protected boolean hasAvailableHandler(@NotNull DataContext dataContext) {
     return isEnabledOnDataContext(dataContext);
   }
 
+  @Override
   protected boolean isEnabledOnDataContext(DataContext dataContext) {
     return RenameHandlerRegistry.getInstance().hasAvailableHandler(dataContext);
   }
 
+  @Override
   protected boolean isAvailableForLanguage(Language language) {
     return true;
   }
 
   @Override
-  protected boolean isAvailableOnElementInEditorAndFile(PsiElement element, Editor editor, PsiFile file, DataContext context) {
+  protected boolean isAvailableOnElementInEditorAndFile(@NotNull PsiElement element, @NotNull Editor editor, @NotNull PsiFile file, @NotNull DataContext context) {
     return RenameHandlerRegistry.getInstance().hasAvailableHandler(context);
   }
 }

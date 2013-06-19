@@ -19,7 +19,7 @@
  * User: max
  * Date: Apr 11, 2002
  * Time: 7:51:16 PM
- * To change template for new class use 
+ * To change template for new class use
  * Code Style | Class Templates options (Tools | IDE Options).
  */
 package com.intellij.codeInsight.daemon;
@@ -35,6 +35,7 @@ import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.nio.charset.Charset;
 import java.util.Collection;
@@ -43,6 +44,7 @@ import java.util.List;
 public class LossyEncodingTest extends LightDaemonAnalyzerTestCase {
   @NonNls private static final String BASE_PATH = "/codeInsight/daemonCodeAnalyzer/lossyEncoding";
 
+  @NotNull
   @Override
   protected LocalInspectionTool[] configureLocalInspectionTools() {
     return new LocalInspectionTool[]{new LossyEncodingInspection()};
@@ -50,7 +52,9 @@ public class LossyEncodingTest extends LightDaemonAnalyzerTestCase {
 
   public void testText() throws Exception {
     doTest("Text.txt");
-    EncodingManager.getInstance().setEncoding(myVFile, Charset.forName("US-ASCII"));
+    Charset ascii = CharsetToolkit.forName("US-ASCII");
+    EncodingManager.getInstance().setEncoding(myVFile, ascii);
+    assertEquals(ascii, myVFile.getCharset());
     int start = myEditor.getCaretModel().getOffset();
     type((char)0x445);
     type((char)0x438);
@@ -58,7 +62,7 @@ public class LossyEncodingTest extends LightDaemonAnalyzerTestCase {
 
     Collection<HighlightInfo> infos = doHighlighting();
     HighlightInfo info = assertOneElement(infos);
-    assertEquals("Unsupported characters for the charset 'US-ASCII'", info.description);
+    assertEquals("Unsupported characters for the charset 'US-ASCII'", info.getDescription());
     assertEquals(start, info.startOffset);
     assertEquals(end, info.endOffset);
 
@@ -87,10 +91,10 @@ public class LossyEncodingTest extends LightDaemonAnalyzerTestCase {
     boolean found = false;
 
     for(HighlightInfo info:infos) {
-      if (info.description.equals("Unsupported characters for the charset 'US-ASCII'")) {
+      if (info.getDescription().equals("Unsupported characters for the charset 'US-ASCII'")) {
         found = true;
         break;
-      }                                         
+      }
     }
     assertTrue(found);
   }
@@ -128,6 +132,6 @@ public class LossyEncodingTest extends LightDaemonAnalyzerTestCase {
     doHighlighting();
     List<HighlightInfo> infos = DaemonCodeAnalyzerImpl.getFileLevelHighlights(getProject(), getFile());
     HighlightInfo info = assertOneElement(infos);
-    assertEquals("File was loaded in the wrong encoding: 'UTF-8'", info.description);
+    assertEquals("File was loaded in the wrong encoding: 'UTF-8'", info.getDescription());
   }
 }

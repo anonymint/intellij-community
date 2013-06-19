@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,19 +22,17 @@ import java.awt.event.MouseEvent;
 
 /**
  * Describes a hyperlink inside a debugger node
- *
- * @author nik
  */
 public abstract class XDebuggerTreeNodeHyperlink {
-  private String myLinkText;
+  private final String linkText;
 
   protected XDebuggerTreeNodeHyperlink(@NotNull String linkText) {
-    myLinkText = linkText;
+    this.linkText = linkText;
   }
 
   @NotNull
   public String getLinkText() {
-    return myLinkText;
+    return linkText;
   }
 
   @NotNull

@@ -23,11 +23,12 @@ import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorModificationUtil;
 import com.intellij.openapi.editor.SelectionModel;
-import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.openapi.editor.actionSystem.EditorWriteActionHandler;
+import com.intellij.openapi.editor.actions.CopyAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 
@@ -57,10 +58,11 @@ public class CutHandler extends EditorWriteActionHandler {
       return;
     }
 
-    VisualPosition positionToRestore = null;
     SelectionModel selectionModel = editor.getSelectionModel();
     if (!selectionModel.hasSelection() && !selectionModel.hasBlockSelection()) {
-      positionToRestore = editor.getCaretModel().getVisualPosition();
+      if (Registry.is(CopyAction.SKIP_COPY_AND_CUT_FOR_EMPTY_SELECTION_KEY)) {
+        return;
+      }
       selectionModel.selectLineAtCaret();
       if (!selectionModel.hasSelection()) return;
     }
@@ -71,16 +73,12 @@ public class CutHandler extends EditorWriteActionHandler {
     EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_COPY).execute(editor, dataContext);
 
     if (start != end) {
-      // There is a possible case that 'sticky selection' is active. It's automatically removed on copying then, so, we explictly
+      // There is a possible case that 'sticky selection' is active. It's automatically removed on copying then, so, we explicitly
       // remove the text.
       editor.getDocument().deleteString(start, end);
     }
     else {
       EditorModificationUtil.deleteSelectedText(editor);
-    }
-    
-    if (positionToRestore != null) {
-      editor.getCaretModel().moveToVisualPosition(positionToRestore);
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,6 +67,7 @@ public class TryFinallyCanBeTryWithResourcesInspection extends BaseInspection {
 
     public TryFinallyCanBeTryWithResourcesFix() {}
 
+    @Override
     @NotNull
     public String getName() {
       return InspectionGadgetsBundle.message("try.finally.can.be.try.with.resources.quickfix");
@@ -82,6 +83,10 @@ public class TryFinallyCanBeTryWithResourcesInspection extends BaseInspection {
       final PsiTryStatement tryStatement = (PsiTryStatement)parent;
       final PsiCodeBlock tryBlock = tryStatement.getTryBlock();
       if (tryBlock == null) {
+        return;
+      }
+      final PsiCodeBlock finallyBlock = tryStatement.getFinallyBlock();
+      if (finallyBlock == null) {
         return;
       }
       final PsiElement[] tryBlockChildren = tryBlock.getChildren();
@@ -145,8 +150,6 @@ public class TryFinallyCanBeTryWithResourcesInspection extends BaseInspection {
       for (PsiCatchSection catchSection : catchSections) {
         newTryStatementText.append(catchSection.getText());
       }
-      final PsiCodeBlock finallyBlock = tryStatement.getFinallyBlock();
-      assert finallyBlock != null;
       final PsiElement[] finallyChildren = finallyBlock.getChildren();
       boolean appended = false;
       final int finallyChildrenLength = finallyChildren.length - 1;

@@ -24,6 +24,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.util.AuthData;
+import com.intellij.util.proxy.CommonProxy;
 import git4idea.GitBranch;
 import git4idea.GitUtil;
 import git4idea.GitVcs;
@@ -33,7 +34,6 @@ import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
 import git4idea.update.GitFetchResult;
 import git4idea.update.GitFetcher;
-import git4idea.util.NetrcData;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
@@ -51,15 +51,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.ProxySelector;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Handles remote operations over HTTP via JGit library.
@@ -70,31 +68,11 @@ public final class GitHttpAdapter {
 
   private static final Logger LOG = Logger.getInstance(GitHttpAdapter.class);
 
-  private static final Pattern HTTP_URL_WITH_USERNAME_AND_PASSWORD = Pattern.compile("http(s?)://([^\\s^@:]+):([^\\s^@:]+)@.*");
   private static final String IGNORECASE_SETTING = "ignorecase";
 
   public static boolean shouldUseJGit(@NotNull String url) {
-    if (!url.startsWith("http")) {
-      return false;
-    }
-    // if username & password are specified in the url, give it to the native Git
-    if (HTTP_URL_WITH_USERNAME_AND_PASSWORD.matcher(url).matches()) {
-      return false;
-    }
-
-    try {
-      NetrcData netrcData = NetrcData.parse();
-      return !netrcData.hasAuthDataForUrl(url);
-    }
-    catch (FileNotFoundException e) {
-      return true;
-    }
-    catch (IOException e) {
-      LOG.warn("Couldn't read netrc file", e);
-      return true;
-    }
+    return "jgit".equals(System.getProperty("git.http"));
   }
-
 
   private enum GeneralResult {
     SUCCESS,
@@ -306,14 +284,9 @@ public final class GitHttpAdapter {
    * Cleanups are executed after each incorrect attempt to enter password, and after other retriable actions.
    */
   private static GeneralResult callWithAuthRetry(@NotNull GitHttpRemoteCommand command, @NotNull Project project) throws InvalidRemoteException, IOException, URISyntaxException {
-    ProxySelector defaultProxySelector = ProxySelector.getDefault();
-    if (GitHttpProxySupport.shouldUseProxy()) {
-      ProxySelector.setDefault(GitHttpProxySupport.newProxySelector(defaultProxySelector, command.getUrl()));
-      GitHttpProxySupport.init();
-    }
-
     boolean httpTransportErrorFixTried = false;
     boolean noRemoteWithoutGitErrorFixTried = false;
+
     String url = command.getUrl();
     GitHttpCredentialsProvider provider = command.getCredentialsProvider();
     try {
@@ -386,8 +359,16 @@ public final class GitHttpAdapter {
     }
     finally {
       log(command, project);
-      ProxySelector.setDefault(defaultProxySelector);
     }
+  }
+
+  private static CommonProxy.HostInfo getHostInfo(String url) throws URISyntaxException {
+    final boolean isSecure = url.startsWith("https");
+    final String protocol = isSecure ? "https" : "http";
+    final URI uri = new URI(url);
+    int port = uri.getPort();
+    port = port < 0 ? (isSecure ? 443 : 80) : port;
+    return new CommonProxy.HostInfo(protocol, uri.getHost(), port);
   }
 
   @NotNull

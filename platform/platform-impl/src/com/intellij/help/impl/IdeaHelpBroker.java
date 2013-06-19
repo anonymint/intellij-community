@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,8 @@
 package com.intellij.help.impl;
 
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.openapi.wm.impl.IdeFocusManagerHeadless;
 import com.intellij.ui.AppUIUtil;
-import com.intellij.util.Alarm;
+import com.intellij.ui.ScreenUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.help.*;
@@ -605,8 +604,8 @@ class IdeaHelpBroker extends DefaultHelpBroker implements KeyListener{
   /**
    * Private methods.
    */
-  private int HELP_WIDTH = (int)(Toolkit.getDefaultToolkit().getScreenSize().width * 0.8);
-  private int HELP_HEIGHT = (int)(Toolkit.getDefaultToolkit().getScreenSize().height * 0.8);
+  private int HELP_WIDTH = (int)(ScreenUtil.getMainScreenBounds().width * 0.8);
+  private int HELP_HEIGHT = (int)(ScreenUtil.getMainScreenBounds().height * 0.8);
 
   private synchronized void createJHelp(){
     if(jhelp==null){
@@ -704,7 +703,7 @@ class IdeaHelpBroker extends DefaultHelpBroker implements KeyListener{
       if (myFrame == null) {
         myFrame = new JFrame(helpTitle);
         resize = true;
-        AppUIUtil.updateFrameIcon(myFrame);
+        AppUIUtil.updateWindowIcon(myFrame);
         WindowListener l = new WindowAdapter() {
           public void windowClosing(WindowEvent e) {
             myFrame.setVisible(false);

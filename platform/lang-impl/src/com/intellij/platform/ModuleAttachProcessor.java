@@ -32,6 +32,7 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsDirectoryMapping;
@@ -43,9 +44,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 /**
  * @author yole
@@ -75,7 +74,7 @@ public class ModuleAttachProcessor extends ProjectAttachProcessor {
     final String[] files = projectDir.list();
     if (files != null) {
       for (String file : files) {
-        if (FileUtil.getExtension(file).equals("iml")) {
+        if (FileUtilRt.extensionEquals(file, "iml")) {
           VirtualFile imlFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(projectDir, file));
           if (imlFile != null) {
             attachModule(project, imlFile, callback);
@@ -105,6 +104,7 @@ public class ModuleAttachProcessor extends ProjectAttachProcessor {
         token.finish();
       }
       final Module newModule = ModuleManager.getInstance(project).findModuleByName(module.getName());
+      assert newModule != null;
       final Module primaryModule = addPrimaryModuleDependency(project, newModule);
       if (primaryModule != null) {
         VirtualFile dotIdeaDir = imlFile.getParent();
@@ -158,6 +158,9 @@ public class ModuleAttachProcessor extends ProjectAttachProcessor {
 
   @Nullable
   public static Module getPrimaryModule(Project project) {
+    if (!canAttachToProject()) {
+      return null;
+    }
     for (Module module : ModuleManager.getInstance(project).getModules()) {
       final VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
       for (VirtualFile root : roots) {
@@ -172,15 +175,54 @@ public class ModuleAttachProcessor extends ProjectAttachProcessor {
   public static List<Module> getSortedModules(Project project) {
     List<Module> result = new ArrayList<Module>();
     final Module primaryModule = getPrimaryModule(project);
-    if (primaryModule != null) {
-      result.add(primaryModule);
-    }
     final Module[] modules = ModuleManager.getInstance(project).getModules();
     for (Module module : modules) {
       if (module != primaryModule) {
         result.add(module);
       }
     }
+    Collections.sort(result, new Comparator<Module>() {
+      @Override
+      public int compare(Module module, Module module2) {
+        return module.getName().compareTo(module2.getName());
+      }
+    });
+    if (primaryModule != null) {
+      result.add(0, primaryModule);
+    }
     return result;
   }
+
+  /**
+   * @param project the project
+   * @return null if either multi-projects are not enabled or the project has only one module
+   */
+  @Nullable
+  public static String getMultiProjectDisplayName(@NotNull Project project) {
+    if (!ProjectAttachProcessor.canAttachToProject()) {
+      return null;
+    }
+
+    final Module[] modules = ModuleManager.getInstance(project).getModules();
+    if (modules.length <= 1) {
+      return null;
+    }
+
+    Module primaryModule = getPrimaryModule(project);
+    if (primaryModule == null) {
+      primaryModule = modules [0];
+    }
+    final StringBuilder result = new StringBuilder(primaryModule.getName());
+    result.append(", ");
+    for (Module module : modules) {
+      if (module == primaryModule) continue;
+      result.append(module.getName());
+      break;
+    }
+    if (modules.length > 2) {
+      result.append("...");
+    }
+    return result.toString();
+  }
+
 }

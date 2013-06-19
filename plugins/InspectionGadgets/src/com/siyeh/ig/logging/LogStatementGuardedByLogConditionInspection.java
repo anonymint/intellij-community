@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2012 Bas Leijdekkers
+ * Copyright 2008-2013 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.ui.CheckBox;
 import com.intellij.util.ui.FormBuilder;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
@@ -57,6 +58,9 @@ public class LogStatementGuardedByLogConditionInspection extends BaseInspection 
   final List<String> logMethodNameList = new ArrayList();
   final List<String> logConditionMethodNameList = new ArrayList();
 
+  @SuppressWarnings("PublicField")
+  public boolean flagAllUnguarded = false;
+
   public LogStatementGuardedByLogConditionInspection() {
     parseString(loggerMethodAndconditionMethodNames, logMethodNameList, logConditionMethodNameList);
   }
@@ -84,6 +88,8 @@ public class LogStatementGuardedByLogConditionInspection extends BaseInspection 
                                                                      InspectionGadgetsBundle.message("log.condition.text")));
     panel.add(UiUtils.createAddRemovePanel(table), BorderLayout.CENTER);
     panel.add(FormBuilder.createFormBuilder().addLabeledComponent(classNameLabel, loggerClassNameField).getPanel(), BorderLayout.NORTH);
+    panel.add(new CheckBox(InspectionGadgetsBundle.message("log.statement.guarded.by.log.condition.flag.all.unguarded.option"),
+                           this, "flagAllUnguarded"), BorderLayout.SOUTH);
     return panel;
   }
 
@@ -95,6 +101,7 @@ public class LogStatementGuardedByLogConditionInspection extends BaseInspection 
 
   private class LogStatementGuardedByLogConditionFix extends InspectionGadgetsFix {
 
+    @Override
     @NotNull
     public String getName() {
       return InspectionGadgetsBundle.message("log.statement.guarded.by.log.condition.quickfix");
@@ -215,9 +222,17 @@ public class LogStatementGuardedByLogConditionInspection extends BaseInspection 
       if (arguments.length == 0) {
         return;
       }
-      final PsiExpression firstArgument = arguments[0];
-      if (PsiUtil.isConstantExpression(firstArgument)) {
-        return;
+      if (!flagAllUnguarded) {
+        boolean constant = true;
+        for (PsiExpression argument : arguments) {
+          if (!PsiUtil.isConstantExpression(argument)) {
+            constant = false;
+            break;
+          }
+        }
+        if (constant) {
+          return;
+        }
       }
       registerMethodCallError(expression);
     }
@@ -266,13 +281,13 @@ public class LogStatementGuardedByLogConditionInspection extends BaseInspection 
   }
 
   @Override
-  public void readSettings(Element element) throws InvalidDataException {
+  public void readSettings(@NotNull Element element) throws InvalidDataException {
     super.readSettings(element);
     parseString(loggerMethodAndconditionMethodNames, logMethodNameList, logConditionMethodNameList);
   }
 
   @Override
-  public void writeSettings(Element element) throws WriteExternalException {
+  public void writeSettings(@NotNull Element element) throws WriteExternalException {
     loggerMethodAndconditionMethodNames = formatString(logMethodNameList, logConditionMethodNameList);
     super.writeSettings(element);
   }

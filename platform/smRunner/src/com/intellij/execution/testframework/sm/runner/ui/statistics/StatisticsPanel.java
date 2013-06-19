@@ -32,7 +32,10 @@ import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.DoubleClickListener;
 import com.intellij.ui.PopupHandler;
 import com.intellij.ui.TableUtil;
+import com.intellij.ui.table.BaseTableView;
 import com.intellij.ui.table.TableView;
+import com.intellij.util.config.Storage;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -41,7 +44,6 @@ import javax.swing.*;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -53,9 +55,10 @@ public class StatisticsPanel implements DataProvider {
 
   private TableView<SMTestProxy> myStatisticsTableView;
   private JPanel myContentPane;
+  private final Storage.PropertiesComponentStorage myStorage = new Storage.PropertiesComponentStorage("sm_test_statistics_table_columns");
 
   private final StatisticsTableModel myTableModel;
-  private final List<PropagateSelectionHandler> myPropagateSelectionHandlers = new ArrayList<PropagateSelectionHandler>();
+  private final List<PropagateSelectionHandler> myPropagateSelectionHandlers = ContainerUtil.createLockFreeCopyOnWriteList();
   private final Project myProject;
   private final TestFrameworkRunningModel myFrameworkRunningModel;
 
@@ -136,6 +139,7 @@ public class StatisticsPanel implements DataProvider {
       private void updateAndRestoreSelection() {
         SMRunnerUtil.addToInvokeLater(new Runnable() {
           public void run() {
+            BaseTableView.restore(myStorage, myStatisticsTableView);
             // statisticsTableView can be null in JUnit tests
             final SMTestProxy oldSelection = myStatisticsTableView.getSelectedObject();
 
@@ -215,19 +219,10 @@ public class StatisticsPanel implements DataProvider {
         final int i = myStatisticsTableView.getSelectedRow();
         assert i >= 0; //because something is selected
 
-        // If first line is selected we should go to parent suite
-        if (ColumnTest.TestsCellRenderer.isFirstLine(i)) {
-          final SMTestProxy parentSuite = selectedProxy.getParent();
-          if (parentSuite != null) {
-            // go to parent and current suit in it
-            showInTableAndSelectRow(parentSuite, selectedProxy);
-          }
-        } else {
-          // if selected element is suite - we should expand it
-          if (selectedProxy.isSuite()) {
-            // expand and select first (Total) row
-            showInTableAndSelectRow(selectedProxy, selectedProxy);
-          }
+        // if selected element is suite - we should expand it
+        if (selectedProxy.isSuite()) {
+          // expand and select first (Total) row
+          showInTableAndSelectRow(selectedProxy, selectedProxy);
         }
       }
     };
@@ -305,5 +300,9 @@ public class StatisticsPanel implements DataProvider {
   private void showInTableAndSelectRow(final SMTestProxy suite, final SMTestProxy suiteProxy) {
     selectProxy(suite);
     selectRowOf(suiteProxy);
+  }
+
+  public void doDispose() {
+    BaseTableView.store(myStorage, myStatisticsTableView);
   }
 }

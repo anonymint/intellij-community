@@ -17,9 +17,12 @@
 package com.intellij.testFramework.fixtures.impl;
 
 import com.intellij.codeInspection.LocalInspectionTool;
+import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.idea.IdeaTestApplication;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.impl.DirectoryIndex;
+import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
 import com.intellij.psi.codeStyle.CodeStyleSchemes;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
@@ -27,14 +30,14 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.testFramework.LightPlatformTestCase;
 import com.intellij.testFramework.LightProjectDescriptor;
-import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.testFramework.TestDataProvider;
 import com.intellij.testFramework.fixtures.LightIdeaTestFixture;
+import gnu.trove.THashMap;
 
 /**
  * @author mike
  */
-class LightIdeaTestFixtureImpl extends BaseFixture implements LightIdeaTestFixture {
+public class LightIdeaTestFixtureImpl extends BaseFixture implements LightIdeaTestFixture {
   private final LightProjectDescriptor myProjectDescriptor;
 
   public LightIdeaTestFixtureImpl(LightProjectDescriptor projectDescriptor) {
@@ -46,7 +49,7 @@ class LightIdeaTestFixtureImpl extends BaseFixture implements LightIdeaTestFixtu
     super.setUp();
 
     IdeaTestApplication application = LightPlatformTestCase.initApplication();
-    LightPlatformTestCase.doSetup(myProjectDescriptor, LocalInspectionTool.EMPTY_ARRAY, null);
+    LightPlatformTestCase.doSetup(myProjectDescriptor, LocalInspectionTool.EMPTY_ARRAY, new THashMap<String, InspectionToolWrapper>());
     InjectedLanguageManagerImpl.pushInjectors(getProject());
     storeSettings();
     application.setDataProvider(new TestDataProvider(getProject()));
@@ -57,11 +60,12 @@ class LightIdeaTestFixtureImpl extends BaseFixture implements LightIdeaTestFixtu
     Project project = getProject();
     CodeStyleSettingsManager.getInstance(project).dropTemporarySettings();
     checkForSettingsDamage();
-    PersistentFS.getInstance().clearIdCache();
 
     LightPlatformTestCase.doTearDown(project, LightPlatformTestCase.getApplication(), true);
     super.tearDown();
     InjectedLanguageManagerImpl.checkInjectorsAreDisposed(project);
+    PersistentFS.getInstance().clearIdCache();
+      ((DirectoryIndexImpl)DirectoryIndex.getInstance(project)).assertAncestorConsistent();
   }
 
 

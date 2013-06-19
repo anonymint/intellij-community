@@ -44,7 +44,7 @@ public abstract class PsiElementBaseIntentionAction extends BaseIntentionAction 
   }
 
   /**
-   * Invokes intention action for the element under cursor.
+   * Invokes intention action for the element under caret.
    *
    * @param project the project in which the file is opened.
    * @param editor  the editor for the file.
@@ -56,6 +56,7 @@ public abstract class PsiElementBaseIntentionAction extends BaseIntentionAction 
 
   @Override
   public final boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
+    if (file == null) return false;
     final PsiManager manager = file.getManager();
     if (manager == null) return false;
     if (!manager.isInProject(file)) return false;
@@ -75,7 +76,7 @@ public abstract class PsiElementBaseIntentionAction extends BaseIntentionAction 
   public abstract boolean isAvailable(@NotNull Project project, Editor editor, @NotNull PsiElement element);
 
   @Nullable
-  protected static PsiElement getElement(Editor editor, @NotNull PsiFile file) {
+  private static PsiElement getElement(@NotNull Editor editor, @NotNull PsiFile file) {
     CaretModel caretModel = editor.getCaretModel();
     int position = caretModel.getOffset();
     return file.findElementAt(position);

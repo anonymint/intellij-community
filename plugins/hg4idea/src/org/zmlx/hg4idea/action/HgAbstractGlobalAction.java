@@ -12,18 +12,22 @@
 // limitations under the License.
 package org.zmlx.hg4idea.action;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.vcsUtil.VcsImplUtil;
 import org.jetbrains.annotations.Nullable;
-import org.zmlx.hg4idea.execution.HgCommandException;
+import org.zmlx.hg4idea.HgVcs;
 import org.zmlx.hg4idea.util.HgUtil;
 
 import javax.swing.*;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
+import java.util.List;
 
 abstract class HgAbstractGlobalAction extends AnAction {
   protected HgAbstractGlobalAction(Icon icon) {
@@ -33,7 +37,6 @@ abstract class HgAbstractGlobalAction extends AnAction {
   protected HgAbstractGlobalAction() {
   }
 
-  protected abstract HgGlobalCommandBuilder getHgGlobalCommandBuilder(Project project);
   private static final Logger LOG = Logger.getInstance(HgAbstractGlobalAction.class.getName());
 
   public void actionPerformed(AnActionEvent event) {
@@ -42,49 +45,50 @@ abstract class HgAbstractGlobalAction extends AnAction {
     if (project == null) {
       return;
     }
-
-    HgGlobalCommand command = getHgGlobalCommandBuilder(project).build(HgUtil.getHgRepositories(project));
-    if (command == null) {
-      return;
-    }
-    try {
-      command.execute();
-      HgUtil.markDirectoryDirty(project, command.getRepo());
-    } catch (HgCommandException e) {
-      handleException(project, e);
-    } catch (InvocationTargetException e) {
-      handleException(project, e);
-    } catch (InterruptedException e) {
-      handleException(project, e);
+    VirtualFile file = event.getData(PlatformDataKeys.VIRTUAL_FILE);
+    VirtualFile repo = file != null ? HgUtil.getHgRootOrNull(project, file) : null;
+    List<VirtualFile> repos = HgUtil.getHgRepositories(project);
+    if (!repos.isEmpty()) {
+      execute(project, repos, repo);
     }
   }
 
   @Override
   public void update(AnActionEvent e) {
     super.update(e);
+    boolean enabled = isEnabled(e);
+    e.getPresentation().setEnabled(enabled);
+  }
 
-    Presentation presentation = e.getPresentation();
-    final DataContext dataContext = e.getDataContext();
+  protected abstract void execute(Project project, Collection<VirtualFile> repositories, @Nullable VirtualFile selectedRepo);
 
-    Project project = PlatformDataKeys.PROJECT.getData(dataContext);
-    if (project == null) {
-      presentation.setEnabled(false);
+  public static void handleException(Project project, Exception e) {
+    LOG.info(e);
+    new HgCommandResultNotifier(project).notifyError(null, "Error", e.getMessage());
+  }
+
+  protected void markDirtyAndHandleErrors(Project project, VirtualFile repository) {
+    try {
+      HgUtil.markDirectoryDirty(project, repository);
+    }
+    catch (InvocationTargetException e) {
+      handleException(project, e);
+    }
+    catch (InterruptedException e) {
+      handleException(project, e);
     }
   }
 
-  protected interface HgGlobalCommand {
-    VirtualFile getRepo();
-    void execute() throws HgCommandException;
+  public static boolean isEnabled(AnActionEvent e) {
+    Project project = e.getData(PlatformDataKeys.PROJECT);
+    if (project == null) {
+      return false;
+    }
+    HgVcs vcs = HgVcs.getInstance(project);
+    final VirtualFile[] roots = ProjectLevelVcsManager.getInstance(project).getRootsUnderVcs(vcs);
+    if (roots == null || roots.length == 0) {
+      return false;
+    }
+    return true;
   }
-
-  protected interface HgGlobalCommandBuilder {
-    @Nullable
-    HgGlobalCommand build(Collection<VirtualFile> repos);
-  }
-
-  private static void handleException(Project project, Exception e) {
-    LOG.info(e);
-    VcsImplUtil.showErrorMessage(project, e.getMessage(), "Error");
-  }
-
 }

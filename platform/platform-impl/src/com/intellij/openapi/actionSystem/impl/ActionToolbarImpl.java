@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,12 +37,14 @@ import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.IdRunnable;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.awt.RelativeRectangle;
 import com.intellij.ui.switcher.SwitchTarget;
@@ -70,6 +72,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
       for (Component c : toolbar.getComponents()) {
         if (c instanceof ActionButton) {
           ((ActionButton)c).updateToolTipText();
+          ((ActionButton)c).updateIcon();
         }
       }
     }
@@ -212,7 +215,8 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     ourToolbars.remove(this);
     myActionManager.removeTimerListener(myWeakTimerListener);
     myActionManager.removeTransparentTimerListener(myWeakTimerListener);
-    myKeymapManager.removeWeakListener(myKeymapManagerListener);
+    if (ScreenUtil.isStandardAddRemoveNotify(this))
+      myKeymapManager.removeWeakListener(myKeymapManagerListener);
   }
 
   @Override
@@ -283,20 +287,10 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
         }
       }
       else if (action instanceof CustomComponentAction) {
-        Presentation presentation = myPresentationFactory.getPresentation(action);
-        JComponent customComponent = ((CustomComponentAction)action).createCustomComponent(presentation);
-        if (ActionPlaces.EDITOR_TOOLBAR.equals(myPlace)) {
-          // tweak font & color for editor toolbar to match editor tabs style
-          Color foreground = customComponent.getForeground();
-          customComponent.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
-          if (foreground != null) customComponent.setForeground(ColorUtil.dimmer(foreground));
-        }
-        presentation.putClientProperty(CustomComponentAction.CUSTOM_COMPONENT_PROPERTY, customComponent);
-        add(customComponent);
+        add(getCustomComponent(action));
       }
       else {
-        final ActionButton button = createToolbarButton(action);
-        add(button);
+        add(createToolbarButton(action));
       }
     }
 
@@ -305,6 +299,25 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
       mySecondaryActionsButton.setNoIconsInPopup(true);
       add(mySecondaryActionsButton);
     }
+
+    if (Registry.is("search.everywhere.enabled") && (ActionPlaces.MAIN_TOOLBAR.equals(myPlace) || ActionPlaces.NAVIGATION_BAR.equals(myPlace))) {
+      final JComponent searchEverywhere = getCustomComponent(ActionManager.getInstance().getAction("SearchEverywhere"));
+      searchEverywhere.putClientProperty("SEARCH_EVERYWHERE", Boolean.TRUE);
+      add(searchEverywhere);
+    }
+  }
+
+  private JComponent getCustomComponent(AnAction action) {
+    Presentation presentation = myPresentationFactory.getPresentation(action);
+    JComponent customComponent = ((CustomComponentAction)action).createCustomComponent(presentation);
+    if (ActionPlaces.EDITOR_TOOLBAR.equals(myPlace)) {
+      // tweak font & color for editor toolbar to match editor tabs style
+      Color foreground = customComponent.getForeground();
+      customComponent.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
+      if (foreground != null) customComponent.setForeground(ColorUtil.dimmer(foreground));
+    }
+    presentation.putClientProperty(CustomComponentAction.CUSTOM_COMPONENT_PROPERTY, customComponent);
+    return customComponent;
   }
 
   private boolean isNavBar() {
@@ -698,6 +711,14 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar {
     }
     else {
       throw new IllegalStateException("unknonw layoutPolicy: " + myLayoutPolicy);
+    }
+
+    if (getComponentCount() > 0 && size2Fit.width < Integer.MAX_VALUE) {
+      final Component component = getComponent(getComponentCount() - 1);
+      if (component instanceof JComponent && ((JComponent)component).getClientProperty("SEARCH_EVERYWHERE") == Boolean.TRUE) {
+        final Rectangle rect = bounds.get(bounds.size() - 1);
+        bounds.set(bounds.size() - 1, new Rectangle(size2Fit.width - rect.width - 5, rect.y, rect.width, rect.height));
+      }
     }
   }
 

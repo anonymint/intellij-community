@@ -34,8 +34,10 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.concurrency.FutureResult;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSet;
 import com.intellij.util.containers.Stack;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -64,16 +66,16 @@ public class SearchResults implements DocumentListener {
   public enum Direction {UP, DOWN}
 
 
-  private List<SearchResultsListener> myListeners = new ArrayList<SearchResultsListener>();
+  private final List<SearchResultsListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
-  private @Nullable LiveOccurrence myCursor;
+  private @Nullable FindResult myCursor;
 
-  private List<LiveOccurrence> myOccurrences = new ArrayList<LiveOccurrence>();
+  private List<FindResult> myOccurrences = new ArrayList<FindResult>();
 
-  private Set<RangeMarker> myExcluded = new HashSet<RangeMarker>();
+  private final Set<RangeMarker> myExcluded = new HashSet<RangeMarker>();
 
   private Editor myEditor;
-  private Project myProject;
+  private final Project myProject;
   private FindModel myFindModel;
 
   private int myMatchesLimit = 100;
@@ -86,7 +88,7 @@ public class SearchResults implements DocumentListener {
 
   private int myLastUpdatedStamp = -1;
 
-  private Stack<Pair<FindModel, LiveOccurrence>> myCursorPositions = new Stack<Pair<FindModel, LiveOccurrence>>();
+  private final Stack<Pair<FindModel, FindResult>> myCursorPositions = new Stack<Pair<FindModel, FindResult>>();
 
   public SearchResults(Editor editor, Project project) {
     myEditor = editor;
@@ -114,18 +116,18 @@ public class SearchResults implements DocumentListener {
     return myFindModel;
   }
 
-  public boolean isExcluded(LiveOccurrence occurrence) {
+  public boolean isExcluded(FindResult occurrence) {
     for (RangeMarker rangeMarker : myExcluded) {
-      if (TextRange.areSegmentsEqual(rangeMarker, occurrence.getPrimaryRange())) {
+      if (TextRange.areSegmentsEqual(rangeMarker, occurrence)) {
         return true;
       }
     }
     return false;
   }
 
-  public void exclude(LiveOccurrence occurrence) {
+  public void exclude(FindResult occurrence) {
     boolean include = false;
-    final TextRange r = occurrence.getPrimaryRange();
+    final TextRange r = occurrence;
     for (RangeMarker rangeMarker : myExcluded) {
       if (TextRange.areSegmentsEqual(rangeMarker, r)) {
         myExcluded.remove(rangeMarker);
@@ -150,6 +152,7 @@ public class SearchResults implements DocumentListener {
     void editorChanged(SearchResults sr, Editor oldEditor);
     void cursorMoved(boolean toChangeSelection);
 
+    void updateFinished();
   }
   public void addListener(SearchResultsListener srl) {
     myListeners.add(srl);
@@ -168,11 +171,11 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  public LiveOccurrence getCursor() {
+  public FindResult getCursor() {
     return myCursor;
   }
 
-  public List<LiveOccurrence> getOccurrences() {
+  public List<FindResult> getOccurrences() {
     return myOccurrences;
   }
 
@@ -197,21 +200,13 @@ public class SearchResults implements DocumentListener {
     return myEditor;
   }
 
-  private static void findResultsToOccurrences(ArrayList<FindResult> results, Collection<LiveOccurrence> occurrences) {
-    for (FindResult r : results) {
-      LiveOccurrence occurrence = new LiveOccurrence();
-      occurrence.setPrimaryRange(r);
-      occurrences.add(occurrence);
-    }
-  }
-
   public void clear() {
-    searchCompleted(new ArrayList<LiveOccurrence>(), getEditor(), null, false, null, getStamp());
+    searchCompleted(new ArrayList<FindResult>(), getEditor(), null, false, null, getStamp());
   }
 
   public void updateThreadSafe(final FindModel findModel, final boolean toChangeSelection, @Nullable final TextRange next, final int stamp) {
     if (myDisposed) return;
-    final ArrayList<LiveOccurrence> occurrences = new ArrayList<LiveOccurrence>();
+
     final Editor editor = getEditor();
 
     final ArrayList<FindResult> results = new ArrayList<FindResult>();
@@ -244,17 +239,15 @@ public class SearchResults implements DocumentListener {
             }
           }
 
-          findResultsToOccurrences(results, occurrences);
-
           final Runnable searchCompletedRunnable = new Runnable() {
             @Override
             public void run() {
-              searchCompleted(occurrences, editor, findModel, toChangeSelection, next, stamp);
+              searchCompleted(results, editor, findModel, toChangeSelection, next, stamp);
             }
           };
 
           if (!ApplicationManager.getApplication().isUnitTestMode()) {
-            SwingUtilities.invokeLater(searchCompletedRunnable);
+            UIUtil.invokeLaterIfNeeded(searchCompletedRunnable);
           }
           else {
             searchCompletedRunnable.run();
@@ -301,13 +294,16 @@ public class SearchResults implements DocumentListener {
   private void findInRange(TextRange r, Editor editor, FindModel findModel, ArrayList<FindResult> results) {
     VirtualFile virtualFile = FileDocumentManager.getInstance().getFile(editor.getDocument());
 
+    CharSequence charSequence = editor.getDocument().getCharsSequence();
+
     int offset = r.getStartOffset();
+    int maxOffset = Math.min(r.getEndOffset(), charSequence.length());
+    FindManager findManager = FindManager.getInstance(getProject());
 
     while (true) {
-      FindManager findManager = FindManager.getInstance(getProject());
       FindResult result;
       try {
-        CharSequence bombedCharSequence = StringUtil.newBombedCharSequence(editor.getDocument().getCharsSequence(), 3000);
+        CharSequence bombedCharSequence = StringUtil.newBombedCharSequence(charSequence, 3000);
         result = findManager.findString(bombedCharSequence, offset, findModel, virtualFile);
       } catch(PatternSyntaxException e) {
         result = null;
@@ -316,8 +312,17 @@ public class SearchResults implements DocumentListener {
       }
       if (result == null || !result.isStringFound()) break;
       int newOffset = result.getEndOffset();
-      if (offset == newOffset || result.getEndOffset() > r.getEndOffset()) break;
-      offset = newOffset;
+      if (result.getEndOffset() > maxOffset) break;
+      if (offset == newOffset) {
+        if (offset < maxOffset - 1) {
+          offset++;
+        } else {
+          results.add(result);
+          break;
+        }
+      } else {
+        offset = newOffset;
+      }
       results.add(result);
     }
   }
@@ -327,7 +332,7 @@ public class SearchResults implements DocumentListener {
     myEditor.getDocument().removeDocumentListener(this);
   }
 
-  private void searchCompleted(List<LiveOccurrence> occurrences, Editor editor, @Nullable FindModel findModel,
+  private void searchCompleted(List<FindResult> occurrences, Editor editor, @Nullable FindModel findModel,
                                boolean toChangeSelection, @Nullable TextRange next, int stamp) {
     if (stamp < myLastUpdatedStamp){
       return;
@@ -337,11 +342,11 @@ public class SearchResults implements DocumentListener {
       return;
     }
     myOccurrences = occurrences;
-    final TextRange oldCursorRange = myCursor != null ? myCursor.getPrimaryRange() : null;
-    Collections.sort(myOccurrences, new Comparator<LiveOccurrence>() {
+    final TextRange oldCursorRange = myCursor != null ? myCursor : null;
+    Collections.sort(myOccurrences, new Comparator<FindResult>() {
       @Override
-      public int compare(LiveOccurrence liveOccurrence, LiveOccurrence liveOccurrence1) {
-        return liveOccurrence.getPrimaryRange().getStartOffset() - liveOccurrence1.getPrimaryRange().getStartOffset();
+      public int compare(FindResult findResult, FindResult findResult1) {
+        return findResult.getStartOffset() - findResult1.getStartOffset();
       }
     });
 
@@ -349,8 +354,15 @@ public class SearchResults implements DocumentListener {
     updateCursor(oldCursorRange, next);
     updateExcluded();
     notifyChanged();
-    if (oldCursorRange == null || myCursor == null || !myCursor.getPrimaryRange().equals(oldCursorRange)) {
+    if (oldCursorRange == null || myCursor == null || !myCursor.equals(oldCursorRange)) {
       notifyCursorMoved(toChangeSelection);
+    }
+    dumpIfNeeded();
+  }
+
+  private void dumpIfNeeded() {
+    for (SearchResultsListener listener : myListeners) {
+      listener.updateFinished();
     }
   }
 
@@ -377,7 +389,7 @@ public class SearchResults implements DocumentListener {
             if (justReplaced) {
               nextOccurrence(false, next, false, justReplaced);
             } else {
-              LiveOccurrence afterCaret = oldCursorRange == null ? firstOccurrenceAtOrAfterCaret() : firstOccurrenceAfterCaret();
+              FindResult afterCaret = oldCursorRange == null ? firstOccurrenceAtOrAfterCaret() : firstOccurrenceAfterCaret();
               if (afterCaret != null) {
                 myCursor = afterCaret;
               } else {
@@ -400,9 +412,9 @@ public class SearchResults implements DocumentListener {
 
   private boolean repairCursorFromStack() {
     if (myCursorPositions.size() >= 2) {
-      final Pair<FindModel, LiveOccurrence> oldPosition = myCursorPositions.get(myCursorPositions.size() - 2);
+      final Pair<FindModel, FindResult> oldPosition = myCursorPositions.get(myCursorPositions.size() - 2);
       if (oldPosition.first.equals(myFindModel)) {
-        LiveOccurrence newCursor;
+        FindResult newCursor;
         if ((newCursor = findOccurrenceEqualTo(oldPosition.second)) != null) {
           myCursorPositions.pop();
           myCursor = newCursor;
@@ -414,20 +426,20 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence findOccurrenceEqualTo(LiveOccurrence occurrence) {
-    for (LiveOccurrence liveOccurrence : myOccurrences) {
-      if (liveOccurrence.getPrimaryRange().equals(occurrence.getPrimaryRange())) {
-        return liveOccurrence;
+  private FindResult findOccurrenceEqualTo(FindResult occurrence) {
+    for (FindResult findResult : myOccurrences) {
+      if (findResult.equals(occurrence)) {
+        return findResult;
       }
     }
     return null;
   }
 
   @Nullable
-  private LiveOccurrence firstOccurrenceAtOrAfterCaret() {
+  private FindResult firstOccurrenceAtOrAfterCaret() {
     int offset = getEditor().getCaretModel().getOffset();
-    for (LiveOccurrence occurrence : myOccurrences) {
-      if (offset <= occurrence.getPrimaryRange().getEndOffset() && offset >= occurrence.getPrimaryRange().getStartOffset()) {
+    for (FindResult occurrence : myOccurrences) {
+      if (offset <= occurrence.getEndOffset() && offset >= occurrence.getStartOffset()) {
         return occurrence;
       }
     }
@@ -448,18 +460,18 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence firstVisibleOccurrence() {
+  private FindResult firstVisibleOccurrence() {
     int offset = Integer.MAX_VALUE;
-    LiveOccurrence firstOccurrence = null;
-    LiveOccurrence firstVisibleOccurrence = null;
-    for (LiveOccurrence o : getOccurrences()) {
-      if (insideVisibleArea(myEditor, o.getPrimaryRange())) {
-        if (firstVisibleOccurrence == null || o.getPrimaryRange().getStartOffset() < firstVisibleOccurrence.getPrimaryRange().getStartOffset()) {
+    FindResult firstOccurrence = null;
+    FindResult firstVisibleOccurrence = null;
+    for (FindResult o : getOccurrences()) {
+      if (insideVisibleArea(myEditor, o)) {
+        if (firstVisibleOccurrence == null || o.getStartOffset() < firstVisibleOccurrence.getStartOffset()) {
           firstVisibleOccurrence = o;
         }
       }
-      if (o.getPrimaryRange().getStartOffset() < offset) {
-        offset = o.getPrimaryRange().getStartOffset();
+      if (o.getStartOffset() < offset) {
+        offset = o.getStartOffset();
         firstOccurrence = o;
       }
     }
@@ -467,15 +479,15 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence firstOccurrenceBeforeCaret() {
+  private FindResult firstOccurrenceBeforeCaret() {
     int offset = getEditor().getCaretModel().getOffset();
     return firstOccurrenceBeforeOffset(offset);
   }
 
   @Nullable
-  private LiveOccurrence firstOccurrenceBeforeOffset(int offset) {
+  private FindResult firstOccurrenceBeforeOffset(int offset) {
     for (int i = getOccurrences().size()-1; i >= 0; --i) {
-      if (getOccurrences().get(i).getPrimaryRange().getEndOffset() < offset) {
+      if (getOccurrences().get(i).getEndOffset() < offset) {
         return getOccurrences().get(i);
       }
     }
@@ -483,17 +495,17 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence firstOccurrenceAfterCaret() {
+  private FindResult firstOccurrenceAfterCaret() {
     int caret = myEditor.getCaretModel().getOffset();
     return firstOccurrenceAfterOffset(caret);
   }
 
   @Nullable
-  private LiveOccurrence firstOccurrenceAfterOffset(int offset) {
-    LiveOccurrence afterCaret = null;
-    for (LiveOccurrence occurrence : getOccurrences()) {
-      if (occurrence.getPrimaryRange().getStartOffset() >= offset) {
-        if (afterCaret == null || occurrence.getPrimaryRange().getStartOffset() < afterCaret.getPrimaryRange().getStartOffset() ) {
+  private FindResult firstOccurrenceAfterOffset(int offset) {
+    FindResult afterCaret = null;
+    for (FindResult occurrence : getOccurrences()) {
+      if (occurrence.getStartOffset() >= offset && occurrence.getEndOffset() > offset) {
+        if (afterCaret == null || occurrence.getStartOffset() < afterCaret.getStartOffset() ) {
           afterCaret = occurrence;
         }
       }
@@ -503,12 +515,12 @@ public class SearchResults implements DocumentListener {
 
   private boolean tryToRepairOldCursor(@Nullable TextRange oldCursorRange) {
     if (oldCursorRange == null) return false;
-    LiveOccurrence mayBeOldCursor = null;
-    for (LiveOccurrence searchResult : getOccurrences()) {
-      if (searchResult.getPrimaryRange().intersects(oldCursorRange)) {
+    FindResult mayBeOldCursor = null;
+    for (FindResult searchResult : getOccurrences()) {
+      if (searchResult.intersects(oldCursorRange)) {
         mayBeOldCursor = searchResult;
       }
-      if (searchResult.getPrimaryRange().getStartOffset() == oldCursorRange.getStartOffset()) {
+      if (searchResult.getStartOffset() == oldCursorRange.getStartOffset()) {
         break;
       }
     }
@@ -520,10 +532,10 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence prevOccurrence(TextRange range) {
+  private FindResult prevOccurrence(TextRange range) {
     for (int i = getOccurrences().size() - 1; i >= 0; --i) {
-      final LiveOccurrence occurrence = getOccurrences().get(i);
-      if (occurrence.getPrimaryRange().getEndOffset() <= range.getStartOffset())  {
+      final FindResult occurrence = getOccurrences().get(i);
+      if (occurrence.getEndOffset() <= range.getStartOffset())  {
           return occurrence;
       }
     }
@@ -531,9 +543,9 @@ public class SearchResults implements DocumentListener {
   }
 
   @Nullable
-  private LiveOccurrence nextOccurrence(TextRange range) {
-    for (LiveOccurrence occurrence : getOccurrences()) {
-      if (occurrence.getPrimaryRange().getStartOffset() >= range.getEndOffset()) {
+  private FindResult nextOccurrence(TextRange range) {
+    for (FindResult occurrence : getOccurrences()) {
+      if (occurrence.getStartOffset() >= range.getEndOffset()) {
         return occurrence;
       }
     }
@@ -541,7 +553,7 @@ public class SearchResults implements DocumentListener {
   }
 
   public void prevOccurrence() {
-    LiveOccurrence next = null;
+    FindResult next = null;
     if (myFindModel == null) return;
     boolean processFromTheBeginning = false;
     if (myNotFoundState) {
@@ -550,7 +562,7 @@ public class SearchResults implements DocumentListener {
     }
     if (!myFindModel.isGlobal()) {
       if (myCursor != null) {
-        next = prevOccurrence(myCursor.getPrimaryRange());
+        next = prevOccurrence(myCursor);
       }
     } else {
       next = firstOccurrenceBeforeCaret();
@@ -570,17 +582,17 @@ public class SearchResults implements DocumentListener {
   }
 
   private void push() {
-    myCursorPositions.push(new Pair<FindModel, LiveOccurrence>(myFindModel, myCursor));
+    myCursorPositions.push(new Pair<FindModel, FindResult>(myFindModel, myCursor));
   }
 
   public void nextOccurrence() {
     if (myFindModel == null) return;
-    nextOccurrence(false, myCursor != null ? myCursor.getPrimaryRange() : null, true, false);
+    nextOccurrence(false, myCursor != null ? myCursor : null, true, false);
     push();
   }
 
   private void nextOccurrence(boolean processFromTheBeginning, TextRange cursor, boolean toNotify, boolean justReplaced) {
-    LiveOccurrence next;
+    FindResult next;
     if (myNotFoundState) {
       myNotFoundState = false;
       processFromTheBeginning = true;
@@ -606,7 +618,7 @@ public class SearchResults implements DocumentListener {
     }
   }
 
-  public void moveCursorTo(LiveOccurrence next) {
+  public void moveCursorTo(FindResult next) {
     if (next != null) {
       myCursor = next;
       notifyCursorMoved(true);

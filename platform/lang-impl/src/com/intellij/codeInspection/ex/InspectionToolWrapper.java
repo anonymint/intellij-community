@@ -16,15 +16,16 @@
 package com.intellij.codeInspection.ex;
 
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
-import com.intellij.codeInspection.CustomSuppressableInspectionTool;
-import com.intellij.codeInspection.InspectionEP;
-import com.intellij.codeInspection.InspectionProfileEntry;
-import com.intellij.codeInspection.SuppressIntentionAction;
+import com.intellij.codeInspection.*;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.util.Function;
+import com.intellij.util.ResourceUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,30 +38,34 @@ import java.net.URL;
  *         Date: 9/28/11
  */
 public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E extends InspectionEP> extends DescriptorProviderInspection {
+  private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.ex.InspectionToolWrapper");
+
   protected T myTool;
   protected final E myEP;
 
-  protected InspectionToolWrapper(E ep) {
-    myTool = null;
-    myEP = ep;
+  protected InspectionToolWrapper(@NotNull E ep) {
+    this(null, ep);
   }
 
-  protected InspectionToolWrapper(T tool) {
-    myTool = tool;
-    myEP = null;
+  protected InspectionToolWrapper(@NotNull T tool) {
+    this(tool, null);
   }
 
   protected InspectionToolWrapper(@Nullable T tool, @Nullable E ep) {
+    assert tool != null || ep != null : "must not be both null";
     myEP = ep;
     myTool = tool;
   }
 
   /** Copy ctor */
-  protected InspectionToolWrapper(InspectionToolWrapper<T, E> other) {
+  protected InspectionToolWrapper(@NotNull InspectionToolWrapper<T, E> other) {
     myEP = other.myEP;
-    myTool = other.myTool;
+    // we need to create a copy for buffering
+    //noinspection unchecked
+    myTool = other.myTool == null ? null : (T)InspectionToolRegistrar.instantiateTool(other.myTool.getClass());
   }
 
+  @NotNull
   public abstract InspectionToolWrapper<T, E> createCopy();
 
   @NotNull
@@ -69,12 +74,7 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
       //noinspection unchecked
       myTool = (T)myEP.instantiateTool();
       if (!myTool.getShortName().equals(myEP.getShortName())) {
-        LOG.error("Short name not matched for " +
-                  myTool.getClass() +
-                  ": getShortName() = " +
-                  myTool.getShortName() +
-                  "; ep.shortName = " +
-                  myEP.getShortName());
+        LOG.error("Short name not matched for " + myTool.getClass() + ": getShortName() = " + myTool.getShortName() + "; ep.shortName = " + myEP.getShortName());
       }
     }
     return myTool;
@@ -94,14 +94,14 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
     return myEP != null && myEP.applyToDialects;
   }
 
-  @NotNull
   @Override
+  @NotNull
   public String getShortName() {
     return myEP != null ? myEP.getShortName() : getTool().getShortName();
   }
 
-  @NotNull
   @Override
+  @NotNull
   public String getDisplayName() {
     if (myEP == null) {
       return getTool().getDisplayName();
@@ -112,8 +112,8 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
     }
   }
 
-  @NotNull
   @Override
+  @NotNull
   public String getGroupDisplayName() {
     if (myEP == null) {
       return getTool().getGroupDisplayName();
@@ -129,14 +129,14 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
     return myEP == null ? getTool().isEnabledByDefault() : myEP.enabledByDefault;
   }
 
-  @NotNull
   @Override
+  @NotNull
   public HighlightDisplayLevel getDefaultLevel() {
     return myEP == null ? getTool().getDefaultLevel() : myEP.getDefaultLevel();
   }
 
-  @NotNull
   @Override
+  @NotNull
   public String[] getGroupPath() {
     if (myEP == null) {
       return getTool().getGroupPath();
@@ -148,12 +148,12 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
   }
 
   @Override
-  public void readSettings(Element element) throws InvalidDataException {
+  public void readSettings(@NotNull Element element) throws InvalidDataException {
     getTool().readSettings(element);
   }
 
   @Override
-  public void writeSettings(Element element) throws WriteExternalException {
+  public void writeSettings(@NotNull Element element) throws WriteExternalException {
     getTool().writeSettings(element);
   }
 
@@ -185,19 +185,38 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
   protected URL getDescriptionUrl() {
     Application app = ApplicationManager.getApplication();
     if (myEP == null || app.isUnitTestMode() || app.isHeadlessEnvironment()) {
-      return super.getDescriptionUrl();
+      return superGetDescriptionUrl();
     }
     String fileName = getDescriptionFileName();
-    if (fileName == null) return null;
     return myEP.getLoaderForClass().getResource("/inspectionDescriptions/" + fileName);
   }
 
+  @Nullable
+  protected URL superGetDescriptionUrl() {
+    final String fileName = getDescriptionFileName();
+    return ResourceUtil.getResource(getDescriptionContextClass(), "/inspectionDescriptions", fileName);
+  }
+
+  //public String getDescriptionFileName() {
+  //  return getShortName() + ".html";
+  //}
+
   @Override
   public SuppressIntentionAction[] getSuppressActions() {
-    if (getTool() instanceof CustomSuppressableInspectionTool) {
-      return ((CustomSuppressableInspectionTool)getTool()).getSuppressActions(null);
+    T tool = getTool();
+    if (tool instanceof CustomSuppressableInspectionTool) {
+      return ((CustomSuppressableInspectionTool)tool).getSuppressActions(null);
     }
-    return super.getSuppressActions();
+    if (tool instanceof BatchSuppressableTool) {
+      LocalQuickFix[] actions = ((BatchSuppressableTool)tool).getBatchSuppressActions(null);
+      return ContainerUtil.map2Array(actions, SuppressIntentionAction.class, new Function<LocalQuickFix, SuppressIntentionAction>() {
+        @Override
+        public SuppressIntentionAction fun(final LocalQuickFix fix) {
+          return InspectionManagerEx.convertBatchToSuppressIntentionAction((SuppressQuickFix)fix);
+        }
+      });
+    }
+    return null;
   }
 
   @Override
@@ -217,5 +236,10 @@ public abstract class InspectionToolWrapper<T extends InspectionProfileEntry, E 
   @Override
   public String toString() {
     return getShortName();
+  }
+
+  @Override
+  public void cleanup() {
+    getTool().cleanup();
   }
 }

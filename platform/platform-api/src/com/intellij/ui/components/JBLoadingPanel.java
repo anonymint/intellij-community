@@ -19,6 +19,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.ui.LoadingDecorator;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.components.panels.NonOpaquePanel;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.AsyncProcessIcon;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -26,7 +27,6 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.ArrayList;
 import java.util.Collection;
 
 /**
@@ -35,12 +35,16 @@ import java.util.Collection;
 public class JBLoadingPanel extends JPanel {
   private final JPanel myPanel;
   final LoadingDecorator myDecorator;
-  private Collection<JBLoadingPanelListener> myListeners = new ArrayList<JBLoadingPanelListener>();
+  private final Collection<JBLoadingPanelListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   public JBLoadingPanel(@Nullable LayoutManager manager, @NotNull Disposable parent) {
+    this(manager, parent, -1);
+  }
+
+  public JBLoadingPanel(@Nullable LayoutManager manager, @NotNull Disposable parent, int startDelayMs) {
     super(new BorderLayout());
     myPanel = manager == null ? new JPanel() : new JPanel(manager);
-    myDecorator = new LoadingDecorator(myPanel, parent, -1) {
+    myDecorator = new LoadingDecorator(myPanel, parent, startDelayMs) {
       @Override
       protected NonOpaquePanel customizeLoadingLayer(JPanel parent, JLabel text, AsyncProcessIcon icon) {
         final NonOpaquePanel panel = super.customizeLoadingLayer(parent, text, icon);

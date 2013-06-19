@@ -23,6 +23,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,7 +39,7 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
 
   public CreateClassFromUsageBaseFix(CreateClassKind kind, final PsiJavaCodeReferenceElement refElement) {
     myKind = kind;
-    myRefElement = SmartPointerManager.getInstance(refElement.getProject()).createLazyPointer(refElement);
+    myRefElement = SmartPointerManager.getInstance(refElement.getProject()).createSmartPsiElementPointer(refElement);
   }
 
   protected abstract String getText(String varName);
@@ -113,6 +114,12 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
     PsiElement parent = element.getParent();
     if (parent instanceof PsiExpression && !(parent instanceof PsiReferenceExpression)) return false;
     if (!isAvailableInContext(element)) return false;
+    final String superClassName = getSuperClassName(element);
+    if (superClassName != null) {
+      if (superClassName.equals(CommonClassNames.JAVA_LANG_ENUM) && myKind != CreateClassKind.ENUM) return false;
+      final PsiClass psiClass = JavaPsiFacade.getInstance(project).findClass(superClassName, GlobalSearchScope.allScope(project));
+      if (psiClass != null && psiClass.hasModifierProperty(PsiModifier.FINAL)) return false;
+    }
     final int offset = editor.getCaretModel().getOffset();
     if (CreateFromUsageUtils.shouldShowTag(offset, nameElement, element)) {
       setText(getText(nameElement.getText()));
@@ -134,12 +141,13 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
   }
 
   @Nullable
-  protected static String getSuperClassName(final PsiJavaCodeReferenceElement element) {
+  protected String getSuperClassName(final PsiJavaCodeReferenceElement element) {
     String superClassName = null;
-    final PsiElement ggParent = element.getParent().getParent();
+    PsiElement parent = element.getParent();
+    final PsiElement ggParent = parent.getParent();
     if (ggParent instanceof PsiMethod) {
       PsiMethod method = (PsiMethod)ggParent;
-      if (method.getThrowsList() == element.getParent()) {
+      if (method.getThrowsList() == parent) {
         superClassName = "java.lang.Exception";
       }
     } else if (ggParent instanceof PsiClassObjectAccessExpression) {
@@ -148,7 +156,8 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
         final PsiClassType.ClassResolveResult classResolveResult = PsiUtil.resolveGenericsClassInType(expectedTypes[0].getType());
         final PsiClass psiClass = classResolveResult.getElement();
         if (psiClass != null && CommonClassNames.JAVA_LANG_CLASS.equals(psiClass.getQualifiedName())) {
-          PsiType psiType = classResolveResult.getSubstitutor().substitute(psiClass.getTypeParameters()[0]);
+          final PsiTypeParameter[] typeParameters = psiClass.getTypeParameters();
+          PsiType psiType = typeParameters.length == 1 ? classResolveResult.getSubstitutor().substitute(typeParameters[0]) : null;
           if (psiType instanceof PsiWildcardType && ((PsiWildcardType)psiType).isExtends()) {
             psiType = ((PsiWildcardType)psiType).getExtendsBound();
           }
@@ -156,6 +165,16 @@ public abstract class CreateClassFromUsageBaseFix extends BaseIntentionAction {
           if (aClass != null) return aClass.getQualifiedName();
         }
       }
+    } else if (ggParent instanceof PsiExpressionList && parent instanceof PsiExpression && myKind == CreateClassKind.ENUM) {
+      final ExpectedTypeInfo[] expectedTypes = ExpectedTypesProvider.getExpectedTypes((PsiExpression)parent, false);
+      if (expectedTypes.length == 1) {
+        final PsiClassType.ClassResolveResult classResolveResult = PsiUtil.resolveGenericsClassInType(expectedTypes[0].getType());
+        final PsiClass psiClass = classResolveResult.getElement();
+        if (psiClass != null && psiClass.isInterface()) {
+          return psiClass.getQualifiedName();
+        }
+      }
+      return null;
     }
 
     return superClassName;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@
 package com.intellij.codeInsight.editorActions;
 
 import com.intellij.codeInsight.CodeInsightSettings;
+import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.EditorModificationUtil;
+import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.FileType;
@@ -35,30 +37,43 @@ public class SelectionQuotingTypedHandler extends TypedHandlerDelegate {
   public static final ExtensionPointName<DequotingFilter> EP_NAME =
     ExtensionPointName.create("com.intellij.selectionDequotingFilter");
   private TextRange myReplacedTextRange;
+  private boolean myRestoreStickySelection;
+  private boolean myLtrSelection;
 
   @Override
   public Result checkAutoPopup(char c, Project project, Editor editor, PsiFile psiFile) {
     // TODO[oleg] provide adequate API not to use this hack
     // beforeCharTyped always works with removed selection
-    if(CodeInsightSettings.getInstance().SURROUND_SELECTION_ON_QUOTE_TYPED &&  editor.getSelectionModel().hasSelection() && isDelimiter(c)) {
-      String selectedText = editor.getSelectionModel().getSelectedText();
+    SelectionModel selectionModel = editor.getSelectionModel();
+    if(CodeInsightSettings.getInstance().SURROUND_SELECTION_ON_QUOTE_TYPED &&  selectionModel.hasSelection() && isDelimiter(c)) {
+      String selectedText = selectionModel.getSelectedText();
       if (selectedText.length() < 1) {
         return super.checkAutoPopup(c, project, editor, psiFile);
       }
+      
+      final int selectionStart = selectionModel.getSelectionStart();
+      final int selectionEnd = selectionModel.getSelectionEnd();
       if (selectedText.length() > 1) {
         final char firstChar = selectedText.charAt(0);
-        if (isSimilarDelimiters(firstChar, c) &&
-            selectedText.charAt(selectedText.length() - 1) == getMatchingDelimiter(firstChar) &&
-            (isQuote(firstChar) || firstChar != c) &&
-            !shouldSkipReplacementOfQuotesOrBraces(psiFile, editor, selectedText, c)
-          ) {
+        final char lastChar = selectedText.charAt(selectedText.length() - 1);
+        if (isSimilarDelimiters(firstChar, c) && lastChar == getMatchingDelimiter(firstChar) &&
+            (isQuote(firstChar) || firstChar != c) && !shouldSkipReplacementOfQuotesOrBraces(psiFile, editor, selectedText, c) &&
+            selectedText.indexOf(lastChar, 1) == selectedText.length() - 1) {
           selectedText = selectedText.substring(1, selectedText.length() - 1);
         }
       }
-      final int caretOffset = editor.getSelectionModel().getSelectionStart();
+      final int caretOffset = selectionModel.getSelectionStart();
       final char c2 = getMatchingDelimiter(c);
       final String newText = String.valueOf(c) + selectedText + c2;
-      EditorModificationUtil.insertStringAtCaret(editor, newText);
+      myLtrSelection = selectionModel.getLeadSelectionOffset() != selectionModel.getSelectionEnd();
+      if (editor instanceof EditorEx) {
+        myRestoreStickySelection = ((EditorEx)editor).isStickySelection();
+      }
+      else {
+        myRestoreStickySelection = false;
+      }
+      selectionModel.removeSelection();
+      editor.getDocument().replaceString(selectionStart, selectionEnd, newText);
       if (Registry.is("editor.smarterSelectionQuoting")) {
         myReplacedTextRange = new TextRange(caretOffset + 1, caretOffset + newText.length() - 1);
       } else {
@@ -106,9 +121,23 @@ public class SelectionQuotingTypedHandler extends TypedHandlerDelegate {
     // TODO[oleg] remove this hack when API changes
     if (myReplacedTextRange != null) {
       if (myReplacedTextRange.getEndOffset() <= editor.getDocument().getTextLength()) {
-        editor.getSelectionModel().setSelection(myReplacedTextRange.getStartOffset(), myReplacedTextRange.getEndOffset());
-        if (Registry.is("editor.smarterSelectionQuoting")) {
-          editor.getCaretModel().moveToOffset(myReplacedTextRange.getEndOffset());
+        if (myRestoreStickySelection && editor instanceof EditorEx) {
+          EditorEx editorEx = (EditorEx)editor;
+          CaretModel caretModel = editorEx.getCaretModel();
+          caretModel.moveToOffset(myLtrSelection ? myReplacedTextRange.getStartOffset() : myReplacedTextRange.getEndOffset());
+          editorEx.setStickySelection(true);
+          caretModel.moveToOffset(myLtrSelection ? myReplacedTextRange.getEndOffset() : myReplacedTextRange.getStartOffset());
+        }
+        else {
+          if (myLtrSelection) {
+            editor.getSelectionModel().setSelection(myReplacedTextRange.getStartOffset(), myReplacedTextRange.getEndOffset());
+          }
+          else {
+            editor.getSelectionModel().setSelection(myReplacedTextRange.getEndOffset(), myReplacedTextRange.getStartOffset());
+          }
+          if (Registry.is("editor.smarterSelectionQuoting")) {
+            editor.getCaretModel().moveToOffset(myLtrSelection ? myReplacedTextRange.getEndOffset() : myReplacedTextRange.getStartOffset());
+          }
         }
       }
       myReplacedTextRange = null;

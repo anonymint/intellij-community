@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.intellij.openapi.fileChooser.ex;
 import com.intellij.openapi.fileChooser.FileElement;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
@@ -30,17 +30,21 @@ import java.util.List;
 import java.util.Set;
 
 public class RootFileElement extends FileElement {
-  private final VirtualFile[] myFiles;
+  private VirtualFile[] myFiles;
   private Object[] myChildren;
 
-  public RootFileElement(@NotNull final VirtualFile[] files, final String name, final boolean showFileSystemRoots) {
+  public RootFileElement(@NotNull VirtualFile[] files, String name, boolean showFileSystemRoots) {
     super(files.length == 1 ? files[0] : null, name);
-    myFiles = files.length == 0 && showFileSystemRoots ? getFileSystemRoots() : files;
+    myFiles = files.length == 0 && showFileSystemRoots ? null : files;
   }
 
   public Object[] getChildren() {
     if (myChildren == null) {
-      final List<FileElement> children = new ArrayList<FileElement>();
+      if (myFiles == null) {
+        myFiles = getFileSystemRoots();
+      }
+
+      List<FileElement> children = new ArrayList<FileElement>();
       for (final VirtualFile file : myFiles) {
         if (file != null) {
           children.add(new FileElement(file, file.getPresentableUrl()));
@@ -64,6 +68,6 @@ public class RootFileElement extends FileElement {
         }
       }
     }
-    return VfsUtil.toVirtualFileArray(roots);
+    return VfsUtilCore.toVirtualFileArray(roots);
   }
 }

@@ -27,8 +27,6 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.DumbAware;
-import com.intellij.openapi.project.DumbService;
-import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
@@ -41,6 +39,7 @@ import java.util.Set;
 
 public class GotoTypeDeclarationAction extends BaseCodeInsightAction implements CodeInsightActionHandler, DumbAware {
 
+  @NotNull
   @Override
   protected CodeInsightActionHandler getHandler(){
     return this;
@@ -66,24 +65,19 @@ public class GotoTypeDeclarationAction extends BaseCodeInsightAction implements 
     PsiDocumentManager.getInstance(project).commitAllDocuments();
 
     int offset = editor.getCaretModel().getOffset();
-    try {
-      PsiElement[] symbolTypes = findSymbolTypes(editor, offset);
-      if (symbolTypes == null || symbolTypes.length == 0) return;
-      if (symbolTypes.length == 1) {
-        navigate(project, symbolTypes[0]);
-      }
-      else {
-        NavigationUtil.getPsiElementPopup(symbolTypes, CodeInsightBundle.message("choose.type.popup.title")).showInBestPositionFor(editor);
-      }
+    PsiElement[] symbolTypes = findSymbolTypes(editor, offset);
+    if (symbolTypes == null || symbolTypes.length == 0) return;
+    if (symbolTypes.length == 1) {
+      navigate(project, symbolTypes[0]);
     }
-    catch (IndexNotReadyException e) {
-      DumbService.getInstance(project).showDumbModeNotification("Type information is not available during index update");
+    else {
+      NavigationUtil.getPsiElementPopup(symbolTypes, CodeInsightBundle.message("choose.type.popup.title")).showInBestPositionFor(editor);
     }
   }
 
   private static void navigate(@NotNull Project project, @NotNull PsiElement symbolType) {
     PsiElement element = symbolType.getNavigationElement();
-    assert element != null;
+    assert element != null : "SymbolType :"+symbolType+"; file: "+symbolType.getContainingFile();
     VirtualFile file = element.getContainingFile().getVirtualFile();
     if (file != null) {
       OpenFileDescriptor descriptor = new OpenFileDescriptor(project, file, element.getTextOffset());

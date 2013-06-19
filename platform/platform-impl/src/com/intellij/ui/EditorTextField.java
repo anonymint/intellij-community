@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,10 +38,13 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.wm.ex.AbstractDelegatingToRootTraversalPolicy;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.util.IJSwingUtilities;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.MacUIUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -69,7 +72,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
   private EditorEx myEditor = null;
   private Component myNextFocusable = null;
   private boolean myWholeTextSelected = false;
-  private final List<DocumentListener> myDocumentListeners = new ArrayList<DocumentListener>();
+  private final List<DocumentListener> myDocumentListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private boolean myIsListenerInstalled = false;
   private boolean myIsViewer;
   private boolean myIsSupplementary;
@@ -127,14 +130,12 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
       }
     });
 
-    pleaseHandleShiftTab();
+    setFocusTraversalPolicyProvider(true);
+    DelegatingToRootTraversalPolicy policy =
+      SystemInfo.isJavaVersionAtLeast("1.7") ? new Jdk7DelegatingToRootTraversalPolicy() : new DelegatingToRootTraversalPolicy();
+    setFocusTraversalPolicy(policy);
 
     setFont(UIManager.getFont("TextField.font"));
-  }
-
-  private void pleaseHandleShiftTab() {
-    setFocusTraversalPolicyProvider(true);
-    setFocusTraversalPolicy(new DelegatingToRootTraversalPolicy());
   }
 
   public void setSupplementary(boolean supplementary) {
@@ -472,6 +473,7 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     settings.setAdditionalLinesCount(0);
     settings.setAdditionalColumnsCount(1);
     settings.setRightMarginShown(false);
+    settings.setRightMargin(-1);
     settings.setFoldingOutlineShown(false);
     settings.setLineNumbersShown(false);
     settings.setLineMarkerAreaShown(false);
@@ -613,6 +615,9 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     if (UIUtil.getParentOfType(CellRendererPane.class, this) != null && UIUtil.isUnderDarcula()) {
       return getParent().getBackground();
     }
+
+    if (UIUtil.isUnderDarcula()) return UIUtil.getTextFieldBackground();
+
     return enabled
            ? colorsScheme.getDefaultBackground()
            : UIUtil.getInactiveTextFieldBackgroundColor();
@@ -791,31 +796,44 @@ public class EditorTextField extends NonOpaquePanel implements DocumentListener,
     return mySettingsProviders.remove(provider);
   }
 
-  private static class DelegatingToRootTraversalPolicy extends FocusTraversalPolicy {
+  private static class Jdk7DelegatingToRootTraversalPolicy extends DelegatingToRootTraversalPolicy {
+    private boolean invokedFromBeforeOrAfter;
     @Override
-    public Component getComponentAfter(final Container aContainer, final Component aComponent) {
-      final Container cycleRootAncestor = aContainer.getFocusCycleRootAncestor();
-      return cycleRootAncestor.getFocusTraversalPolicy().getComponentAfter(cycleRootAncestor, aContainer);
+    public Component getFirstComponent(Container aContainer) {
+      return getDefaultComponent(aContainer);
     }
 
     @Override
-    public Component getComponentBefore(final Container aContainer, final Component aComponent) {
-      final Container cycleRootAncestor = aContainer.getFocusCycleRootAncestor();
-      return cycleRootAncestor.getFocusTraversalPolicy().getComponentBefore(cycleRootAncestor, aContainer);
+    public Component getLastComponent(Container aContainer) {
+      return getDefaultComponent(aContainer);
     }
 
     @Override
-    public Component getFirstComponent(final Container aContainer) {
-      final Container cycleRootAncestor = aContainer.getFocusCycleRootAncestor();
-      return cycleRootAncestor.getFocusTraversalPolicy().getFirstComponent(cycleRootAncestor);
+    public Component getComponentAfter(Container aContainer, Component aComponent) {
+      invokedFromBeforeOrAfter = true;
+      Component after;
+      try {
+        after = super.getComponentAfter(aContainer, aComponent);
+      } finally {
+        invokedFromBeforeOrAfter = false;
+      }
+      return after != aComponent? after: null;  // escape our container
     }
 
     @Override
-    public Component getLastComponent(final Container aContainer) {
-      final Container cycleRootAncestor = aContainer.getFocusCycleRootAncestor();
-      return cycleRootAncestor.getFocusTraversalPolicy().getLastComponent(cycleRootAncestor);
+    public Component getComponentBefore(Container aContainer, Component aComponent) {
+      Component before = super.getComponentBefore(aContainer, aComponent);
+      return before != aComponent ? before: null;  // escape our container
     }
 
+    @Override
+    public Component getDefaultComponent(Container aContainer) {
+      if (invokedFromBeforeOrAfter) return null;     // escape our container
+      return super.getDefaultComponent(aContainer);
+    }
+  }
+
+  private static class DelegatingToRootTraversalPolicy extends AbstractDelegatingToRootTraversalPolicy {
     @Override
     public Component getDefaultComponent(final Container aContainer) {
       final Editor editor = aContainer instanceof EditorTextField ? ((EditorTextField)aContainer).getEditor():null;

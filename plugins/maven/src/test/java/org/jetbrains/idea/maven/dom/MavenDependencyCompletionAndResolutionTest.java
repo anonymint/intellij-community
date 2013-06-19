@@ -29,6 +29,9 @@ import org.jetbrains.idea.maven.dom.intentions.ChooseFileIntentionAction;
 import org.jetbrains.idea.maven.dom.model.MavenDomDependency;
 import org.jetbrains.idea.maven.dom.model.MavenDomProjectModel;
 
+import java.util.Arrays;
+import java.util.List;
+
 public class MavenDependencyCompletionAndResolutionTest extends MavenDomWithIndicesTestCase {
   @Override
   protected void setUpInWriteAction() throws Exception {
@@ -109,7 +112,8 @@ public class MavenDependencyCompletionAndResolutionTest extends MavenDomWithIndi
                      "  </dependency>" +
                      "</dependencies>");
 
-    assertCompletionVariants(myProjectPom, "3.8.1", "3.8.2", "4.0");
+    List<String> variants = getCompletionVariants(myProjectPom);
+    assertEquals(Arrays.asList("4.0", "3.8.2", "3.8.1"), variants);
   }
 
   public void testDoesNotCompleteVersionOnUnknownGroupOrArtifact() throws Exception {
@@ -410,6 +414,33 @@ public class MavenDependencyCompletionAndResolutionTest extends MavenDomWithIndi
     assertResolved(myProjectPom, findPsiFile(f));
   }
 
+  public void testResolveManagedDependency() throws Exception {
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<dependencyManagement>" +
+                  "  <dependencies>" +
+                  "    <dependency>" +
+                  "      <groupId>junit</groupId>" +
+                  "      <artifactId>junit</artifactId>" +
+                  "      <version>4.0</version>" +
+                  "    </dependency>" +
+                  "  </dependencies>" +
+                  "</dependencyManagement>" +
+
+                  "<dependencies>" +
+                  "  <dependency>" +
+                  "    <groupId>junit</groupId>" +
+                  "    <artifactId>junit<caret></artifactId>" +
+                  "  </dependency>" +
+                  "</dependencies>");
+
+    String filePath = myIndicesFixture.getRepositoryHelper().getTestDataPath("local1/junit/junit/4.0/junit-4.0.pom");
+    VirtualFile f = LocalFileSystem.getInstance().refreshAndFindFileByPath(filePath);
+    assertResolved(myProjectPom, findPsiFile(f));
+  }
+
   public void testResolutionIsTypeBased() throws Exception {
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
@@ -636,7 +667,7 @@ public class MavenDependencyCompletionAndResolutionTest extends MavenDomWithIndi
                      "  </dependency>" +
                      "</dependencies>");
 
-    assertCompletionVariants(myProjectPom, "jar", "test-jar", "pom", "ear", "ejb", "ejb-client", "war", "bundle", "jboss-har", "jboss-sar");
+    assertCompletionVariants(myProjectPom, "jar", "test-jar", "pom", "ear", "ejb", "ejb-client", "war", "bundle", "jboss-har", "jboss-sar", "maven-plugin");
   }
 
   public void testDoNotHighlightUnknownType() throws Throwable {
@@ -889,21 +920,60 @@ public class MavenDependencyCompletionAndResolutionTest extends MavenDomWithIndi
     checkHighlighting();
   }
 
-  public void testDoNotHighlightProblemsInNotLoadedProject() throws Throwable {
-    VirtualFile m = createModulePom("not-a-module",
-                                    "<groupId>test</groupId>" +
-                                    "<artifactId>project</artifactId>" +
-                                    "<version>1</version>" +
+  public void testDontHighlightProblemsInNonManagedPom1() throws Throwable {
+    createProjectPom("<groupId>test</groupId>" +
+                     "<artifactId>project</artifactId>" +
+                     "<version>1</version>" +
 
+                     "<properties>" +
+                     "  <junitVersion>4.0</junitVersion>" +
+                     "</properties>");
+
+    VirtualFile m = createModulePom("m1",
+                                    "<artifactId>m1</artifactId>" +
+
+                                    "<parent>" +
+                                    "  <groupId>test</groupId>" +
+                                    "  <artifactId>project</artifactId>" +
+                                    "  <version>1</version>" +
+                                    "</parent>" +
                                     "<dependencies>" +
-                                    "  <dependency>" +
-                                    "    <groupId><error>xxx</error></groupId>" +
-                                    "    <artifactId><error>xxx</error></artifactId>" +
-                                    "    <version><error>xxx</error></version>" +
-                                    "  </dependency>" +
+                                    " <dependency>" +
+                                    " <groupId>junit</groupId>" +
+                                    " <artifactId>junit</artifactId>" +
+                                    " <version>${junitVersion}</version>" +
+                                    " </dependency>" +
                                     "</dependencies>");
 
-    checkHighlighting(m);
+    importProject();
+
+    checkHighlighting(m, true, false, true);
+  }
+
+  public void testDontHighlightProblemsInNonManagedPom2() throws Throwable {
+    createProjectPom("<groupId>test</groupId>" +
+                     "<artifactId>project</artifactId>" +
+                     "<version>1</version>" +
+
+                     "<properties>" +
+                     "  <junitVersion>4.0</junitVersion>" +
+                     "</properties>");
+
+    VirtualFile m = createModulePom("m1",
+                                    "<artifactId>m1</artifactId>" +
+
+                                    "<parent>" +
+                                    "  <groupId>test</groupId>" +
+                                    "  <artifactId>project</artifactId>" +
+                                    "  <version>1</version>" +
+                                    "</parent>" +
+                                    "<properties>" +
+                                    " <aaa>${junitVersion}</aaa>" +
+                                    "</properties>");
+
+    importProject();
+
+    checkHighlighting(m, true, false, true);
   }
 
   public void testUpdateIndicesIntention() throws Throwable {

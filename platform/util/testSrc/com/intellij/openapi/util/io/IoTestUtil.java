@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.util.io;
 
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -121,7 +122,7 @@ public class IoTestUtil {
   }
 
   public static void deleteSubst(@NotNull String substRoot) throws InterruptedException, IOException {
-    runCommand(new ProcessBuilder("subst", substRoot, "/d"));
+    runCommand(new ProcessBuilder("subst", StringUtil.trimEnd(substRoot,"\\"), "/d"));
   }
 
   private static char getFirstFreeDriveLetter() {
@@ -209,11 +210,11 @@ public class IoTestUtil {
 
   @NotNull
   public static File createTestJar() throws IOException {
-    final File jarFile = FileUtil.createTempFile("test.", ".jar");
-    final JarOutputStream stream = new JarOutputStream(new FileOutputStream(jarFile));
+    File jarFile = FileUtil.createTempFile("test.", ".jar");
+    JarOutputStream stream = new JarOutputStream(new FileOutputStream(jarFile));
     try {
       stream.putNextEntry(new JarEntry("entry.txt"));
-      stream.write("test".getBytes());
+      stream.write("test".getBytes("UTF-8"));
       stream.closeEntry();
     }
     finally {
@@ -229,9 +230,19 @@ public class IoTestUtil {
 
   @NotNull
   public static File createTestDir(@NotNull File parent, @NotNull String name) {
-    final File dir = new File(parent, name);
+    File dir = new File(parent, name);
     assertTrue(dir.getPath(), dir.mkdirs());
     return dir;
+  }
+
+  @NotNull
+  public static File createTestFile(@NotNull String name) throws IOException {
+    return createTestFile(name, null);
+  }
+
+  @NotNull
+  public static File createTestFile(@NotNull String name, @Nullable String content) throws IOException {
+    return createTestFile(new File(FileUtil.getTempDirectory()), name, content);
   }
 
   @NotNull
@@ -241,7 +252,8 @@ public class IoTestUtil {
 
   @NotNull
   public static File createTestFile(@NotNull File parent, @NotNull String name, @Nullable String content) throws IOException {
-    final File file = new File(parent, name);
+    assertTrue(parent.getPath(), parent.isDirectory() || parent.mkdirs());
+    File file = new File(parent, name);
     assertTrue(file.getPath(), file.createNewFile());
     if (content != null) {
       FileUtil.writeToFile(file, content);
@@ -249,11 +261,19 @@ public class IoTestUtil {
     return file;
   }
 
-  public static void delete(final File... files) {
+  public static void delete(File... files) {
     for (File file : files) {
       if (file != null) {
         FileUtil.delete(file);
       }
     }
+  }
+
+  public static void setHidden(@NotNull String path, boolean hidden) throws IOException, InterruptedException {
+    assertTrue(SystemInfo.isWindows);
+
+    ProcessBuilder command = new ProcessBuilder("attrib", hidden ? "+H" : "-H", path);
+    int res = runCommand(command);
+    assertEquals(command.command().toString(), 0, res);
   }
 }

@@ -62,6 +62,7 @@ public class ContentImpl extends UserDataHolderBase implements Content {
   private BusyObject myBusyObject;
   private String mySeparator;
   private Icon myPopupIcon;
+  private long myExecutionId;
 
   public ContentImpl(JComponent component, String displayName, boolean isPinnable) {
     myComponent = component;
@@ -241,6 +242,11 @@ public class ContentImpl extends UserDataHolderBase implements Content {
   }
 
   @Override
+  public void setPinnable(boolean pinnable) {
+    myPinnable = pinnable;
+  }
+
+  @Override
   public boolean isCloseable() {
     return myCloseable;
   }
@@ -276,7 +282,12 @@ public class ContentImpl extends UserDataHolderBase implements Content {
 
   @NonNls
   public String toString() {
-    return "Content name=" + myDisplayName;
+    StringBuilder sb = new StringBuilder("Content name=").append(myDisplayName);
+    if (myIsLocked)
+      sb.append(", pinned");
+    if (myExecutionId != 0)
+      sb.append(", executionId=").append(myExecutionId);
+    return sb.toString();
   }
 
   @Override
@@ -350,5 +361,15 @@ public class ContentImpl extends UserDataHolderBase implements Content {
   @Override
   public JComponent getSearchComponent() {
     return mySearchComponent;
+  }
+
+  @Override
+  public void setExecutionId(long executionId) {
+    myExecutionId = executionId;
+  }
+
+  @Override
+  public long getExecutionId() {
+    return myExecutionId;
   }
 }

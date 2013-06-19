@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,10 +35,14 @@ public class ClsMirrorBuildingTest extends LightIdeaTestCase {
   public void testParameterNames() { doTest(); }
   public void testEmptyEnum() { doTest(); }
   public void test$BuckClass() { doTest(); }
+  public void testBuckClass$() { doTest(); }
   public void testExtMethods() { doTest(); }
   public void testMethodReceiver() { doTest(); }
   public void testPackageInfo() { doTest("package-info"); }
   public void testEA40568() { doTest(); }
+  public void testBooleans() { doTest(); }
+  public void testClassRefs() { doTest(); }
+  public void testEA46236() { doTest("ValuedEnum"); }
 
   private void doTest() {
     doTest(getTestName(false));

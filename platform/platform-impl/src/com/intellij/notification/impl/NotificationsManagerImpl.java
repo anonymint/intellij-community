@@ -20,6 +20,8 @@ import com.intellij.notification.*;
 import com.intellij.notification.impl.ui.NotificationsUtil;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -32,6 +34,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.WindowManager;
+import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame;
 import com.intellij.ui.BalloonImpl;
 import com.intellij.ui.BalloonLayout;
 import com.intellij.ui.ScrollPaneFactory;
@@ -59,8 +62,12 @@ public class NotificationsManagerImpl extends NotificationsManager {
   }
 
   @Override
-  public void expire(@NotNull Notification notification) {
-    EventLog.expire(notification);
+  public void expire(@NotNull final Notification notification) {
+    UIUtil.invokeLaterIfNeeded(new Runnable() {
+      public void run() {
+        EventLog.expireNotification(notification);
+      }
+    });
   }
 
   @Override
@@ -110,6 +117,18 @@ public class NotificationsManagerImpl extends NotificationsManager {
   }
 
   private static void showNotification(final Notification notification, @Nullable final Project project) {
+    Application application = ApplicationManager.getApplication();
+    if (application instanceof ApplicationEx && !((ApplicationEx)application).isLoaded()) {
+      application.invokeLater(new Runnable() {
+        @Override
+        public void run() {
+          showNotification(notification, project);
+        }
+      }, ModalityState.current());
+      return;
+    }
+
+
     String groupId = notification.getGroupId();
     final NotificationSettings settings = NotificationsConfigurationImpl.getSettings(groupId);
 
@@ -199,7 +218,8 @@ public class NotificationsManagerImpl extends NotificationsManager {
             }
 
             if (!sticky) {
-              ((BalloonImpl)balloon).startFadeoutTimer(3000);
+              ((BalloonImpl)balloon).startFadeoutTimer(15000);
+              ((BalloonImpl)balloon).setHideOnClickOutside(true);
             }
             else //noinspection ConstantConditions
               if (noProjects) {
@@ -223,9 +243,12 @@ public class NotificationsManagerImpl extends NotificationsManager {
 
   @Nullable
   public static Window findWindowForBalloon(Project project) {
-    final JFrame frame = WindowManager.getInstance().getFrame(project);
+    Window frame = WindowManager.getInstance().getFrame(project);
     if (frame == null && project == null) {
-      return KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+      frame = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+    }
+    if (frame == null && project == null) {
+      frame = (Window)WelcomeFrame.getInstance();
     }
     return frame;
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -202,7 +202,7 @@ public class CommentByBlockCommentHandler implements CodeInsightActionHandler {
         }
       }
       else {
-        if (!isWhiteSpaceOrComment(element)) {
+        if (!isWhiteSpaceOrComment(element, range)) {
           return false;
         }
       }
@@ -225,17 +225,18 @@ public class CommentByBlockCommentHandler implements CodeInsightActionHandler {
   }
 
   private boolean isWhiteSpaceOrComment(@NotNull PsiElement element, @NotNull TextRange range) {
-    TextRange intersection = range.intersection(element.getTextRange());
+    final TextRange textRange = element.getTextRange();
+    TextRange intersection = range.intersection(textRange);
     if (intersection == null) {
       return false;
     }
-    intersection = TextRange.from(Math.max(intersection.getStartOffset() - element.getTextRange().getStartOffset(), 0),
-                                  Math.min(intersection.getEndOffset() - element.getTextRange().getStartOffset(), element.getTextRange().getLength()));
+    intersection = TextRange.create(Math.max(intersection.getStartOffset() - textRange.getStartOffset(), 0),
+                                    Math.min(intersection.getEndOffset() - textRange.getStartOffset(), textRange.getLength()));
     return isWhiteSpaceOrComment(element) ||
            intersection.substring(element.getText()).trim().length() == 0;
   }
 
-  private boolean isWhiteSpaceOrComment(PsiElement element) {
+  private static boolean isWhiteSpaceOrComment(PsiElement element) {
     return element instanceof PsiWhiteSpace ||
            PsiTreeUtil.getParentOfType(element, PsiComment.class, false) != null;
   }
@@ -398,8 +399,8 @@ public class CommentByBlockCommentHandler implements CodeInsightActionHandler {
     CharSequence chars = myDocument.getCharsSequence();
     LogicalPosition caretPosition = myEditor.getCaretModel().getLogicalPosition();
 
-    if (startOffset == 0 || chars.charAt(startOffset - 1) == '\n' || chars.charAt(startOffset - 1) == '\r') {
-      if (endOffset == myDocument.getTextLength() || chars.charAt(endOffset - 1) == '\n' || chars.charAt(endOffset - 1) == '\r') {
+    if (startOffset == 0 || chars.charAt(startOffset - 1) == '\n') {
+      if (endOffset == myDocument.getTextLength() || endOffset > 0 && chars.charAt(endOffset - 1) == '\n') {
         CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(myProject);
         CodeStyleSettings settings = CodeStyleSettingsManager.getSettings(myProject);
         String space;

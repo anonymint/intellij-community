@@ -28,8 +28,8 @@ public class VcsQuickListPopupAction extends QuickSwitchSchemeAction implements 
   }
 
   protected void fillActions(@Nullable final Project project,
-                             final DefaultActionGroup group,
-                             @Nullable final DataContext dataContext) {
+                             @NotNull final DefaultActionGroup group,
+                             @NotNull final DataContext dataContext) {
 
     if (project == null) {
       return;
@@ -113,7 +113,7 @@ public class VcsQuickListPopupAction extends QuickSwitchSchemeAction implements 
 
     // additional stuff
     addSeparator(group);
-    addAction("MoveToChangeList", group);
+    addAction(IdeActions.MOVE_TO_ANOTHER_CHANGE_LIST, group);
 
     // local history
     addLocalHistoryActions(group);

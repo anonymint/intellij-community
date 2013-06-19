@@ -16,7 +16,7 @@
 package com.intellij.codeInspection.i18n;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
@@ -40,6 +40,7 @@ import java.util.Collection;
 public class I18nizeAction extends AnAction {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.i18n.I18nizeAction");
 
+  @Override
   public void update(AnActionEvent e) {
     boolean active = getHandler(e) != null;
     if (ActionPlaces.isPopupPlace(e.getPlace())) {
@@ -112,15 +113,17 @@ public class I18nizeAction extends AnAction {
     dialog.show();
     if (!dialog.isOK()) return;
 
-    if (!CodeInsightUtilBase.prepareFileForWrite(psiFile)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(psiFile)) return;
     final Collection<PropertiesFile> propertiesFiles = dialog.getAllPropertiesFiles();
     for (PropertiesFile file : propertiesFiles) {
-      if (!CodeInsightUtilBase.prepareFileForWrite(file.getContainingFile())) return;
+      if (!FileModificationService.getInstance().prepareFileForWrite(file.getContainingFile())) return;
     }
 
     ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      @Override
       public void run() {
         CommandProcessor.getInstance().executeCommand(project, new Runnable(){
+          @Override
           public void run() {
             try {
               handler.performI18nization(psiFile, editor, dialog.getLiteralExpression(), propertiesFiles, dialog.getKey(), StringUtil.unescapeStringCharacters(dialog.getValue()),
@@ -136,6 +139,7 @@ public class I18nizeAction extends AnAction {
     });
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     final Editor editor = getEditor(e);
     final Project project = editor.getProject();

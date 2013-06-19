@@ -44,7 +44,7 @@ public class LastUnchangedContentTracker {
     }
 
     Long lastTs = getLastSavedStamp(file);
-    final long stamp = file.getModificationStamp();
+    final long stamp = file.getTimeStamp();
     if (lastTs != null && stamp == lastTs) {
       return;
     }
@@ -93,12 +93,11 @@ public class LastUnchangedContentTracker {
 
     LOG.assertTrue(contentId > 0, contentId);
 
-    if (ChangeListManagerImpl.DEBUG) {
-      ChangeListManagerImpl.log("LastUnchangedContentTracker.saveContentReference");
-      ChangeListManagerImpl.log("file = " + file);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("saveContentReference file = " + file);
     }
 
-    long stamp = file.getModificationStamp();
+    long stamp = file.getTimeStamp();
     try {
       final DataOutputStream contentStream = ACQUIRED_CONTENT_ATTR.writeAttribute(file);
       try {

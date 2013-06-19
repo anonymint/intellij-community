@@ -326,17 +326,6 @@ public class NameUtil {
     return suggestion;
   }
 
-  static boolean isWordStart(String text, int i) {
-    char c = text.charAt(i);
-    if (isWordStart(c)) {
-      return true;
-    }
-    if (!Character.isLetterOrDigit(c)) {
-      return false;
-    }
-    return i == 0 || !Character.isLetterOrDigit(text.charAt(i - 1));
-  }
-
   static boolean isWordStart(char p) {
     return Character.isUpperCase(p) || Character.isDigit(p);
   }
@@ -387,10 +376,6 @@ public class NameUtil {
       result.add(text.substring(start, next));
       start = next;
     }
-  }
-
-  static boolean isWordSeparator(char c) {
-    return Character.isWhitespace(c) || c == '_' || c == '-' || c == ':';
   }
 
   /**

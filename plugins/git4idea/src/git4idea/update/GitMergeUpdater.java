@@ -76,7 +76,8 @@ public class GitMergeUpdater extends GitUpdater {
     GitUntrackedFilesOverwrittenByOperationDetector untrackedFilesDetector = new GitUntrackedFilesOverwrittenByOperationDetector(myRoot);
     mergeHandler.addLineListener(untrackedFilesDetector);
 
-    final GitTask mergeTask = new GitTask(myProject, mergeHandler, "Merging changes");
+    String progressTitle = makeProgressTitle("Merging");
+    final GitTask mergeTask = new GitTask(myProject, mergeHandler, progressTitle);
     mergeTask.setProgressIndicator(myProgressIndicator);
     mergeTask.setProgressAnalyzer(new GitStandardProgressAnalyzer());
     final AtomicReference<GitUpdateResult> updateResult = new AtomicReference<GitUpdateResult>();
@@ -188,7 +189,6 @@ public class GitMergeUpdater extends GitUpdater {
   private void cancel() {
     try {
       GitSimpleHandler h = new GitSimpleHandler(myProject, myRoot, GitCommand.RESET);
-      h.setNoSSH(true);
       h.addParameters("--merge");
       h.run();
     } catch (VcsException e) {

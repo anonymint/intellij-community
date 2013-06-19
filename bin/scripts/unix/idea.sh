@@ -5,6 +5,24 @@
 # ---------------------------------------------------------------------
 #
 
+message()
+{
+  TITLE="Cannot start @@product_full@@"
+  if [ -t 1 ]; then
+    echo "ERROR: $TITLE\n$1"
+  elif [ -n `which zenity` ]; then
+    zenity --error --title="$TITLE" --text="$1"
+  elif [ -n `which kdialog` ]; then
+    kdialog --error --title "$TITLE" "$1"
+  elif [ -n `which xmessage` ]; then
+    xmessage -center "ERROR: $TITLE: $1"
+  elif [ -n `which notify-send` ]; then
+    notify-send "ERROR: $TITLE: $1"
+  else
+    echo "ERROR: $TITLE\n$1"
+  fi
+}
+
 UNAME=`which uname`
 GREP=`which egrep`
 GREP_OPTIONS=""
@@ -16,7 +34,7 @@ CAT=`which cat`
 TR=`which tr`
 
 if [ -z "$UNAME" -o -z "$GREP" -o -z "$CUT" -o -z "$MKTEMP" -o -z "$RM" -o -z "$CAT" -o -z "$TR" ]; then
-  echo "ERROR: required tools are missing - check beginning of \"$0\" file for details."
+  message "Required tools are missing - check beginning of \"$0\" file for details."
   exit 1
 fi
 
@@ -68,19 +86,15 @@ else
 fi
 
 if [ -z "$JDK" ]; then
-  echo "ERROR: cannot start @@product_full@@."
-  echo "No JDK found. Please validate either @@product_uc@@_JDK, JDK_HOME or JAVA_HOME environment variable points to valid JDK installation."
-  echo
-  echo "Press Enter to continue."
-  read IGNORE
+  message "No JDK found. Please validate either @@product_uc@@_JDK, JDK_HOME or JAVA_HOME environment variable points to valid JDK installation."
   exit 1
 fi
 
 VERSION_LOG=`"$MKTEMP" -t java.version.log.XXXXXX`
 "$JDK/bin/java" -version 2> "$VERSION_LOG"
-"$GREP" 'OpenJDK' "$VERSION_LOG"
+"$GREP" 'OpenJDK' "$VERSION_LOG" > /dev/null
 OPEN_JDK=$?
-"$GREP" "64-Bit|x86_64" "$VERSION_LOG"
+"$GREP" "64-Bit|x86_64" "$VERSION_LOG" > /dev/null
 BITS=$?
 "$RM" -f "$VERSION_LOG"
 if [ $OPEN_JDK -eq 0 ]; then

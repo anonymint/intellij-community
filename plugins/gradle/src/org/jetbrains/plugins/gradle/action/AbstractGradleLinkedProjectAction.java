@@ -8,10 +8,10 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.config.GradleSettings;
+import org.jetbrains.plugins.gradle.settings.GradleSettings;
 
 /**
- * Common super class for gradle actions that require {@link GradleSettings#getLinkedProjectPath()}  linked project}.
+ * Common super class for gradle actions that require {@link GradleSettings#getLinkedExternalProjectPath()}  linked project}.
  * <p/>
  * Not thread-safe.
  * 
@@ -42,7 +42,7 @@ public abstract class AbstractGradleLinkedProjectAction extends AnAction {
       e.getPresentation().setVisible(false);
       return;
     }
-    doActionPerformed(project, pair.second);
+    doActionPerformed(e, project, pair.second);
   }
 
   @Nullable
@@ -55,11 +55,12 @@ public abstract class AbstractGradleLinkedProjectAction extends AnAction {
     if (project == null) {
       return null;
     }
-    
-    final String path = GradleSettings.getInstance(project).getLinkedProjectPath();
-    return path == null ? null : new Pair<Project, String>(project, path);
+    // TODO den implement
+   return null; 
+//    final String path = GradleSettings.getInstance(project).getLinkedExternalProjectPath();
+//    return path == null ? null : new Pair<Project, String>(project, path);
   }
 
   protected abstract void doUpdate(@NotNull AnActionEvent event, @NotNull Project project, @NotNull String linkedProjectPath);
-  protected abstract void doActionPerformed(@NotNull Project project, @NotNull String linkedProjectPath);
+  protected abstract void doActionPerformed(@NotNull AnActionEvent event, @NotNull Project project, @NotNull String linkedProjectPath);
 }

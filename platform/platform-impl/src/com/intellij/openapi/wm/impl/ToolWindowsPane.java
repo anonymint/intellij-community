@@ -19,9 +19,11 @@ import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindow;
@@ -30,12 +32,13 @@ import com.intellij.openapi.wm.ToolWindowType;
 import com.intellij.openapi.wm.ex.ToolWindowEx;
 import com.intellij.openapi.wm.impl.commands.FinalizableCommand;
 import com.intellij.reference.SoftReference;
+import com.intellij.ui.ScreenUtil;
+import com.intellij.ui.components.JBLayeredPane;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -47,7 +50,7 @@ import java.util.Comparator;
  * @author Anton Katilin
  * @author Vladimir Kondratyev
  */
-final class ToolWindowsPane extends JLayeredPane implements Disposable {
+public final class ToolWindowsPane extends JBLayeredPane implements Disposable {
   private static final Logger LOG=Logger.getInstance("#com.intellij.openapi.wm.impl.ToolWindowsPane");
 
   private final IdeFrameImpl myFrame;
@@ -56,6 +59,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
   private final HashMap<String,InternalDecorator> myId2Decorator;
   private final HashMap<StripeButton, WindowInfoImpl> myButton2Info;
   private final HashMap<InternalDecorator, WindowInfoImpl> myDecorator2Info;
+  private final HashMap<String, Float> myId2SplitProportion;
   /**
    * This panel is the layered pane where all sliding tool windows are located. The DEFAULT
    * layer contains splitters. The PALETTE layer contains all sliding tool windows.
@@ -82,6 +86,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
 
   private boolean myStripesOverlayed;
   private final Disposable myDisposable = Disposer.newDisposable();
+  private boolean myWidescreen = false;
 
   ToolWindowsPane(final IdeFrameImpl frame, ToolWindowManagerImpl manager){
     myManager = manager;
@@ -93,6 +98,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
     myButton2Info=new HashMap<StripeButton, WindowInfoImpl>();
     myDecorator2Info=new HashMap<InternalDecorator, WindowInfoImpl>();
     myUISettingsListener=new MyUISettingsListenerImpl();
+    myId2SplitProportion = new HashMap<String, Float>();
 
     // Splitters
 
@@ -106,8 +112,13 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
     myHorizontalSplitter.setDividerWidth(0);
     myHorizontalSplitter.setDividerMouseZoneSize(Registry.intValue("ide.splitter.mouseZone"));
     myHorizontalSplitter.setBackground(Color.gray);
-
-    myVerticalSplitter.setInnerComponent(myHorizontalSplitter);
+    myWidescreen = UISettings.getInstance().WIDESCREEN_SUPPORT;
+    if (myWidescreen) {
+      myHorizontalSplitter.setInnerComponent(myVerticalSplitter);
+    }
+    else {
+      myVerticalSplitter.setInnerComponent(myHorizontalSplitter);
+    }
 
     // Tool stripes
 
@@ -124,7 +135,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
 
     // Layered pane
 
-    myLayeredPane=new MyLayeredPane(myVerticalSplitter);
+    myLayeredPane=new MyLayeredPane(myWidescreen ? myHorizontalSplitter : myVerticalSplitter);
 
     // Compose layout
 
@@ -155,7 +166,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
       myRightStripe.setBounds(size.width - rightSize.width, topSize.height, rightSize.width, size.height - topSize.height - bottomSize.height);
       myBottomStripe.setBounds(0, size.height - bottomSize.height, size.width, bottomSize.height);
 
-      if (UISettings.getInstance().HIDE_TOOL_STRIPES) {
+      if (UISettings.getInstance().HIDE_TOOL_STRIPES || UISettings.getInstance().PRESENTATION_MODE) {
         myLayeredPane.setBounds(0, 0, size.width, size.height);
       } else {
         myLayeredPane.setBounds(leftSize.width, topSize.height, size.width - leftSize.width - rightSize.width, size.height - topSize.height - bottomSize.height);
@@ -173,15 +184,23 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
    */
   public final void addNotify(){
     super.addNotify();
-    UISettings.getInstance().addUISettingsListener(myUISettingsListener,myDisposable);
+    if (ScreenUtil.isStandardAddRemoveNotify(this)) {
+      UISettings.getInstance().addUISettingsListener(myUISettingsListener,myDisposable);
+    }
   }
 
   /**
    * Invoked when enclosed frame is being disposed.
    */
   public final void removeNotify(){
-    Disposer.dispose(myDisposable);
+    if (ScreenUtil.isStandardAddRemoveNotify(this)) {
+      Disposer.dispose(myDisposable);
+    }
     super.removeNotify();
+  }
+
+  public Project getProject() {
+    return myFrame.getProject();
   }
 
   /**
@@ -194,7 +213,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
    */
   final FinalizableCommand createAddButtonCmd(final StripeButton button,final WindowInfoImpl info,final Comparator<StripeButton> comparator,final Runnable finishCallBack){
     final WindowInfoImpl copiedInfo=info.copy();
-    myId2Button.put(copiedInfo.getId(),button);
+    myId2Button.put(copiedInfo.getId(), button);
     myButton2Info.put(button,copiedInfo);
     return new AddToolStripeButtonCmd(button,copiedInfo,comparator,finishCallBack);
   }
@@ -353,6 +372,11 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
     }
   }
 
+  private float getPreferredSplitProportion(String id, float defaultValue) {
+    Float f = myId2SplitProportion.get(id);
+    return (f == null ? defaultValue : f);
+  }
+
   private WindowInfoImpl getDockedInfoAt(ToolWindowAnchor anchor, boolean side) {
     for (WindowInfoImpl info : myDecorator2Info.values()) {
       if (info.isVisible() && info.isDocked() && info.getAnchor() == anchor && side == info.isSplit()) {
@@ -363,14 +387,14 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
     return null;
   }
 
-  private void setDocumentComponent(final JComponent component){
-    myHorizontalSplitter.setInnerComponent(component);
+  public void setDocumentComponent(final JComponent component){
+    (myWidescreen ? myVerticalSplitter : myHorizontalSplitter).setInnerComponent(component);
   }
 
   private void updateToolStripesVisibility(){
     boolean oldVisible = myLeftStripe.isVisible();
 
-    final boolean showButtons = !UISettings.getInstance().HIDE_TOOL_STRIPES;
+    final boolean showButtons = !UISettings.getInstance().HIDE_TOOL_STRIPES && !UISettings.getInstance().PRESENTATION_MODE;
     boolean visible = showButtons || myStripesOverlayed;
     myLeftStripe.setVisible(visible);
     myRightStripe.setVisible(visible);
@@ -498,6 +522,24 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
     resizer.setSize(actualSize);
   }
 
+  private void updateLayout() {
+    if (myWidescreen != UISettings.getInstance().WIDESCREEN_SUPPORT) {
+      JComponent documentComponent = (myWidescreen ? myVerticalSplitter : myHorizontalSplitter).getInnerComponent();
+      myWidescreen = UISettings.getInstance().WIDESCREEN_SUPPORT;
+      if (myWidescreen) {
+        myVerticalSplitter.setInnerComponent(null);
+        myHorizontalSplitter.setInnerComponent(myVerticalSplitter);
+      }
+      else {
+        myHorizontalSplitter.setInnerComponent(null);
+        myVerticalSplitter.setInnerComponent(myHorizontalSplitter);
+      }
+      myLayeredPane.remove(myWidescreen ? myVerticalSplitter : myHorizontalSplitter);
+      myLayeredPane.add(myWidescreen ? myHorizontalSplitter : myVerticalSplitter, DEFAULT_LAYER);
+      setDocumentComponent(documentComponent);
+    }
+  }
+
 
   interface Resizer {
     void setSize(int size);
@@ -614,12 +656,8 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
 
     public final void run(){
       try{
-        float newWeight = myInfo.getWeight()<=.0f? WindowInfoImpl.DEFAULT_WEIGHT:myInfo.getWeight();
-        if(newWeight>=1.0f){
-          newWeight=1- WindowInfoImpl.DEFAULT_WEIGHT;
-        }
-        final ToolWindowAnchor anchor=myInfo.getAnchor();
-        setComponent(myComponent, anchor, newWeight);
+        final ToolWindowAnchor anchor = myInfo.getAnchor();
+        setComponent(myComponent, anchor, normalizeWeigh(myInfo.getWeight()));
         if(!myDirtyMode){
           myLayeredPane.validate();
           myLayeredPane.repaint();
@@ -652,7 +690,11 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
         if (myInfo.isSplit()) {
           splitter.setFirstComponent(oldComponent);
           splitter.setSecondComponent(myNewComponent);
-          splitter.setProportion(normalizeWeigh(oldComponent.getWindowInfo().getSideWeight()));
+          float proportion = getPreferredSplitProportion(oldComponent.getWindowInfo().getId(),
+                                                         normalizeWeigh(oldComponent.getWindowInfo().getSideWeight() /
+                                                                        (oldComponent.getWindowInfo().getSideWeight() +
+                                                                         myInfo.getSideWeight())));
+          splitter.setProportion(proportion);
           newWeight = normalizeWeigh(oldComponent.getWindowInfo().getWeight());
         }
         else {
@@ -672,13 +714,6 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
       }
     }
 
-    private float normalizeWeigh(final float weight) {
-      float newWeight= weight <= .0f ? WindowInfoImpl.DEFAULT_WEIGHT : weight;
-      if (newWeight >= 1.0f) {
-        newWeight= 1- WindowInfoImpl.DEFAULT_WEIGHT;
-      }
-      return newWeight;
-    }
   }
 
   private final class AddSlidingComponentCmd extends FinalizableCommand{
@@ -855,6 +890,7 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
 
         if (myInfo.isSplit()) {
           InternalDecorator component = (InternalDecorator)splitter.getFirstComponent();
+          myId2SplitProportion.put(component.getWindowInfo().getId(), splitter.getProportion());
           setComponent(component, myInfo.getAnchor(), component.getWindowInfo().getWeight());
         }
         else {
@@ -994,10 +1030,11 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
   private final class MyUISettingsListenerImpl implements UISettingsListener{
     public final void uiSettingsChanged(final UISettings source){
       updateToolStripesVisibility();
+      updateLayout();
     }
   }
 
-  private final class MyLayeredPane extends JLayeredPane{
+  private final class MyLayeredPane extends JBLayeredPane {
     /*
      * These images are used to perform animated showing and hiding of components.
      * They are the member for performance reason.
@@ -1010,8 +1047,6 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
       myTopImageRef=new SoftReference<BufferedImage>(null);
       setOpaque(!UIUtil.isUnderDarcula());
       add(splitter,JLayeredPane.DEFAULT_LAYER);
-      splitter.setBounds(0,0,getWidth(),getHeight());
-      enableEvents(ComponentEvent.COMPONENT_EVENT_MASK);
     }
 
     @Override
@@ -1019,63 +1054,47 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
       return SwingUtilities.getDeepestComponentAt(this, 0, 0) == this ? Color.GRAY : UIUtil.getPanelBackground(); 
     }
 
-    /**
-     * TODO[vova] extract method
-     * Lazily creates and returns bottom image for animation.
-     */
     public final Image getBottomImage(){
-      LOG.assertTrue(UISettings.getInstance().ANIMATE_WINDOWS);
-      BufferedImage image= myBottomImageRef.get();
-      if(
-        image==null ||
-        image.getWidth(null) < getWidth() || image.getHeight(null) < getHeight()
-      ){
-        final int width=Math.max(Math.max(1,getWidth()),myFrame.getWidth());
-        final int height=Math.max(Math.max(1,getHeight()),myFrame.getHeight());
-        if(SystemInfo.isWindows || SystemInfo.isMac){
-          image=myFrame.getGraphicsConfiguration().createCompatibleImage(width,height);
-        }else{
-          // Under Linux we have found that images created by createCompatibleImage(),
-          // createVolatileImage(), etc extremely slow for rendering. TrueColor buffered image
-          // is MUCH faster.
-          image=UIUtil.createImage(width,height,BufferedImage.TYPE_INT_RGB);
-        }
-        myBottomImageRef=new SoftReference<BufferedImage>(image);
-      }
-      return image;
+      Pair<BufferedImage, SoftReference<BufferedImage>> result = getImage(myBottomImageRef);
+      myBottomImageRef = result.second;
+      return result.first;
     }
 
-    /**
-     * TODO[vova] extract method
-     * Lazily creates and returns top image for animation.
-     */
     public final Image getTopImage(){
+      Pair<BufferedImage, SoftReference<BufferedImage>> result = getImage(myTopImageRef);
+      myTopImageRef = result.second;
+      return result.first;
+    }
+
+    private Pair<BufferedImage, SoftReference<BufferedImage>> getImage(SoftReference<BufferedImage> imageRef) {
       LOG.assertTrue(UISettings.getInstance().ANIMATE_WINDOWS);
-      BufferedImage image= myTopImageRef.get();
+      BufferedImage image= imageRef.get();
       if(
         image==null ||
         image.getWidth(null) < getWidth() || image.getHeight(null) < getHeight()
       ){
         final int width=Math.max(Math.max(1,getWidth()),myFrame.getWidth());
         final int height=Math.max(Math.max(1,getHeight()),myFrame.getHeight());
-        if(SystemInfo.isWindows || SystemInfo.isMac){
-          image=myFrame.getGraphicsConfiguration().createCompatibleImage(width,height);
-        }else{
+        if (SystemInfo.isWindows) {
+          image = myFrame.getGraphicsConfiguration().createCompatibleImage(width, height);
+        }
+        else {
           // Under Linux we have found that images created by createCompatibleImage(),
           // createVolatileImage(), etc extremely slow for rendering. TrueColor buffered image
           // is MUCH faster.
-          image=UIUtil.createImage(width,height,BufferedImage.TYPE_INT_RGB);
+          // On Mac we create a retina-compatible image
+
+          image = UIUtil.createImage(width, height, BufferedImage.TYPE_INT_RGB);
         }
-        myTopImageRef=new SoftReference<BufferedImage>(image);
+        imageRef = new SoftReference<BufferedImage>(image);
       }
-      return image;
+      return Pair.create(image, imageRef);
     }
 
     /**
      * When component size becomes larger then bottom and top images should be enlarged.
      */
-    protected final void processComponentEvent(final ComponentEvent e) {
-      if(ComponentEvent.COMPONENT_RESIZED==e.getID()){
+    public void doLayout() {
         final int width=getWidth();
         final int height=getHeight();
         if(width<0||height<0){
@@ -1109,11 +1128,6 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
           }
           setBoundsInPaletteLayer(component, info.getAnchor(), weight);
         }
-        validate();
-        repaint();
-      }else{
-        super.processComponentEvent(e);
-      }
     }
 
     public final void setBoundsInPaletteLayer(final Component component,final ToolWindowAnchor anchor,float weight){
@@ -1145,5 +1159,11 @@ final class ToolWindowsPane extends JLayeredPane implements Disposable {
 
   @Override
    public void dispose() {
+  }
+
+  private static float normalizeWeigh(final float weight) {
+    if (weight <= 0) return WindowInfoImpl.DEFAULT_WEIGHT;
+    if (weight >= 1 ) return 1 - WindowInfoImpl.DEFAULT_WEIGHT;
+    return weight;
   }
 }

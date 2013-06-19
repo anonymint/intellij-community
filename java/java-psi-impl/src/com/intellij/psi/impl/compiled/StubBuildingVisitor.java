@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import com.intellij.psi.impl.java.stubs.impl.*;
 import com.intellij.psi.stubs.PsiFileStub;
 import com.intellij.psi.stubs.StubElement;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.cls.ClsFormatException;
 import com.intellij.util.io.StringRef;
 import org.jetbrains.annotations.NonNls;
@@ -304,10 +303,6 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
   }
 
   @Override
-  public void visitAttribute(final Attribute attr) {
-  }
-
-  @Override
   public void visitInnerClass(final String name, final String outerName, final String innerName, final int access) {
     if ((access & Opcodes.ACC_SYNTHETIC) != 0) return;
     if (!isCorrectName(innerName)) return;
@@ -339,13 +334,15 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
   @Override
   @Nullable
-  public FieldVisitor visitField(final int access, final String name, final String desc, final String signature, final Object value) {
+  public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
     if ((access & Opcodes.ACC_SYNTHETIC) != 0) return null;
     if (!isCorrectName(name)) return null;
 
-    final byte flags = PsiFieldStubImpl.packFlags((access & Opcodes.ACC_ENUM) != 0, (access & Opcodes.ACC_DEPRECATED) != 0, false);
-    final PsiFieldStub stub = new PsiFieldStubImpl(myResult, name, fieldType(desc, signature), constToString(value), flags);
-    final PsiModifierListStub modList = new PsiModifierListStubImpl(stub, packFieldFlags(access));
+    byte flags = PsiFieldStubImpl.packFlags((access & Opcodes.ACC_ENUM) != 0, (access & Opcodes.ACC_DEPRECATED) != 0, false);
+    TypeInfo type = fieldType(desc, signature);
+    String initializer = constToString(value, "boolean".equals(type.text.getString()), false);
+    PsiFieldStub stub = new PsiFieldStubImpl(myResult, name, type, initializer, flags);
+    PsiModifierListStub modList = new PsiModifierListStubImpl(stub, packFieldFlags(access));
     return new AnnotationCollectingVisitor(modList);
   }
 
@@ -358,20 +355,23 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
       catch (ClsFormatException e) {
         return fieldTypeViaDescription(desc);
       }
-    } else {
+    }
+    else {
       return fieldTypeViaDescription(desc);
     }
   }
 
   @NotNull
-  private static TypeInfo fieldTypeViaDescription(final String desc) {
+  private static TypeInfo fieldTypeViaDescription(@NotNull String desc) {
     Type type = Type.getType(desc);
     final int dim = type.getSort() == Type.ARRAY ? type.getDimensions() : 0;
     if (dim > 0) {
       type = type.getElementType();
     }
-    return new TypeInfo(StringRef.fromString(getTypeText(type)), (byte)dim, false, Collections.<PsiAnnotationStub>emptyList()); //todo read annos from .class file
+    return new TypeInfo(getTypeText(type), (byte)dim, false, Collections.<PsiAnnotationStub>emptyList()); //todo read annos from .class file
   }
+
+  private static final String[] parameterNames = {"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"};
 
   @Override
   @Nullable
@@ -436,7 +436,8 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
       boolean isEllipsisParam = isVarargs && i == paramCount - 1;
       final TypeInfo typeInfo = TypeInfo.fromString(arg, isEllipsisParam);
 
-      PsiParameterStubImpl parameterStub = new PsiParameterStubImpl(parameterList, "p" + (i + 1), typeInfo, isEllipsisParam);
+      String paramName = i < parameterNames.length ? parameterNames[i] : "p" + (i + 1);
+      PsiParameterStubImpl parameterStub = new PsiParameterStubImpl(parameterList, paramName, typeInfo, isEllipsisParam);
       paramStubs [i] = parameterStub;
       new PsiModifierListStubImpl(parameterStub, 0);
     }
@@ -536,7 +537,7 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
     @Override
     public void visit(final String name, final Object value) {
       valuePairPrefix(name);
-      myBuilder.append(constToString(value));
+      myBuilder.append(constToString(value, false, true));
     }
 
     @Override
@@ -696,12 +697,20 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
   }
 
   @Nullable
-  private static String constToString(@Nullable Object value) {
+  private static String constToString(@Nullable Object value, boolean isBoolean, boolean anno) {
     if (value == null) return null;
 
     if (value instanceof String) return "\"" + StringUtil.escapeStringCharacters((String)value) + "\"";
-    if (value instanceof Integer || value instanceof Boolean) return value.toString();
+    if (value instanceof Boolean) return value.toString();
     if (value instanceof Long) return value.toString() + "L";
+
+    if (value instanceof Integer) {
+      if (isBoolean) {
+        if (value.equals(0)) return "false";
+        if (value.equals(1)) return "true";
+      }
+      return value.toString();
+    }
 
     if (value instanceof Double) {
       final double d = ((Double)value).doubleValue();
@@ -729,19 +738,18 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
     }
 
     if (value.getClass().isArray()) {
-      StringBuilder buffer = StringBuilderSpinAllocator.alloc();
-      try {
-        buffer.append('{');
-        for (int i = 0, length = Array.getLength(value); i < length; i++) {
-          if (i > 0) buffer.append(", ");
-          buffer.append(Array.get(value, i));
-        }
-        buffer.append('}');
-        return buffer.toString();
+      StringBuilder buffer = new StringBuilder();
+      buffer.append('{');
+      for (int i = 0, length = Array.getLength(value); i < length; i++) {
+        if (i > 0) buffer.append(", ");
+        buffer.append(Array.get(value, i));
       }
-      finally {
-        StringBuilderSpinAllocator.dispose(buffer);
-      }
+      buffer.append('}');
+      return buffer.toString();
+    }
+
+    if (anno && value instanceof Type) {
+      return getTypeText((Type)value) + ".class";
     }
 
     return null;
@@ -755,13 +763,14 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
     return getTypeText(Type.getObjectType(name));
   }
 
-  private static String getTypeText(final Type type) {
+  @NotNull
+  private static String getTypeText(@NotNull Type type) {
     final String raw = type.getClassName();
     // As the '$' char is a valid java identifier and is actively used by byte code generators, the problem is
     // which occurrences of this char should be replaced and which should not.
     // Heuristic: replace only those $ occurrences that are surrounded non-"$" chars
     //   (most likely generated by javac to separate inner or anonymous class name)
     //   Leading and trailing $ chars should be left unchanged.
-    return raw.contains("$")? REGEX_PATTERN.matcher(raw).replaceAll("\\.") : raw;
+    return raw.indexOf('$') >= 0 ? REGEX_PATTERN.matcher(raw).replaceAll("\\.") : raw;
   }
 }

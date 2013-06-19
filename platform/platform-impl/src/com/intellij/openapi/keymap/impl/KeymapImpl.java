@@ -95,7 +95,7 @@ public class KeymapImpl implements Keymap, ExternalizableScheme {
 
   private static final Map<Integer, String> ourNamesForKeycodes;
   private static final Shortcut[] ourEmptyShortcutsArray = new Shortcut[0];
-  private final List<Listener> myListeners = new ArrayList<Listener>();
+  private final List<Listener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private KeymapManagerEx myKeymapManager;
   private final ExternalInfo myExternalInfo = new ExternalInfo();
 
@@ -497,12 +497,17 @@ public class KeymapImpl implements Keymap, ExternalizableScheme {
   }
 
   public Shortcut[] getShortcuts(String actionId) {
+    LinkedHashSet<Shortcut> shortcuts = myActionId2ListOfShortcuts.get(actionId);
+
+    // Shortcuts of bounded action has more priority than keystrokes of given action,
+    // and likely this behaviour can't be changed completely because of IDEA-58896.
+    // But. If shortcuts for actionId has been explicitly defined in current keymap
+    // then shortcuts of bounded action won't be used.
     KeymapManagerEx keymapManager = getKeymapManager();
-    if (keymapManager.getBoundActions().contains(actionId)) {
+    boolean hasBoundedAction = keymapManager.getBoundActions().contains(actionId);
+    if (hasBoundedAction && (shortcuts == null || shortcuts.isEmpty())) {
       return getShortcuts(keymapManager.getActionBinding(actionId));
     }
-
-    LinkedHashSet<Shortcut> shortcuts = myActionId2ListOfShortcuts.get(actionId);
 
     if (shortcuts == null) {
       if (myParent != null) {
@@ -890,8 +895,7 @@ public class KeymapImpl implements Keymap, ExternalizableScheme {
   }
 
   private void fireShortcutChanged(String actionId) {
-    Listener[] listeners = myListeners.toArray(new Listener[myListeners.size()]);
-    for (Listener listener : listeners) {
+    for (Listener listener : myListeners) {
       listener.onShortcutChanged(actionId);
     }
   }

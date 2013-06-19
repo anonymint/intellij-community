@@ -30,7 +30,7 @@ import javax.swing.*;
  */
 public class SplitterItem extends ItemWrapper {
 
-  private String myText;
+  private final String myText;
 
   public SplitterItem(String text) {
     myText = text;
@@ -46,7 +46,7 @@ public class SplitterItem extends ItemWrapper {
   }
 
   @Override
-  public void setupRenderer(ColoredTreeCellRenderer renderer) {
+  public void setupRenderer(ColoredTreeCellRenderer renderer, Project project, boolean selected) {
     //To change body of implemented methods use File | Settings | File Templates.
   }
 

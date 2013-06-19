@@ -48,7 +48,7 @@ public abstract class BundleBase {
       else {
         value = "!" + key + "!";
         if (assertKeyIsFound) {
-          assert false : key + " is not found in " + bundle;
+          assert false : "'" + key + "' is not found in " + bundle;
         }
       }
     }
@@ -58,7 +58,8 @@ public abstract class BundleBase {
     return format(value, params);
   }
 
-  public static String format(String value, Object... params) {
+  @NotNull
+  public static String format(@NotNull String value, @NotNull Object... params) {
     if (params.length > 0 && value.indexOf('{') >= 0) {
       return MessageFormat.format(value, params);
     }

@@ -66,8 +66,6 @@ public class LookupTypedHandler extends TypedHandlerDelegate {
       return Result.CONTINUE;
     }
 
-    CompletionPreview preview = lookup.uninstallPreview();
-
     if (!lookup.performGuardedChange(new Runnable() {
       @Override
       public void run() {
@@ -104,7 +102,6 @@ public class LookupTypedHandler extends TypedHandlerDelegate {
       if (completion != null) {
         completion.prefixUpdated();
       }
-      CompletionPreview.reinstallPreview(preview);
       return Result.STOP;
     }
 
@@ -151,10 +148,6 @@ public class LookupTypedHandler extends TypedHandlerDelegate {
 
   static CharFilter.Result getLookupAction(final char charTyped, final LookupImpl lookup) {
     final CharFilter.Result filtersDecision = getFiltersDecision(charTyped, lookup);
-    if (!Registry.is("ide.completion.allow.finishing.by.chars") &&
-        filtersDecision == CharFilter.Result.SELECT_ITEM_AND_FINISH_LOOKUP) {
-      return CharFilter.Result.HIDE_LOOKUP;
-    }
 
     final LookupElement currentItem = lookup.getCurrentItem();
     if (currentItem != null && charTyped != ' ') {

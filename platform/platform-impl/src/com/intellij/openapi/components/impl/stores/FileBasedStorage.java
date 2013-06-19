@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ public class FileBasedStorage extends XmlElementStorage {
 
     if (!myConfigDirectoryRefreshed && (app.isUnitTestMode() || app.isDispatchThread())) {
       try {
-        syncRefreshPathRecursively(PathManager.getConfigPath(true), "componentVersions");
+        syncRefreshPathRecursively(PathManager.getConfigPath(), "componentVersions");
       }
       finally {
         //noinspection AssignmentToStaticFieldFromInstanceMethod
@@ -174,6 +174,7 @@ public class FileBasedStorage extends XmlElementStorage {
       myCachedVirtualFile = StorageUtil.save(myFile, getDocumentToSave(), this);
     }
 
+    @NotNull
     @Override
     public Collection<IFile> getStorageFilesToSave() throws StateStorageException {
       boolean needsSave = needsSave();
@@ -189,6 +190,7 @@ public class FileBasedStorage extends XmlElementStorage {
       }
     }
 
+    @NotNull
     @Override
     public List<IFile> getAllStorageFiles() {
       return Collections.singletonList(myFile);
@@ -197,7 +199,6 @@ public class FileBasedStorage extends XmlElementStorage {
 
   @Override
   protected void loadState(final StorageData result, final Element element) throws StateStorageException {
-    ((FileStorageData)result).myFileName = myFile.getAbsolutePath();
     ((FileStorageData)result).myFilePath = myFile.getAbsolutePath();
     super.loadState(result, element);
   }
@@ -210,7 +211,6 @@ public class FileBasedStorage extends XmlElementStorage {
 
   public static class FileStorageData extends StorageData {
     String myFilePath;
-    String myFileName;
 
     public FileStorageData(final String rootElementName) {
       super(rootElementName);
@@ -218,7 +218,6 @@ public class FileBasedStorage extends XmlElementStorage {
 
     protected FileStorageData(FileStorageData storageData) {
       super(storageData);
-      myFileName = storageData.myFileName;
       myFilePath = storageData.myFilePath;
     }
 
@@ -229,7 +228,7 @@ public class FileBasedStorage extends XmlElementStorage {
 
     @NonNls
     public String toString() {
-      return "FileStorageData[" + myFileName + "]";
+      return "FileStorageData[" + myFilePath + "]";
     }
   }
 
@@ -252,16 +251,14 @@ public class FileBasedStorage extends XmlElementStorage {
     myBlockSavingTheContent = false;
     try {
       VirtualFile file = getVirtualFile();
-      if (file == null || file.isDirectory()) {
-        LOG.info("Document was not loaded for " + myFileSpec + " file is " + (file == null ? "null" : "directory"));        
+      if (file == null || file.isDirectory() || !file.isValid()) {
+        LOG.info("Document was not loaded for " + myFileSpec + " file is " + (file == null ? "null" : "directory"));
         return null;
       }
-      else if (file.getLength() == 0) {
+      if (file.getLength() == 0) {
         return processReadException(null);
       }
-      else {
-        return loadDocumentImpl(file);
-      }
+      return loadDocumentImpl(file);
     }
     catch (final JDOMException e) {
       return processReadException(e);

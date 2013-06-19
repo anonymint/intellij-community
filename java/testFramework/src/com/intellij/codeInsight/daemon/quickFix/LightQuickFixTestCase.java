@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.impl.ShowIntentionActionsHandler;
 import com.intellij.lang.Commenter;
 import com.intellij.lang.LanguageCommenters;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -29,7 +30,6 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.rt.execution.junit.FileComparisonFailure;
 import com.intellij.testFramework.LightPlatformCodeInsightTestCase;
 import com.intellij.testFramework.LightPlatformTestCase;
@@ -49,8 +49,12 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.intellij.util.ObjectUtils.notNull;
+
 public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase {
   @NonNls private static final String BEFORE_PREFIX = "before";
+  @NonNls private static final String AFTER_PREFIX = "after";
+
   private static QuickFixTestCase myWrapper;
 
   protected boolean shouldBeAvailableAfterExecution() {
@@ -62,10 +66,11 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
   }
 
   private static void doTestFor(final String testName, final QuickFixTestCase quickFixTestCase) {
-    final String relativePath = quickFixTestCase.getBasePath() + "/" + BEFORE_PREFIX + testName;
+    final String relativePath = notNull(quickFixTestCase.getBasePath(), "") + "/" + BEFORE_PREFIX + testName;
     final String testFullPath = quickFixTestCase.getTestDataPath().replace(File.separatorChar, '/') + relativePath;
     final File testFile = new File(testFullPath);
     CommandProcessor.getInstance().executeCommand(quickFixTestCase.getProject(), new Runnable() {
+      @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod", "CallToPrintStackTrace"})
       @Override
       public void run() {
         try {
@@ -108,16 +113,18 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     return parseActionHint(file, contents, " \"(.*)\" \"(true|false)\".*");
   }
 
-  public static Pair<String, Boolean> parseActionHint(final PsiFile file, String contents, @NonNls @RegExp String actionPattern) {
-    PsiFile hostFile = InjectedLanguageUtil.getTopLevelFile(file);
+  @NotNull
+  public static Pair<String, Boolean> parseActionHint(@NotNull PsiFile file, @NotNull String contents, @NotNull @NonNls @RegExp String actionPattern) {
+    PsiFile hostFile = InjectedLanguageManager.getInstance(file.getProject()).getTopLevelFile(file);
 
     final Commenter commenter = LanguageCommenters.INSTANCE.forLanguage(hostFile.getLanguage());
     String comment = commenter.getLineCommentPrefix();
     if (comment == null) {
       comment = commenter.getBlockCommentPrefix();
     }
-    
+
     // "quick fix action text to perform" "should be available"
+    assert comment != null : commenter;
     Pattern pattern = Pattern.compile("^" + comment.replace("*", "\\*") + actionPattern, Pattern.DOTALL);
     Matcher matcher = pattern.matcher(contents);
     assertTrue("No comment found in "+file.getVirtualFile(), matcher.matches());
@@ -126,10 +133,11 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     return Pair.create(text, actionShouldBeAvailable);
   }
 
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  public static void doAction(final String text, final boolean actionShouldBeAvailable, final String testFullPath, final String testName,
-                              QuickFixTestCase quickFix)
-    throws Exception {
+  public static void doAction(String text,
+                              boolean actionShouldBeAvailable,
+                              String testFullPath,
+                              String testName,
+                              QuickFixTestCase quickFix) throws Exception {
     IntentionAction action = quickFix.findActionWithText(text);
     if (action == null) {
       if (actionShouldBeAvailable) {
@@ -139,7 +147,8 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
           texts.add(intentionAction.getText());
         }
         Collection<HighlightInfo> infos = quickFix.doHighlighting();
-        fail("Action with text '" + text + "' is not available in test " + testFullPath+"\nAvailable actions ("+texts.size()+"): "+texts+"\n"+actions+"\nInfos:"+infos);
+        fail("Action with text '" + text + "' is not available in test " + testFullPath + "\n" +
+             "Available actions (" + texts.size() + "): " + texts + "\n" + actions + "\nInfos:" + infos);
       }
     }
     else {
@@ -155,7 +164,7 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
           fail("Action '" + text + "' is still available after its invocation in test " + testFullPath);
         }
       }
-      final String expectedFilePath = quickFix.getBasePath() + "/after" + testName;
+      String expectedFilePath = notNull(quickFix.getBasePath(), "") + "/" + AFTER_PREFIX + testName;
       quickFix.checkResultByFile("In file :" + expectedFilePath, expectedFilePath, false);
     }
   }
@@ -189,7 +198,7 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     return null;
   }
 
-  public static void doAllTests(QuickFixTestCase testCase) throws Exception {
+  public static void doAllTests(QuickFixTestCase testCase) {
     assertNotNull("getBasePath() should not return null!", testCase.getBasePath());
 
     final String testDirPath = testCase.getTestDataPath().replace(File.separatorChar, '/') + testCase.getBasePath();
@@ -208,7 +217,6 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     for (File file : files) {
       final String testName = file.getName().substring(BEFORE_PREFIX.length());
       doTestFor(testName, testCase);
-      System.out.println(file.getPath());
     }
     assertTrue("Test files not found in "+testDirPath,files.length != 0);
   }
@@ -217,7 +225,7 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     doTestFor(fileSuffix, createWrapper());
   }
 
-  protected void doAllTests() throws Exception {
+  protected void doAllTests() {
     doAllTests(createWrapper());
   }
 

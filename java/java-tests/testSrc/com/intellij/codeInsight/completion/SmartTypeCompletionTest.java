@@ -348,6 +348,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
     String path = "/generics";
 
     configureByFile(path + "/before9.java");
+    selectItem(myItems[1]);
     checkResultByFile(path + "/after9.java");
   }
 
@@ -421,7 +422,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testArrayAccessIndex() throws Throwable { doTest(); }
 
-  public void testThrowExceptionConstructor() throws Throwable { doTest(); }
+  public void testThrowExceptionConstructor() throws Throwable { doTest('\n'); }
 
   public void testJavadocThrows() throws Throwable { doTest(); }
 
@@ -470,7 +471,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testVoidExpectedType() throws Throwable {
     configureByTestName();
-    assertStringItems("notify", "notifyAll", "wait", "wait", "wait", "getClass", "equals", "hashCode", "toString");
+    assertStringItems("notify", "notifyAll", "wait", "wait", "wait", "equals", "hashCode", "toString", "getClass");
     type("eq");
     assertEquals("equals", assertOneElement(getLookup().getItems()).getLookupString());
     select();
@@ -594,23 +595,31 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testNewVararg() throws Throwable {
     configureByTestName();
-    assertStringItems("Foo", "Foo");
+    assertStringItems("Foo", "Foo", "Foo");
     assertEquals("{...} (default package)", LookupElementPresentation.renderElement(myItems[0]).getTailText());
     assertEquals("[] (default package)", LookupElementPresentation.renderElement(myItems[1]).getTailText());
+    assertEquals("[]{...} (default package)", LookupElementPresentation.renderElement(myItems[2]).getTailText());
   }
 
   public void testNewVararg2() throws Throwable {
     configureByTestName();
-    assertStringItems("String", "String");
+    assertStringItems("String", "String", "String");
     assertEquals(" (java.lang)", LookupElementPresentation.renderElement(myItems[0]).getTailText());
     assertEquals("[] (java.lang)", LookupElementPresentation.renderElement(myItems[1]).getTailText());
+    assertEquals("[]{...} (java.lang)", LookupElementPresentation.renderElement(myItems[2]).getTailText());
   }
 
   public void testNewByteArray() {
     configureByTestName();
     assertStringItems("byte");
     assertEquals("[]", LookupElementPresentation.renderElement(myItems[0]).getTailText());
+  }
 
+  public void testNewByteArray2() {
+    configureByTestName();
+    assertStringItems("byte", "byte");
+    assertEquals("[]", LookupElementPresentation.renderElement(myItems[0]).getTailText());
+    assertEquals("[]{...}", LookupElementPresentation.renderElement(myItems[1]).getTailText());
   }
 
   public void testInsideStringLiteral() throws Throwable { doAntiTest(); }
@@ -726,8 +735,7 @@ public class SmartTypeCompletionTest extends LightFixtureCompletionTestCase {
 
   public void testDontAutoCastWhenAlreadyCasted() throws Throwable {
     configureByTestName();
-    assertEquals("s", myItems[0].getLookupString());
-    assertEquals("copyValueOf", myItems[1].getLookupString());
+    myFixture.assertPreferredCompletionItems(0, "s", "toString");
     select();
     checkResultByTestName();
   }

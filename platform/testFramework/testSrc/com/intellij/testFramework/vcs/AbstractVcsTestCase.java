@@ -102,6 +102,8 @@ public abstract class AbstractVcsTestCase {
       myProjectFixture.setUp();
       myProject = myProjectFixture.getProject();
 
+      projectCreated();
+
       if (myInitChangeListManager) {
         ((ProjectComponent) ChangeListManager.getInstance(myProject)).projectOpened();
       }
@@ -121,6 +123,9 @@ public abstract class AbstractVcsTestCase {
         System.clearProperty(key);
       }
     }
+  }
+
+  protected void projectCreated() {
   }
 
   protected void activateVCS(final String vcsName) {
@@ -187,16 +192,25 @@ public abstract class AbstractVcsTestCase {
     new WriteCommandAction.Simple(myProject) {
       @Override
       protected void run() throws Throwable {
-        try {
-          final VirtualFile[] children = dir.getChildren();
-          for (VirtualFile child : children) {
-            if (filter != null && filter.process(child)) {
-              child.delete(AbstractVcsTestCase.this);
+        int numOfRuns = 5;
+        for (int i = 0; i < numOfRuns; i++) {
+          try {
+            final VirtualFile[] children = dir.getChildren();
+            for (VirtualFile child : children) {
+              if (filter != null && filter.process(child)) {
+                child.delete(AbstractVcsTestCase.this);
+              }
             }
+            return;
           }
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
+          catch (IOException e) {
+            if (i == (numOfRuns - 1)) {
+              // last run
+              throw e;
+            }
+            Thread.sleep(50);
+            continue;
+          }
         }
       }
     }.execute();
@@ -282,7 +296,7 @@ public abstract class AbstractVcsTestCase {
     }.execute().throwException();
   }
 
-  protected void deleteFileInCommand(final VirtualFile file) {
+  public void deleteFileInCommand(final VirtualFile file) {
     deleteFileInCommand(myProject, file);
   }
 
@@ -300,7 +314,7 @@ public abstract class AbstractVcsTestCase {
     }.execute();
   }
 
-  protected void editFileInCommand(final VirtualFile file, final String newContent) {
+  public void editFileInCommand(final VirtualFile file, final String newContent) {
     editFileInCommand(myProject, file, newContent);
   }
 
@@ -311,14 +325,12 @@ public abstract class AbstractVcsTestCase {
       @Override
       protected void run() throws Throwable {
         try {
-          long newModTs = Math.max(System.currentTimeMillis(), file.getModificationStamp() + 1100);
           final long newTs = Math.max(System.currentTimeMillis(), file.getTimeStamp() + 1100);
-          file.setBinaryContent(newContent.getBytes(), newModTs, newTs);
+          file.setBinaryContent(newContent.getBytes(), -1, newTs);
           final File file1 = new File(file.getPath());
           FileUtil.writeToFile(file1, newContent.getBytes());
           file.refresh(false, false);
-          newModTs = Math.max(System.currentTimeMillis() + 1100, file.getModificationStamp() + 1100);
-          assertTrue(file1 + " / " + newModTs, file1.setLastModified(newModTs));
+          assertTrue(file1 + " / " + newTs, file1.setLastModified(newTs));
         }
         catch(IOException ex) {
           throw new RuntimeException(ex);

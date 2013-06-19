@@ -23,13 +23,14 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlComment;
 import com.intellij.psi.xml.XmlDocument;
 import com.intellij.psi.xml.XmlText;
+import com.intellij.psi.xml.XmlTokenType;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Eugene.Kudelevsky
  */
 public class HtmlTextContextType extends TemplateContextType {
-  protected HtmlTextContextType() {
+  public HtmlTextContextType() {
     super("HTML_TEXT", CodeInsightBundle.message("dialog.edit.template.checkbox.html.text"), HtmlContextType.class);
   }
 
@@ -47,6 +48,9 @@ public class HtmlTextContextType extends TemplateContextType {
       return false;
     }
     if (PsiTreeUtil.getParentOfType(element, XmlText.class) != null) {
+      return true;
+    }
+    if (element.getNode().getElementType() == XmlTokenType.XML_START_TAG_START) {
       return true;
     }
     PsiElement parent = element.getParent();

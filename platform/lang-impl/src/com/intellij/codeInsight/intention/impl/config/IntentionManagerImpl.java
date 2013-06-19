@@ -51,7 +51,7 @@ import java.util.List;
 public class IntentionManagerImpl extends IntentionManager {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.intention.impl.config.IntentionManagerImpl");
 
-  private final List<IntentionAction> myActions = ContainerUtil.createEmptyCOWList();
+  private final List<IntentionAction> myActions = ContainerUtil.createLockFreeCopyOnWriteList();
   private final IntentionManagerSettings mySettings;
 
   private final Alarm myInitActionsAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
@@ -75,7 +75,7 @@ public class IntentionManagerImpl extends IntentionManager {
     });
   }
 
-  private void registerIntentionFromBean(final IntentionActionBean extension) {
+  private void registerIntentionFromBean(@NotNull final IntentionActionBean extension) {
     final Runnable runnable = new Runnable() {
       @Override
       public void run() {
@@ -97,7 +97,7 @@ public class IntentionManagerImpl extends IntentionManager {
       }
     };
     //todo temporary hack, need smarter logic:
-    // * on the first request, wait until all the initialization is finished  
+    // * on the first request, wait until all the initialization is finished
     // * ensure this request doesn't come on EDT
     // * while waiting, check for ProcessCanceledException
     if (ApplicationManager.getApplication().isUnitTestMode()) {
@@ -108,7 +108,7 @@ public class IntentionManagerImpl extends IntentionManager {
     }
   }
 
-  private static IntentionAction createIntentionActionWrapper(final IntentionActionBean intentionActionBean, final String[] categories) {
+  private static IntentionAction createIntentionActionWrapper(@NotNull IntentionActionBean intentionActionBean, String[] categories) {
     return new IntentionActionWrapper(intentionActionBean, categories);
   }
 

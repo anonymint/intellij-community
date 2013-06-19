@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.TreeSet;
 
 /**
@@ -46,26 +47,30 @@ public class AvailablePluginsManagerMain extends PluginManagerMain {
   public static final String N_A = "N/A";
 
   private PluginManagerMain installed;
+  private final String myVendorFilter;
 
-  public AvailablePluginsManagerMain(PluginManagerMain installed, PluginManagerUISettings uiSettings) {
+  public AvailablePluginsManagerMain(PluginManagerMain installed, PluginManagerUISettings uiSettings, String vendorFilter) {
     super(uiSettings);
     this.installed = installed;
+    myVendorFilter = vendorFilter;
     init();
     final JButton manageRepositoriesBtn = new JButton(MANAGE_REPOSITORIES);
-    manageRepositoriesBtn.setMnemonic('m');
-    manageRepositoriesBtn.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        if (ShowSettingsUtil.getInstance().editConfigurable(myActionsPanel, new PluginHostsConfigurable())) {
-          final ArrayList<String> pluginHosts = UpdateSettings.getInstance().myPluginHosts;
-          if (!pluginHosts.contains(((AvailablePluginsTableModel)pluginsModel).getRepository())) {
-            ((AvailablePluginsTableModel)pluginsModel).setRepository(AvailablePluginsTableModel.ALL, myFilter.getFilter().toLowerCase());
+    if (myVendorFilter == null) {
+      manageRepositoriesBtn.setMnemonic('m');
+      manageRepositoriesBtn.addActionListener(new ActionListener() {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          if (ShowSettingsUtil.getInstance().editConfigurable(myActionsPanel, new PluginHostsConfigurable())) {
+            final ArrayList<String> pluginHosts = UpdateSettings.getInstance().myPluginHosts;
+            if (!pluginHosts.contains(((AvailablePluginsTableModel)pluginsModel).getRepository())) {
+              ((AvailablePluginsTableModel)pluginsModel).setRepository(AvailablePluginsTableModel.ALL, myFilter.getFilter().toLowerCase());
+            }
+            loadAvailablePlugins();
           }
-          loadAvailablePlugins();
         }
-      }
-    });
-    myActionsPanel.add(manageRepositoriesBtn, BorderLayout.EAST);
+      });
+      myActionsPanel.add(manageRepositoriesBtn, BorderLayout.EAST);
+    }
 
     final JButton httpProxySettingsButton = new JButton(IdeBundle.message("button.http.proxy.settings"));
     httpProxySettingsButton.addActionListener(new ActionListener() {
@@ -83,11 +88,13 @@ public class AvailablePluginsManagerMain extends PluginManagerMain {
 
   @Override
   protected JScrollPane createTable() {
-    pluginsModel = new AvailablePluginsTableModel();
+    AvailablePluginsTableModel model = new AvailablePluginsTableModel();
+    model.setVendor(myVendorFilter);
+    pluginsModel = model;
     pluginTable = new PluginTable(pluginsModel);
     pluginTable.getTableHeader().setReorderingAllowed(false);
     pluginTable.setColumnWidth(PluginManagerColumnInfo.COLUMN_DOWNLOADS, 70);
-    pluginTable.setColumnWidth(PluginManagerColumnInfo.COLUMN_DATE, 50);
+    pluginTable.setColumnWidth(PluginManagerColumnInfo.COLUMN_DATE, 80);
     pluginTable.setColumnWidth(PluginManagerColumnInfo.COLUMN_RATE, 80);
 
     return ScrollPaneFactory.createScrollPane(pluginTable);
@@ -173,7 +180,7 @@ public class AvailablePluginsManagerMain extends PluginManagerMain {
   }
 
   @Override
-  protected void propagateUpdates(ArrayList<IdeaPluginDescriptor> list) {
+  protected void propagateUpdates(List<IdeaPluginDescriptor> list) {
     installed.modifyPluginsList(list); //propagate updates
   }
 

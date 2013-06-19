@@ -24,6 +24,8 @@ import com.intellij.ide.navigationToolbar.ui.NavBarUIManager;
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
+import com.intellij.ide.ui.customization.CustomActionsSchema;
+import com.intellij.ide.ui.customization.CustomisedActionGroup;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.project.Project;
@@ -32,6 +34,7 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.wm.IdeRootPaneNorthExtension;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,7 +50,7 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
   private Project myProject;
   private NavBarPanel myNavigationBar;
   private JPanel myRunPanel;
-  private boolean myNavToolbarGroupExist;
+  private final boolean myNavToolbarGroupExist;
   private JScrollPane myScrollPane;
 
   public NavBarRootPaneExtension(Project project) {
@@ -56,14 +59,22 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
     UISettings.getInstance().addUISettingsListener(new UISettingsListener() {
       @Override
       public void uiSettingsChanged(UISettings source) {
-        toggleRunPanel(!source.SHOW_MAIN_TOOLBAR);
+        toggleRunPanel(!source.SHOW_MAIN_TOOLBAR && source.SHOW_NAVIGATION_BAR && !UISettings.getInstance().PRESENTATION_MODE);
       }
     }, this);
 
-    final AnAction navBarToolBar = ActionManager.getInstance().getAction("NavBarToolBar");
-    myNavToolbarGroupExist = navBarToolBar instanceof DefaultActionGroup && ((DefaultActionGroup)navBarToolBar).getChildrenCount() > 0;
+    myNavToolbarGroupExist = runToolbarExists();
 
     Disposer.register(myProject, this);
+  }
+
+  @Override
+  public void revalidate() {
+    final UISettings settings = UISettings.getInstance();
+    if (!settings.SHOW_MAIN_TOOLBAR && settings.SHOW_NAVIGATION_BAR && !UISettings.getInstance().PRESENTATION_MODE) {
+      toggleRunPanel(false);
+      toggleRunPanel(true);
+    }
   }
 
   @Override
@@ -72,14 +83,16 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
   }
 
   public boolean isMainToolbarVisible() {
-    return UISettings.getInstance().SHOW_MAIN_TOOLBAR || !myNavToolbarGroupExist;
+    return !UISettings.getInstance().PRESENTATION_MODE && (UISettings.getInstance().SHOW_MAIN_TOOLBAR || !myNavToolbarGroupExist);
   }
 
   public static boolean runToolbarExists() {
-    final AnAction navBarToolBar = ActionManager.getInstance().getAction("NavBarToolBar");
-    return navBarToolBar instanceof DefaultActionGroup && ((DefaultActionGroup)navBarToolBar).getChildrenCount() > 0;
+    final AnAction correctedAction = CustomActionsSchema.getInstance().getCorrectedAction("NavBarToolBar");
+    return correctedAction instanceof DefaultActionGroup && ((DefaultActionGroup)correctedAction).getChildrenCount() > 0 ||
+           correctedAction instanceof CustomisedActionGroup && ((CustomisedActionGroup)correctedAction).getFirstAction() != null;
   }
 
+  @Override
   public JComponent getComponent() {
     if (myWrapperPanel == null) {
       myWrapperPanel = new NavBarWrapperPanel(new BorderLayout()) {
@@ -95,12 +108,12 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
         }
       };
       myWrapperPanel.add(buildNavBarPanel(), BorderLayout.CENTER);
-      toggleRunPanel(!UISettings.getInstance().SHOW_MAIN_TOOLBAR);
+      toggleRunPanel(!UISettings.getInstance().SHOW_MAIN_TOOLBAR && !UISettings.getInstance().PRESENTATION_MODE);
     }
 
     return myWrapperPanel;
   }
-  
+
   public static class NavBarWrapperPanel extends JPanel {
     public NavBarWrapperPanel(LayoutManager layout) {
       super(layout);
@@ -120,11 +133,10 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
   private void toggleRunPanel(final boolean show) {
     if (show && myRunPanel == null && runToolbarExists()) {
       final ActionManager manager = ActionManager.getInstance();
-      final AnAction toolbarRunGroup = manager.getAction("NavBarToolBar");
-      if (toolbarRunGroup instanceof DefaultActionGroup) {
-        final DefaultActionGroup group = (DefaultActionGroup)toolbarRunGroup;
-        final boolean needGap = isNeedGap(group);
-        final ActionToolbar actionToolbar = manager.createActionToolbar(ActionPlaces.NAVIGATION_BAR, group, true);
+      AnAction toolbarRunGroup = CustomActionsSchema.getInstance().getCorrectedAction("NavBarToolBar");
+      if (toolbarRunGroup instanceof ActionGroup) {
+        final boolean needGap = isNeedGap(toolbarRunGroup);
+        final ActionToolbar actionToolbar = manager.createActionToolbar(ActionPlaces.NAVIGATION_BAR, (ActionGroup)toolbarRunGroup, true);
         final JComponent component = actionToolbar.getComponent();
         component.setOpaque(false);
         myRunPanel = new JPanel(new BorderLayout()) {
@@ -148,33 +160,41 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
 
   private boolean isUndocked() {
     final Window ancestor = SwingUtilities.getWindowAncestor(myWrapperPanel);
-    return (ancestor != null && !(ancestor instanceof IdeFrameImpl)) || !UISettings.getInstance().SHOW_MAIN_TOOLBAR;
+    return (ancestor != null && !(ancestor instanceof IdeFrameImpl))
+           || !UISettings.getInstance().SHOW_MAIN_TOOLBAR
+           || !UISettings.getInstance().PRESENTATION_MODE;
   }
 
-  private static boolean isNeedGap(final DefaultActionGroup group) {
+  private static boolean isNeedGap(final AnAction group) {
     final AnAction firstAction = getFirstAction(group);
     return firstAction instanceof ComboBoxAction;
   }
 
   @Nullable
-  private static AnAction getFirstAction(final DefaultActionGroup group) {
-    AnAction firstAction = null;
-    for (final AnAction action : group.getChildActionsOrStubs()) {
-      if (action instanceof DefaultActionGroup) {
-        firstAction = getFirstAction((DefaultActionGroup)action);
-      }
-      else if (action instanceof Separator || action instanceof ActionGroup) {
-        continue;
-      }
-      else {
-        firstAction = action;
-        break;
+  private static AnAction getFirstAction(final AnAction group) {
+    if (group instanceof DefaultActionGroup) {
+      AnAction firstAction = null;
+      for (final AnAction action : ((DefaultActionGroup)group).getChildActionsOrStubs()) {
+        if (action instanceof DefaultActionGroup) {
+          firstAction = getFirstAction((DefaultActionGroup)action);
+        }
+        else if (action instanceof Separator || action instanceof ActionGroup) {
+          continue;
+        }
+        else {
+          firstAction = action;
+          break;
+        }
+
+        if (firstAction != null) break;
       }
 
-      if (firstAction != null) break;
+      return firstAction;
     }
-
-    return firstAction;
+    if (group instanceof CustomisedActionGroup) {
+      return ((CustomisedActionGroup)group).getFirstAction();
+    }
+    return null;
   }
 
   private JComponent buildNavBarPanel() {
@@ -184,7 +204,7 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
 
       @Override
       public void run() {
-        if (LafManager.getInstance().getCurrentLookAndFeel().getName().equals(laf)) return;
+        //if (LafManager.getInstance().getCurrentLookAndFeel().getName().equals(laf)) return;
         laf = LafManager.getInstance().getCurrentLookAndFeel().getName();
         panel.get().removeAll();
         myScrollPane = null;
@@ -212,7 +232,7 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
       @Override
       public void updateUI() {
         super.updateUI();
-        if (UISettings.getInstance().SHOW_NAVIGATION_BAR) {
+        if (UISettings.getInstance().SHOW_NAVIGATION_BAR && !UISettings.getInstance().PRESENTATION_MODE) {
           SwingUtilities.invokeLater(updater);
         }
       }
@@ -227,10 +247,13 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
         Graphics2D g2d = (Graphics2D) g.create();
         g2d.translate(r.x, r.y);
 
-        Rectangle rectangle =
-          new Rectangle(0, 0, r.width + insets.left + insets.right, r.height + insets.top + insets.bottom);
+        Rectangle rectangle = new Rectangle(0, 0, r.width + insets.left + insets.right, r.height + insets.top + insets.bottom);
         NavBarUIManager.getUI().doPaintNavBarPanel(g2d, rectangle, isMainToolbarVisible(), isUndocked());
-        
+        if (UIUtil.isUnderAquaLookAndFeel() && isUndocked()) {
+          Rectangle bounds = getParent().getBounds();
+          NavBarUIManager.getUI().doPaintWrapperPanel(g2d, bounds, false);
+        }
+
         g2d.dispose();
       }
 
@@ -254,11 +277,12 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
     return panel.get();
   }
 
+  @Override
   public void uiSettingsChanged(final UISettings settings) {
     if (myNavigationBar != null) {
       myNavigationBar.updateState(settings.SHOW_NAVIGATION_BAR);
-      myWrapperPanel.setVisible(settings.SHOW_NAVIGATION_BAR);
-      
+      myWrapperPanel.setVisible(settings.SHOW_NAVIGATION_BAR && !UISettings.getInstance().PRESENTATION_MODE);
+
       myWrapperPanel.revalidate();
       myNavigationBar.revalidate();
       myWrapperPanel.repaint();
@@ -270,11 +294,13 @@ public class NavBarRootPaneExtension extends IdeRootPaneNorthExtension {
     }
   }
 
+  @Override
   @NonNls
   public String getKey() {
     return NAV_BAR;
   }
 
+  @Override
   public void dispose() {
     myWrapperPanel.setVisible(false);
     myWrapperPanel = null;

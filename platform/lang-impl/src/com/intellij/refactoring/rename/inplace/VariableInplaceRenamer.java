@@ -38,10 +38,7 @@ import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
-import com.intellij.refactoring.rename.AutomaticRenamingDialog;
-import com.intellij.refactoring.rename.RenameHandlerRegistry;
-import com.intellij.refactoring.rename.RenameProcessor;
-import com.intellij.refactoring.rename.RenameUtil;
+import com.intellij.refactoring.rename.*;
 import com.intellij.refactoring.rename.naming.AutomaticRenamer;
 import com.intellij.refactoring.rename.naming.AutomaticRenamerFactory;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
@@ -102,6 +99,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
     if (stringToSearch != null) {
       TextOccurrencesUtil
         .processUsagesInStringsAndComments(myElementToRename, stringToSearch, true, new PairProcessor<PsiElement, TextRange>() {
+          @Override
           public boolean process(PsiElement psiElement, TextRange textRange) {
             if (psiElement.getContainingFile() == currentFile) {
               stringUsages.add(Pair.create(psiElement, textRange));
@@ -166,6 +164,12 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
 
   @Override
   protected int restoreCaretOffset(int offset) {
+    if (myCaretRangeMarker.isValid()) {
+      if (myCaretRangeMarker.getStartOffset() <= offset && myCaretRangeMarker.getEndOffset() >= offset) {
+        return offset;
+      }
+      return myCaretRangeMarker.getEndOffset();
+    }
     return offset;
   }
 
@@ -226,6 +230,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
             }
 
             final Runnable runnable = new Runnable() {
+              @Override
               public void run() {
                 renamer.findUsages(usages, false, false);
               }
@@ -274,7 +279,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
     }
     finally {
       try {
-        ((EditorImpl)InjectedLanguageUtil.getTopLevelEditor(myEditor)).stopDumb();
+        ((EditorImpl)InjectedLanguageUtil.getTopLevelEditor(myEditor)).stopDumbLater();
       }
       finally {
         FinishMarkAction.finish(myProject, myEditor, markAction);
@@ -284,11 +289,6 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
 
   @Override
   protected String getCommandName() {
-    PsiNamedElement variable = getVariable();
-    if (variable == null) {
-      LOG.error(myElementToRename);
-      return "Rename";
-    }
     return RefactoringBundle.message("renaming.command.name", myInitialName);
   }
 
@@ -310,6 +310,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
         if (mySnapshot != null) {
           if (isIdentifier(myInsertedName, myLanguage)) {
             ApplicationManager.getApplication().runWriteAction(new Runnable() {
+              @Override
               public void run() {
                 mySnapshot.apply(myInsertedName);
               }
@@ -329,7 +330,7 @@ public class VariableInplaceRenamer extends InplaceRefactoring {
       revertStateOnFinish();
     }
     else {
-      ((EditorImpl)InjectedLanguageUtil.getTopLevelEditor(myEditor)).stopDumb();
+      ((EditorImpl)InjectedLanguageUtil.getTopLevelEditor(myEditor)).stopDumbLater();
     }
   }
 

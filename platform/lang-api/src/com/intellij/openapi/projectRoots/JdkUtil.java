@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,6 +117,7 @@ public class JdkUtil {
     if (!binPath.exists()) return false;
 
     FileFilter fileFilter = new FileFilter() {
+      @Override
       @SuppressWarnings({"HardCodedStringLiteral"})
       public boolean accept(File f) {
         if (f.isDirectory()) return false;
@@ -136,6 +137,7 @@ public class JdkUtil {
     if (!binPath.exists()) return false;
 
     FileFilter fileFilter = new FileFilter() {
+      @Override
       @SuppressWarnings({"HardCodedStringLiteral"})
       public boolean accept(File f) {
         return !f.isDirectory() && Comparing.strEqual(FileUtil.getNameWithoutExtension(f), "java");
@@ -162,48 +164,43 @@ public class JdkUtil {
     commandLine.setExePath(exePath);
 
     final ParametersList vmParametersList = javaParameters.getVMParametersList();
-    commandLine.setEnvParams(javaParameters.getEnv());
-    commandLine.setPassParentEnvs(javaParameters.isPassParentEnvs());
+    commandLine.getEnvironment().putAll(javaParameters.getEnv());
+    commandLine.setPassParentEnvironment(javaParameters.isPassParentEnvs());
 
     final Class commandLineWrapper;
     if ((commandLineWrapper = getCommandLineWrapperClass()) != null) {
-
-      if (javaParameters.isDynamicVMOptions() && useDynamicVMOptions()) {
+      if (forceDynamicClasspath) {
+        File classpathFile = null;
         File vmParamsFile = null;
-        try {
-          vmParamsFile = FileUtil.createTempFile("vm_params", null);
-          final PrintWriter writer = new PrintWriter(vmParamsFile);
-          try {
-            for (String param : vmParametersList.getList()) {
-              if (param.startsWith("-D")) {
-                writer.println(param);
+        if (!vmParametersList.hasParameter("-classpath") && !vmParametersList.hasParameter("-cp")) {
+          if (javaParameters.isDynamicVMOptions() && useDynamicVMOptions()) {
+            try {
+              vmParamsFile = FileUtil.createTempFile("vm_params", null);
+              final PrintWriter writer = new PrintWriter(vmParamsFile);
+              try {
+                for (String param : vmParametersList.getList()) {
+                  if (param.startsWith("-D")) {
+                    writer.println(param);
+                  }
+                }
+              }
+              finally {
+                writer.close();
+              }
+            }
+            catch (IOException e) {
+              LOG.error(e);
+            }
+            final List<String> list = vmParametersList.getList();
+            for (String param : list) {
+              if (!param.trim().startsWith("-D")) {
+                commandLine.addParameter(param);
               }
             }
           }
-          finally {
-            writer.close();
+          else {
+            commandLine.addParameters(vmParametersList.getList());
           }
-        }
-        catch (IOException e) {
-          LOG.error(e);
-        }
-        final List<String> list = vmParametersList.getList();
-        for (String param : list) {
-          if (!param.trim().startsWith("-D")) {
-            commandLine.addParameter(param);
-          }
-        }
-
-        commandLine.addParameter("@vm_params");
-        commandLine.addParameter(vmParamsFile.getAbsolutePath());
-      }
-      else {
-        commandLine.addParameters(vmParametersList.getList());
-      }
-
-      if (forceDynamicClasspath) {
-        File classpathFile = null;
-        if (!vmParametersList.hasParameter("-classpath") && !vmParametersList.hasParameter("-cp")) {
           try {
             classpathFile = FileUtil.createTempFile("classpath", null);
             final PrintWriter writer = new PrintWriter(classpathFile);
@@ -215,7 +212,7 @@ public class JdkUtil {
             finally {
               writer.close();
             }
-  
+
             String classpath = PathUtil.getJarPathForClass(commandLineWrapper);
             final String utilRtPath = PathUtil.getJarPathForClass(StringUtilRt.class);
             if (!classpath.equals(utilRtPath)) {
@@ -226,7 +223,7 @@ public class JdkUtil {
               classpath += File.pathSeparator + PathUtil.getJarPathForClass(ourUrlClassLoader);
               classpath += File.pathSeparator + PathUtil.getJarPathForClass(THashMap.class);
             }
-  
+
             commandLine.addParameter("-classpath");
             commandLine.addParameter(classpath);
           }
@@ -234,15 +231,20 @@ public class JdkUtil {
             LOG.error(e);
           }
         }
-  
+
         appendEncoding(javaParameters, commandLine, vmParametersList);
         if (classpathFile != null) {
           commandLine.addParameter(commandLineWrapper.getName());
           commandLine.addParameter(classpathFile.getAbsolutePath());
         }
+
+        if (vmParamsFile != null) {
+          commandLine.addParameter("@vm_params");
+          commandLine.addParameter(vmParamsFile.getAbsolutePath());
+        }
       }
       else {
-        appendEncodingClasspath(javaParameters, commandLine, vmParametersList);
+        appendParamsEncodingClasspath(javaParameters, commandLine, vmParametersList);
       }
     }
     else {
@@ -262,12 +264,6 @@ public class JdkUtil {
                                                     GeneralCommandLine commandLine,
                                                     ParametersList parametersList) {
     commandLine.addParameters(parametersList.getList());
-    appendEncodingClasspath(javaParameters, commandLine, parametersList);
-  }
-
-  private static void appendEncodingClasspath(SimpleJavaParameters javaParameters,
-                                              GeneralCommandLine commandLine,
-                                              ParametersList parametersList) {
     appendEncoding(javaParameters, commandLine, parametersList);
     if (!parametersList.hasParameter("-classpath") && !parametersList.hasParameter("-cp")){
       commandLine.addParameter("-classpath");

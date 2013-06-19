@@ -21,6 +21,7 @@ import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.settings.*;
 import com.intellij.debugger.ui.breakpoints.*;
 import com.intellij.ide.DataManager;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
@@ -31,16 +32,17 @@ import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.AbstractDebuggerSession;
-import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointItem;
 import com.intellij.xdebugger.breakpoints.ui.XBreakpointGroupingRule;
 import com.intellij.xdebugger.impl.DebuggerSupport;
 import com.intellij.xdebugger.impl.actions.DebuggerActionHandler;
 import com.intellij.xdebugger.impl.actions.DebuggerToggleActionHandler;
 import com.intellij.xdebugger.impl.actions.EditBreakpointActionHandler;
 import com.intellij.xdebugger.impl.actions.MarkObjectActionHandler;
+import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointItem;
 import com.intellij.xdebugger.impl.breakpoints.ui.BreakpointPanelProvider;
 import com.intellij.xdebugger.impl.evaluate.quick.common.QuickEvaluateHandler;
 import com.intellij.xdebugger.impl.settings.DebuggerSettingsPanelProvider;
@@ -64,7 +66,8 @@ public class JavaDebuggerSupport extends DebuggerSupport {
   private final ForceRunToCursorActionHandler myForceRunToCursorActionHandler = new ForceRunToCursorActionHandler();
   private final ResumeActionHandler myResumeActionHandler = new ResumeActionHandler();
   private final PauseActionHandler myPauseActionHandler = new PauseActionHandler();
-  private final ToggleLineBreakpointActionHandler myToggleLineBreakpointActionHandler = new ToggleLineBreakpointActionHandler();
+  private final ToggleLineBreakpointActionHandler myToggleLineBreakpointActionHandler = new ToggleLineBreakpointActionHandler(false);
+  private final ToggleLineBreakpointActionHandler myToggleTemporaryLineBreakpointActionHandler = new ToggleLineBreakpointActionHandler(true);
   private final ShowExecutionPointActionHandler myShowExecutionPointActionHandler = new ShowExecutionPointActionHandler();
   private final EvaluateActionHandler myEvaluateActionHandler = new EvaluateActionHandler();
   private final QuickEvaluateActionHandler myQuickEvaluateHandler = new QuickEvaluateActionHandler();
@@ -136,6 +139,12 @@ public class JavaDebuggerSupport extends DebuggerSupport {
   }
 
   @NotNull
+  @Override
+  public DebuggerActionHandler getToggleTemporaryLineBreakpointHandler() {
+    return myToggleTemporaryLineBreakpointActionHandler;
+  }
+
+  @NotNull
   public DebuggerActionHandler getShowExecutionPointHandler() {
     return myShowExecutionPointActionHandler;
   }
@@ -185,7 +194,7 @@ public class JavaDebuggerSupport extends DebuggerSupport {
   }
 
   private static class JavaBreakpointPanelProvider extends BreakpointPanelProvider<Breakpoint> {
-    private List<MyBreakpointManagerListener> myListeners = ContainerUtil.createEmptyCOWList();
+    private final List<MyBreakpointManagerListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
     @Override
     public AnAction[] getAddBreakpointActions(@NotNull Project project) {
@@ -205,15 +214,21 @@ public class JavaDebuggerSupport extends DebuggerSupport {
     }
 
     @Override
-    public void addListener(final BreakpointsListener listener, Project project) {
-      BreakpointManager breakpointManager = DebuggerManagerEx.getInstanceEx(getCurrentProject()).getBreakpointManager();
+    public void addListener(final BreakpointsListener listener, Project project, Disposable disposable) {
+      BreakpointManager breakpointManager = DebuggerManagerEx.getInstanceEx(project).getBreakpointManager();
       final MyBreakpointManagerListener listener1 = new MyBreakpointManagerListener(listener, breakpointManager);
       breakpointManager.addBreakpointManagerListener(listener1);
       myListeners.add(listener1);
+      Disposer.register(disposable, new Disposable() {
+        @Override
+        public void dispose() {
+          removeListener(listener);
+        }
+      });
     }
 
     @Override
-    public void removeListener(BreakpointsListener listener) {
+    protected void removeListener(BreakpointsListener listener) {
       for (MyBreakpointManagerListener managerListener : myListeners) {
         if (managerListener.myListener == listener) {
           BreakpointManager manager = managerListener.myBreakpointManager;

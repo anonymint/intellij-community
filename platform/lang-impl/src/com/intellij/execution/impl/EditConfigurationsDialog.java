@@ -29,6 +29,7 @@ public class EditConfigurationsDialog extends SingleConfigurableEditor implement
     super(project, new RunConfigurable(project));
     ((RunConfigurable)getConfigurable()).setRunDialog(this);
     setTitle(ExecutionBundle.message("run.debug.dialog.title"));
+    setHorizontalStretch(1.3F);
   }
 
   @Override
@@ -41,6 +42,7 @@ public class EditConfigurationsDialog extends SingleConfigurableEditor implement
     }
   }
 
+  @Override
   protected String getDimensionServiceKey() {
     return "#com.intellij.execution.impl.EditConfigurationsDialog";
   }
@@ -51,6 +53,7 @@ public class EditConfigurationsDialog extends SingleConfigurableEditor implement
     return myExecutor;
   }
 
+  @Override
   public void setOKActionEnabled(boolean isEnabled) {
     super.setOKActionEnabled(isEnabled);
   }

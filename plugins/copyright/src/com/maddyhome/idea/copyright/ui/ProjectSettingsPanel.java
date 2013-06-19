@@ -16,21 +16,22 @@
 package com.maddyhome.idea.copyright.ui;
 
 import com.intellij.ide.DataManager;
-import com.intellij.psi.search.scope.packageSet.CustomScopesProviderEx;
-import com.intellij.ui.JBColor;
-import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ide.util.scopeChooser.PackageSetChooserCombo;
 import com.intellij.ide.util.scopeChooser.ScopeChooserConfigurable;
 import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.newEditor.OptionsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.packageDependencies.DefaultScopesProvider;
 import com.intellij.packageDependencies.DependencyValidationManager;
+import com.intellij.psi.search.scope.packageSet.CustomScopesProviderEx;
 import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.psi.search.scope.packageSet.NamedScopesHolder;
 import com.intellij.ui.HyperlinkLabel;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.editors.JBComboBoxTableCellEditorComponent;
 import com.intellij.ui.table.TableView;
@@ -108,7 +109,7 @@ public class ProjectSettingsPanel {
           final DataContext dataContext = DataManager.getInstance().getDataContextFromFocus().getResult();
           final OptionsEditor optionsEditor = OptionsEditor.KEY.getData(dataContext);
           if (optionsEditor != null) {
-            ScopeChooserConfigurable configurable = optionsEditor.findConfigurable(ScopeChooserConfigurable.class);
+            Configurable configurable = optionsEditor.findConfigurableById(ScopeChooserConfigurable.PROJECT_SCOPES);
             if (configurable != null) {
               optionsEditor.clearSearchAndSelect(configurable);
             }
@@ -166,7 +167,7 @@ public class ProjectSettingsPanel {
       final NamedScope scope = setting.getScope();
       if (!iterator.hasNext()) return true;
       final String scopeName = iterator.next();
-      if (!Comparing.strEqual(scopeName, scope.getName())) return true;
+      if (scope == null || !Comparing.strEqual(scopeName, scope.getName())) return true;
       final String profileName = map.get(scope.getName());
       if (profileName == null) return true;
       if (!profileName.equals(setting.getProfileName())) return true;

@@ -855,6 +855,7 @@ public class AbstractPopup implements JBPopup {
 
     if (myRequestFocus) {
       getFocusManager().requestFocus(new FocusCommand() {
+        @NotNull
         @Override
         public ActionCallback run() {
           if (isDisposed()) {
@@ -884,6 +885,7 @@ public class AbstractPopup implements JBPopup {
                 }
 
                 furtherRequestor.requestFocus(new FocusCommand() {
+                  @NotNull
                   @Override
                   public ActionCallback run() {
                     if (isDisposed()) {
@@ -1094,6 +1096,7 @@ public class AbstractPopup implements JBPopup {
     if (!myFocusable) return false;
 
     getFocusManager().requestFocus(new FocusCommand() {
+      @NotNull
       @Override
       public ActionCallback run() {
         _requestFocus();
@@ -1489,8 +1492,9 @@ public class AbstractPopup implements JBPopup {
 
   private class MyWindowListener extends WindowAdapter {
     @Override
-    public void windowClosed(final WindowEvent e) {
+    public void windowClosing(final WindowEvent e) {
       resetWindow();
+      cancel();
     }
   }
 
@@ -1677,7 +1681,16 @@ public class AbstractPopup implements JBPopup {
   @Override
   public boolean dispatchKeyEvent(@NotNull KeyEvent e) {
     BooleanFunction<KeyEvent> handler = myKeyEventHandler;
-    return handler != null && handler.fun(e);
+    if (handler != null) {
+      return handler.fun(e);
+    }
+    else {
+      if (isCloseRequest(e) && myCancelKeyEnabled) {
+        cancel(e);
+        return true;
+      }
+    }
+    return false;
   }
 
   private class SpeedSearchKeyListener implements KeyListener {
@@ -1704,5 +1717,9 @@ public class AbstractPopup implements JBPopup {
   @NotNull
   public Dimension getFooterPreferredSize() {
     return myAdComponent == null ? new Dimension(0,0) : myAdComponent.getPreferredSize();
+  }
+
+  public static boolean isCloseRequest(KeyEvent e) {
+    return e != null && e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_ESCAPE && e.getModifiers() == 0;
   }
 }

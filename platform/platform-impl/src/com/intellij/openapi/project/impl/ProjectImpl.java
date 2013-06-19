@@ -16,6 +16,7 @@
 package com.intellij.openapi.project.impl;
 
 import com.intellij.diagnostic.PluginException;
+import com.intellij.ide.RecentProjectsManagerBase;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.ide.startup.StartupManagerEx;
@@ -75,6 +76,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
   private static final Logger LOG = Logger.getInstance("#com.intellij.project.impl.ProjectImpl");
   private static final String PLUGIN_SETTINGS_ERROR = "Plugin Settings Error";
+  public static final String NAME_FILE = ".name";
 
   private ProjectManagerImpl myManager;
 
@@ -92,13 +94,15 @@ public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
 
   public static Key<Long> CREATION_TIME = Key.create("ProjectImpl.CREATION_TIME");
 
-  protected ProjectImpl(ProjectManagerImpl manager, String filePath, boolean isOptimiseTestLoadSpeed, String projectName) {
-    super(ApplicationManager.getApplication());
+  protected ProjectImpl(@NotNull ProjectManagerImpl manager, @NotNull String filePath, boolean isOptimiseTestLoadSpeed, String projectName) {
+    super(ApplicationManager.getApplication(), "Project "+(projectName == null ? filePath : projectName));
     putUserData(CREATION_TIME, System.nanoTime());
 
     getPicoContainer().registerComponentInstance(Project.class, this);
 
-    getStateStore().setProjectFilePath(filePath);
+    if (!isDefault()) {
+      getStateStore().setProjectFilePath(filePath);
+    }
 
     myOptimiseTestLoadSpeed = isOptimiseTestLoadSpeed;
 
@@ -131,9 +135,9 @@ public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
   }
 
   @Override
-  protected void bootstrapPicoContainer() {
+  protected void bootstrapPicoContainer(@NotNull String name) {
     Extensions.instantiateArea(ExtensionAreas.IDEA_PROJECT, this, null);
-    super.bootstrapPicoContainer();
+    super.bootstrapPicoContainer(name);
     final MutablePicoContainer picoContainer = getPicoContainer();
 
     final ProjectStoreClassProvider projectStoreClassProvider = (ProjectStoreClassProvider)picoContainer.getComponentInstanceOfType(ProjectStoreClassProvider.class);
@@ -342,7 +346,7 @@ public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
         if (baseDir != null && baseDir.isValid()) {
           final VirtualFile ideaDir = baseDir.findChild(DIRECTORY_STORE_FOLDER);
           if (ideaDir != null && ideaDir.isValid() && ideaDir.isDirectory()) {
-            final File nameFile = new File(ideaDir.getPath(), ".name");
+            final File nameFile = new File(ideaDir.getPath(), NAME_FILE);
             try {
               FileUtil.writeToFile(nameFile, getName().getBytes("UTF-8"), false);
               myOldName = null;
@@ -350,6 +354,7 @@ public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
             catch (IOException e) {
               LOG.info("Unable to store project name to: " + nameFile.getPath());
             }
+            RecentProjectsManagerBase.getInstance().clearNameCache();
           }
         }
       }
@@ -433,15 +438,16 @@ public class ProjectImpl extends ComponentManagerImpl implements ProjectEx {
     }
   }
 
+  @NotNull
   @Override
-  public <T> T[] getExtensions(final ExtensionPointName<T> extensionPointName) {
+  public <T> T[] getExtensions(@NotNull final ExtensionPointName<T> extensionPointName) {
     return Extensions.getArea(this).getExtensionPoint(extensionPointName).getExtensions();
   }
 
   public String getDefaultName() {
     if (isDefault()) return TEMPLATE_PROJECT_NAME;
 
-    return getStateStore().getProjectName();    
+    return getStateStore().getProjectName();
   }
 
   private class MyProjectManagerListener extends ProjectManagerAdapter {

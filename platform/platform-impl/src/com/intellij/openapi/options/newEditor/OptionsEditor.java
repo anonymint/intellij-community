@@ -126,7 +126,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
         myTree.processTextEvent(e);
       }
     };
-    
+
     mySearch.getTextEditor().addMouseListener(new MouseAdapter() {
       @Override
       public void mousePressed(MouseEvent e) {
@@ -134,13 +134,13 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
         if (!myContext.isHoldingFilter() && hasText) {
           myFilter.reenable();
         }
-        
+
         if (!isSearchFieldFocused() && hasText) {
           mySearch.selectText();
         }
       }
     });
-    
+
     myTree = new OptionsTree(myProject, groups, getContext()) {
       @Override
       protected void onTreeKeyEvent(final KeyEvent e) {
@@ -191,7 +191,14 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     */
 
 
-    myLeftSide = new JPanel(new BorderLayout());
+    myLeftSide = new JPanel(new BorderLayout()) {
+      @Override
+      public Dimension getMinimumSize() {
+        Dimension dimension = super.getMinimumSize();
+        dimension.width = Math.max(myTree.getMinimumSize().width, mySearchWrapper.getPreferredSize().width);
+        return dimension;
+      }
+    };
 
     /* [back/forward]
 
@@ -207,7 +214,6 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
 
     myMainSplitter = new Splitter(false);
     myMainSplitter.setFirstComponent(myLeftSide);
-    myMainSplitter.setHonorComponentsMinimumSize(false);
 
     myLoadingDecorator = new LoadingDecorator(myOwnDetails.getComponent(), this, 150);
     myMainSplitter.setSecondComponent(myLoadingDecorator.getComponent());
@@ -231,7 +237,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
 
     Toolkit.getDefaultToolkit().addAWTEventListener(this,
                                                     AWTEvent.MOUSE_EVENT_MASK | AWTEvent.KEY_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
-    
+
     ActionManager.getInstance().addAnActionListener(new AnActionListener() {
       @Override
       public void beforeActionPerformed(AnAction action, DataContext dataContext, AnActionEvent event) {
@@ -261,15 +267,19 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     setFilterFieldVisible(true, false, false);
 
     new UiNotifyConnector.Once(this, new Activatable() {
+      @Override
       public void showNotify() {
         myWindow = SwingUtilities.getWindowAncestor(OptionsEditor.this);
       }
 
+      @Override
       public void hideNotify() {
       }
     });
   }
 
+  /** @see #select(com.intellij.openapi.options.Configurable) */
+  @Deprecated
   public ActionCallback select(Class<? extends Configurable> configurableClass) {
     final Configurable configurable = findConfigurable(configurableClass);
     if (configurable == null) {
@@ -278,6 +288,8 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     return select(configurable);
   }
 
+  /** @see #findConfigurableById(String) */
+  @Deprecated
   @Nullable
   public <T extends Configurable> T findConfigurable(Class<T> configurableClass) {
     return myTree.findConfigurable(configurableClass);
@@ -292,7 +304,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     clearFilter();
     return select(configurable, "");
   }
-  
+
   public ActionCallback select(Configurable configurable) {
     if (StringUtil.isEmpty(mySearch.getText())) {
       return select(configurable, "");
@@ -335,6 +347,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
 
     } else {
       getUiFor(configurable).doWhenDone(new EdtRunnable() {
+        @Override
         public void runEdt() {
           if (myDisposed) return;
 
@@ -367,7 +380,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
           checkModified(configurable);
 
           if (myTree.myBuilder.getSelectedElements().size() == 0) {
-            select(configurable.getClass()).notify(result);
+            select(configurable).notify(result);
           } else {
             result.setDone();
           }
@@ -378,7 +391,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     return result;
   }
 
-  private void assertIsDispatchThread() {
+  private static void assertIsDispatchThread() {
     ApplicationManager.getApplication().assertIsDispatchThread();
   }
 
@@ -402,10 +415,13 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       myLoadingDecorator.startLoading(false);
       final Application app = ApplicationManager.getApplication();
       Runnable action = new Runnable() {
+        @Override
         public void run() {
           app.runReadAction(new Runnable() {
+            @Override
             public void run() {
               ((ApplicationEx)app).runEdtSafeAction(new Runnable() {
+                @Override
                 public void run() {
                   if (myProject.isDisposed()) {
                     result.setRejected();
@@ -453,6 +469,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     }
 
     UIUtil.invokeLaterIfNeeded(new Runnable() {
+      @Override
       public void run() {
         if (myDisposed) return;
         myConfigurable2Content.put(configurable, content);
@@ -472,6 +489,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       }
     } else {
       mySpotlightUpdate.queue(new Update(this) {
+        @Override
         public void run() {
           final boolean success = mySpotlightPainter.updateForCurrentConfigurable();
           if (!success) {
@@ -531,10 +549,14 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       if (!myConfigurable2Content.containsKey(configurable) && isParentWithContent(configurable)) {
 
         ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
+          @Override
           public void run() {
             ApplicationManager.getApplication().runReadAction(new Runnable() {
+              @Override
               public void run() {
+                if (myDisposed) return;
                 initConfigurable(configurable).doWhenDone(new Runnable() {
+                  @Override
                   public void run() {
                     if (myDisposed) return;
                     fireModificationInt(configurable);
@@ -622,6 +644,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       putValue(SHORT_DESCRIPTION, "Rollback changes for this configuration element");
     }
 
+    @Override
     public void actionPerformed(final ActionEvent e) {
       reset(myConfigurable, true);
       checkModified(myConfigurable);
@@ -658,6 +681,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       myLeft = new JPanel(new BorderLayout());
 
       mySplitter.addPropertyChangeListener(Splitter.PROP_PROPORTION, new PropertyChangeListener() {
+        @Override
         public void propertyChange(final PropertyChangeEvent evt) {
           myLastSplitterProportion = ((Float)evt.getNewValue()).floatValue();
         }
@@ -768,6 +792,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
   }
 
 
+  @Override
   public Object getData(@NonNls final String dataId) {
     if (KEY.is(dataId)) {
       return this;
@@ -793,6 +818,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     boolean myUpdateEnabled = true;
     private Configurable myLastSelected;
 
+    @Override
     public boolean shouldBeShowing(final SimpleNode value) {
       if (myFiltered == null) return true;
 
@@ -832,12 +858,12 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
 
       return update(DocumentEvent.EventType.CHANGE, adjustSelection, now);
     }
-    
+
     public void clearTemporary() {
       myContext.setHoldingFilter(false);
       updateSpotlight(false);
     }
-    
+
     public void reenable() {
       myContext.setHoldingFilter(true);
       updateSpotlight(false);
@@ -875,7 +901,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
         shouldMoveSelection = false;
       }
 
-      Configurable toSelect = null;
+      Configurable toSelect = adjustSelection ? current : null;
       if (shouldMoveSelection && myHits != null) {
         if (!myHits.getNameHits().isEmpty()) {
           toSelect = suggestToSelect(myHits.getNameHits(), myHits.getNameFullHits());
@@ -890,11 +916,11 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
         toSelect = myLastSelected;
         myLastSelected = null;
       }
-      
+
       if (toSelect == null && current != null) {
         myLastSelected = current;
       }
-      
+
       final ActionCallback callback = fireUpdate(adjustSelection ? myTree.findNodeFor(toSelect) : null, adjustSelection, now);
 
       myFilterDocumentWasChanged = true;
@@ -921,6 +947,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
 
   }
 
+  @Override
   public ActionCallback navigateTo(@Nullable final Place place, final boolean requestFocus) {
     final Configurable config = (Configurable)place.getPath("configurable");
     final String filter = (String)place.getPath("filter");
@@ -928,6 +955,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     final ActionCallback result = new ActionCallback();
 
     myFilter.refilterFor(filter, false, true).doWhenDone(new Runnable() {
+      @Override
       public void run() {
         myTree.select(config).notifyWhenDone(result);
       }
@@ -936,6 +964,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     return result;
   }
 
+  @Override
   public void queryPlace(@NotNull final Place place) {
     final Configurable current = getContext().getCurrentConfigurable();
     place.putPath("configurable", current);
@@ -946,6 +975,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     }
   }
 
+  @Override
   public void dispose() {
     assertIsDispatchThread();
 
@@ -988,6 +1018,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
   }
 
   private class MyColleague extends OptionsEditorColleague.Adapter {
+    @Override
     public ActionCallback onSelected(final Configurable configurable, final Configurable oldConfigurable) {
       return processSelected(configurable, oldConfigurable);
     }
@@ -1027,6 +1058,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     return !getContext().getModified().isEmpty();
   }
 
+  @Override
   public void eventDispatched(final AWTEvent event) {
     if (event.getID() == MouseEvent.MOUSE_PRESSED || event.getID() == MouseEvent.MOUSE_RELEASED || event.getID() == MouseEvent.MOUSE_DRAGGED) {
       final MouseEvent me = (MouseEvent)event;
@@ -1046,6 +1078,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
   private void queueModificationCheck() {
     final Configurable configurable = getContext().getCurrentConfigurable();
     myModificationChecker.queue(new Update(this) {
+      @Override
       public void run() {
         checkModified(configurable);
       }
@@ -1116,6 +1149,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     GlassPanel myGP = new GlassPanel(myOwnDetails.getContentGutter());
     boolean myVisible;
 
+    @Override
     public void executePaint(final Component component, final Graphics2D g) {
       if (myVisible && myGP.isVisible()) {
         myGP.paintSpotlight(g, myOwnDetails.getContentGutter());
@@ -1150,7 +1184,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
         }
 
         myGP.clear();
-        
+
         final Runnable runnable = SearchUtil.lightOptions(searchable, myContentWrapper, text, myGP);
         if (runnable != null) {
           myVisible = true;//myContext.isHoldingFilter();
@@ -1164,7 +1198,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
               pushFilteringFurther = !myFilter.myHits.getNameHits().contains(current);
             }
           }
-          
+
           final Runnable ownSearch = searchable.enableSearch(text);
           if (pushFilteringFurther && ownSearch != null) {
             ownSearch.run();
@@ -1199,40 +1233,49 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       myConfigurable = configurable;
     }
 
+    @Override
     @NotNull
     public String getId() {
       return myConfigurable.getClass().getName();
     }
 
+    @Override
     public Runnable enableSearch(final String option) {
       return null;
     }
 
+    @Override
     @Nls
     public String getDisplayName() {
       return myConfigurable.getDisplayName();
     }
 
+    @Override
     public String getHelpTopic() {
       return myConfigurable.getHelpTopic();
     }
 
+    @Override
     public JComponent createComponent() {
       return myConfigurable.createComponent();
     }
 
+    @Override
     public boolean isModified() {
       return myConfigurable.isModified();
     }
 
+    @Override
     public void apply() throws ConfigurationException {
       myConfigurable.apply();
     }
 
+    @Override
     public void reset() {
       myConfigurable.reset();
     }
 
+    @Override
     public void disposeUIResources() {
       myConfigurable.disposeUIResources();
     }
@@ -1251,7 +1294,6 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
   }
 
   private class Simple extends ConfigurableContent {
-
     JComponent myComponent;
     Configurable myConfigurable;
 
@@ -1262,31 +1304,36 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       if (myComponent != null) {
         final Object clientProperty = myComponent.getClientProperty(NOT_A_NEW_COMPONENT);
         if (clientProperty != null && ApplicationManager.getApplication().isInternal()) {
-          LOG.warn(String.format("Settings component for '%s' MUST be recreated, please dispose it in disposeUIResources() and create a new instance in createComponent()!",
-                                 configurable.getClass().getCanonicalName()));
-        } else {
+          LOG.warn("Settings component for " + configurable.getClass()+ " must be created anew, not reused, in createComponent() and destroyed in disposeUIResources()");
+        }
+        else {
           myComponent.putClientProperty(NOT_A_NEW_COMPONENT, Boolean.TRUE);
         }
       }
     }
 
+    @Override
     void set(final ContentWrapper wrapper) {
       myOwnDetails.setDetailsModeEnabled(true);
       wrapper.setContent(myComponent, getContext().getErrors().get(myConfigurable), !ConfigurableWrapper.isNoScroll(myConfigurable));
     }
 
+    @Override
     boolean isShowing() {
       return myComponent != null && myComponent.isShowing();
     }
 
+    @Override
     void setBannerActions(final Action[] actions) {
       myOwnDetails.setBannerActions(actions);
     }
 
+    @Override
     void updateBannerActions() {
       myOwnDetails.updateBannerActions();
     }
 
+    @Override
     void setText(final String[] bannerText) {
       myOwnDetails.setText(bannerText);
     }
@@ -1306,24 +1353,29 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
       myToolbar = myConfigurable.getToolbar();
     }
 
+    @Override
     void set(final ContentWrapper wrapper) {
       myOwnDetails.setDetailsModeEnabled(false);
       myDetails.setPrefix(getBannerText((Configurable)myConfigurable));
       wrapper.setContent(myMaster, myToolbar, myDetails, getContext().getErrors().get(myConfigurable));
     }
 
+    @Override
     void setBannerActions(final Action[] actions) {
       myDetails.setBannerActions(actions);
     }
 
+    @Override
     boolean isShowing() {
       return myDetails.getComponent().isShowing();
     }
 
+    @Override
     void updateBannerActions() {
       myDetails.updateBannerActions();
     }
 
+    @Override
     void setText(final String[] bannerText) {
       myDetails.update();
     }
@@ -1333,6 +1385,7 @@ public class OptionsEditor extends JPanel implements DataProvider, Place.Navigat
     mySearch.setText("");
   }
 
+  @Override
   public void setHistory(final History history) {
   }
 }

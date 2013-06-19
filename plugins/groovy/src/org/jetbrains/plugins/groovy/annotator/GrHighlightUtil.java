@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
  */
 package org.jetbrains.plugins.groovy.annotator;
 
+import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
 import com.intellij.psi.search.PsiElementProcessor;
+import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -28,9 +30,13 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
+import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
 import org.jetbrains.plugins.groovy.lang.psi.GrReferenceElement;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierList;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrClassInitializer;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrLabeledStatement;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrOpenBlock;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrAssignmentExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression;
@@ -40,6 +46,8 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrExtendsCla
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrImplementsClause;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrAccessorMethod;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMember;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod;
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GroovyScriptClass;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyPropertyUtils;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
@@ -104,8 +112,16 @@ public class GrHighlightUtil {
     return scope != null && getReassignedNames(scope).contains(var.getName());
   }
 
+  /**
+   *
+   * @param resolved declaration element
+   * @param refElement reference to highlight. if null, 'resolved' is highlighted and no resolve is allowed.
+   * @return
+   */
   @Nullable
   static TextAttributesKey getDeclarationHighlightingAttribute(PsiElement resolved, @Nullable PsiElement refElement) {
+    if (refElement != null && isReferenceWithLiteralName(refElement)) return null; //don't highlight literal references
+
     if (resolved instanceof PsiField || resolved instanceof GrVariable && ResolveUtil.isScriptField((GrVariable)resolved)) {
       boolean isStatic = ((PsiVariable)resolved).hasModifierProperty(PsiModifier.STATIC);
       return isStatic ? STATIC_FIELD : INSTANCE_FIELD;
@@ -115,6 +131,9 @@ public class GrHighlightUtil {
       return isStatic ? STATIC_PROPERTY_REFERENCE : INSTANCE_PROPERTY_REFERENCE;
     }
     else if (resolved instanceof PsiMethod) {
+
+      if (isMethodWithLiteralName((PsiMethod)resolved)) return null; //don't highlight method with literal name
+
       if (((PsiMethod)resolved).isConstructor()) {
         if (refElement != null) {
           if (refElement.getNode().getElementType() == GroovyTokenTypes.kTHIS || //don't highlight this() or super()
@@ -163,7 +182,38 @@ public class GrHighlightUtil {
       boolean reassigned = isReassigned((GrVariable)resolved);
       return reassigned ? REASSIGNED_LOCAL_VARIABLE : LOCAL_VARIABLE;
     }
+    else if (resolved instanceof GrLabeledStatement) {
+      return LABEL;
+    }
     return null;
+  }
+
+  private static boolean isMethodWithLiteralName(@Nullable PsiMethod method) {
+    if (method instanceof GrMethod) {
+      final PsiElement nameIdentifier = ((GrMethod)method).getNameIdentifierGroovy();
+      if (isStringNameElement(nameIdentifier)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isReferenceWithLiteralName(@Nullable PsiElement ref) {
+    if (ref instanceof GrReferenceExpression) {
+      final PsiElement nameIdentifier = ((GrReferenceExpression)ref).getReferenceNameElement();
+      if (nameIdentifier != null && isStringNameElement(nameIdentifier)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isStringNameElement(@NotNull PsiElement nameIdentifier) {
+    final ASTNode node = nameIdentifier.getNode();
+    if (node == null) return false;
+
+    final IElementType nameElementType = node.getElementType();
+    return TokenSets.STRING_LITERAL_SET.contains(nameElementType);
   }
 
   public static boolean isDeclarationAssignment(GrReferenceExpression refExpr) {
@@ -234,5 +284,28 @@ public class GrHighlightUtil {
       }
     }
     return new TextRange(startOffset, endOffset);
+  }
+
+  public static TextRange getInitializerHeaderTextRange(GrClassInitializer initializer) {
+    final PsiModifierList modifierList = initializer.getModifierList();
+    final GrOpenBlock block = initializer.getBlock();
+
+    final TextRange textRange = modifierList.getTextRange();
+    LOG.assertTrue(textRange != null, initializer.getClass() + ":" + initializer.getText());
+    int startOffset = textRange.getStartOffset();
+    int endOffset = block.getLBrace().getTextRange().getEndOffset() + 1;
+
+    return new TextRange(startOffset, endOffset);
+
+  }
+
+  @Nullable
+  public static GrMember findClassMemberContainer(@NotNull GrReferenceExpression ref, @NotNull PsiClass aClass) {
+    for (PsiElement parent = ref.getParent(); parent != null && parent != aClass; parent = parent.getParent()) {
+      if (parent instanceof GrMember && ((GrMember)parent).getContainingClass() == aClass) {
+        return (GrMember)parent;
+      }
+    }
+    return null;
   }
 }

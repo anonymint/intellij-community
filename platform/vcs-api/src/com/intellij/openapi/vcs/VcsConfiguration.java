@@ -25,7 +25,7 @@ import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.PlatformUtils;
 import org.jdom.Element;
@@ -77,7 +77,7 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
   public boolean SHOW_ONLY_CHANGED_IN_SELECTION_DIFF = true;
   public boolean CHECK_COMMIT_MESSAGE_SPELLING = true;
   public String DEFAULT_PATCH_EXTENSION = PATCH;
-  public boolean SHORT_DIFF_HORISONTALLY = true;
+  public boolean SHORT_DIFF_HORIZONTALLY = true;
   public int SHORT_DIFF_EXTRA_LINES = 2;
   public boolean SOFT_WRAPS_IN_SHORT_DIFF = true;
   public IgnoreSpaceEnum SHORT_DIFF_IGNORE_SPACE = IgnoreSpaceEnum.NO;
@@ -90,6 +90,10 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
   public boolean SHOW_DIRTY_RECURSIVELY = false;
   public boolean LIMIT_HISTORY = true;
   public int MAXIMUM_HISTORY_ROWS = 1000;
+  public String UPDATE_FILTER_SCOPE_NAME = null;
+  public boolean USE_COMMIT_MESSAGE_MARGIN = false;
+  public int COMMIT_MESSAGE_MARGIN_SIZE = 72;
+  public boolean WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN = false;
 
   public enum StandardOption {
     ADD(VcsBundle.message("vcs.command.name.add")),
@@ -141,9 +145,10 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
   public float FILE_HISTORY_DIALOG_COMMENTS_SPLITTER_PROPORTION = 0.8f;
   public float FILE_HISTORY_DIALOG_SPLITTER_PROPORTION = 0.5f;
 
-  public String ACTIVE_VCS_NAME;
+  public String ACTIVE_VCS_NAME = null;
   public boolean UPDATE_GROUP_BY_PACKAGES = false;
   public boolean UPDATE_GROUP_BY_CHANGELIST = false;
+  public boolean UPDATE_FILTER_BY_SCOPE = false;
   public boolean SHOW_FILE_HISTORY_AS_TREE = false;
   public float FILE_HISTORY_SPLITTER_PROPORTION = 0.6f;
   private static final int MAX_STORED_MESSAGES = 25;
@@ -154,9 +159,6 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
   private final PerformInBackgroundOption myEditOption = new EditInBackgroundOption();
   private final PerformInBackgroundOption myCheckoutOption = new CheckoutInBackgroundOption();
   private final PerformInBackgroundOption myAddRemoveOption = new AddRemoveInBackgroundOption();
-
-  private VcsConfiguration() {
-  }
 
   public VcsConfiguration(final Project project) {
     myProject = project;
@@ -242,13 +244,6 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
     }
 
     myLastCommitMessages.add(comment);
-  }
-
-  /**
-   * @deprecated Use {@link #getLastNonEmptyCommitMessage()} instead.
-   */
-  public String getLastCommitMessage() {
-    return getLastNonEmptyCommitMessage();
   }
 
   public String getLastNonEmptyCommitMessage() {
@@ -345,10 +340,10 @@ public final class VcsConfiguration implements PersistentStateComponent<Element>
 
   public void acceptLastCreatedPatchName(final String string) {
     if (StringUtil.isEmptyOrSpaces(string)) return;
-    final String extension = FileUtil.getExtension(string);
-    if (DIFF.equalsIgnoreCase(extension)) {
+    if (FileUtilRt.extensionEquals(string, DIFF)) {
       DEFAULT_PATCH_EXTENSION = DIFF;
-    } else if (PATCH.equalsIgnoreCase(extension)) {
+    }
+    else if (FileUtilRt.extensionEquals(string, PATCH)) {
       DEFAULT_PATCH_EXTENSION = PATCH;
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -217,31 +217,25 @@ public class ExecUtil {
   }
 
   @NotNull
-  public static List<String> getTerminalCommand(@Nullable final String title, @NotNull final String command) {
+  public static List<String> getTerminalCommand(@Nullable String title, @NotNull String command) {
     if (SystemInfo.isWindows) {
-      return Arrays.asList("cmd.exe", "/c", "start", '"' + (title != null ? title : "") + '"', command);
+      title = title != null ? title.replace("\"", "'") : "";
+      return Arrays.asList(getWindowsShellName(), "/c", "start", GeneralCommandLine.inescapableQuote(title), command);
     }
     else if (SystemInfo.isMac) {
       return Arrays.asList(getOpenCommandPath(), "-a", "Terminal", command); // todo: title?
     }
     else if (hasKdeTerminal.getValue()) {
-      return Arrays.asList("/usr/bin/konsole", "-e", command); // todo: title?
+      return title != null ? Arrays.asList("/usr/bin/konsole", "-p", "tabtitle=\"" + title.replace("\"", "'") + "\"", "-e", command)
+                           : Arrays.asList("/usr/bin/konsole", "-e", command);
     }
     else if (hasGnomeTerminal.getValue()) {
-      if (title != null) {
-        return Arrays.asList("/usr/bin/gnome-terminal", "-t", title, "-x", command);
-      }
-      else {
-        return Arrays.asList("/usr/bin/gnome-terminal", "-x", command);
-      }
+      return title != null ? Arrays.asList("/usr/bin/gnome-terminal", "-t", title, "-x", command)
+                           : Arrays.asList("/usr/bin/gnome-terminal", "-x", command);
     }
     else if (hasXTerm.getValue()) {
-      if (title != null) {
-        return Arrays.asList("/usr/bin/xterm", "-T", title, "-e", command);
-      }
-      else {
-        return Arrays.asList("/usr/bin/xterm", "-e", command);
-      }
+      return title != null ? Arrays.asList("/usr/bin/xterm", "-T", title, "-e", command)
+                           : Arrays.asList("/usr/bin/xterm", "-e", command);
     }
 
     throw new UnsupportedSystemException();

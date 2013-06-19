@@ -49,8 +49,7 @@ public class XmlParsingTest extends ParsingTestCase {
     addExplicitExtension(LanguageParserDefinitions.INSTANCE, DTDLanguage.INSTANCE, new DTDParserDefinition());
     addExplicitExtension(LanguageASTFactory.INSTANCE, XMLLanguage.INSTANCE, new XmlASTFactory());
     addExplicitExtension(LanguageASTFactory.INSTANCE, DTDLanguage.INSTANCE, new XmlASTFactory());
-    registerExtensionPoint(new ExtensionPointName<XmlChildRole.StartTagEndTokenProvider>("com.intellij.xml.startTagEndToken"),
-                           XmlChildRole.StartTagEndTokenProvider.class);
+    registerExtensionPoint(StartTagEndTokenProvider.EP_NAME, StartTagEndTokenProvider.class);
   }
 
   @Override
@@ -671,7 +670,7 @@ public class XmlParsingTest extends ParsingTestCase {
     doTest("<script type=\"application/custom\">Custom Script</script>", "test.html");
   }
 
-  static class MyLanguage extends Language {
+  static class MyLanguage extends Language implements InjectableLanguage {
     protected MyLanguage() {
       super("MyLanguage", "application/custom");
     }

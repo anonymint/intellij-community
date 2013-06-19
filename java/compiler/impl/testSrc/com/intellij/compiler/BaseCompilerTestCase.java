@@ -1,7 +1,9 @@
 package com.intellij.compiler;
 
+import com.intellij.ProjectTopics;
 import com.intellij.compiler.impl.CompileDriver;
 import com.intellij.compiler.impl.ExitStatus;
+import com.intellij.compiler.server.BuildManager;
 import com.intellij.ide.highlighter.ModuleFileType;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
@@ -11,9 +13,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.impl.JavaAwareProjectJdkTableImpl;
-import com.intellij.openapi.roots.CompilerModuleExtension;
-import com.intellij.openapi.roots.CompilerProjectExtension;
-import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
@@ -60,11 +60,22 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     if (useExternalCompiler()) {
+      myProject.getMessageBus().connect(myTestRootDisposable).subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+        @Override
+        public void rootsChanged(ModuleRootEvent event) {
+          //todo[nik] projectOpened isn't called in tests so we need to add this listener manually
+          forceFSRescan();
+        }
+      });
       CompilerTestUtil.enableExternalCompiler(myProject);
     }
     else {
       CompilerTestUtil.disableExternalCompiler(myProject);
     }
+  }
+
+  protected void forceFSRescan() {
+    BuildManager.getInstance().clearState(myProject);
   }
 
   @Override
@@ -123,12 +134,19 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   }
 
   protected Module addModule(final String moduleName, final @Nullable VirtualFile sourceRoot) {
+    return addModule(moduleName, sourceRoot, null);
+  }
+
+  protected Module addModule(final String moduleName, final @Nullable VirtualFile sourceRoot, final @Nullable VirtualFile testRoot) {
     return new WriteAction<Module>() {
       @Override
       protected void run(final Result<Module> result) {
         final Module module = createModule(moduleName);
         if (sourceRoot != null) {
-          PsiTestUtil.addSourceContentToRoots(module, sourceRoot);
+          PsiTestUtil.addSourceContentToRoots(module, sourceRoot, false);
+        }
+        if (testRoot != null) {
+          PsiTestUtil.addSourceContentToRoots(module, testRoot, true);
         }
         ModuleRootModificationUtil.setModuleSdk(module, getTestProjectJdk());
         result.setResult(module);
@@ -150,8 +168,8 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   }
 
   protected CompilationLog recompile(final Artifact... artifacts) {
-    final CompileScope scope = ArtifactCompileScope.createArtifactsScope(myProject, Arrays.asList(artifacts));
-    return compile(scope, CompilerFilter.ALL, true);
+    final CompileScope scope = ArtifactCompileScope.createArtifactsScope(myProject, Arrays.asList(artifacts), true);
+    return make(scope, CompilerFilter.ALL);
   }
 
   protected CompilationLog make(Module... modules) {
@@ -249,7 +267,7 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
         };
         if (useExternalCompiler()) {
           myProject.save();
-          CompilerTestUtil.saveSdkTable();
+          CompilerTestUtil.saveApplicationSettings();
           CompilerTestUtil.scanSourceRootsToRecompile(myProject);
         }
         action.run(callback);
@@ -354,8 +372,12 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   }
 
   protected static void assertOutput(Module module, TestFileSystemBuilder item) {
-    File outputDir = getOutputDir(module);
-    Assert.assertTrue("Output directory " + outputDir.getAbsolutePath() + " doesn't exist", outputDir.exists());
+    assertOutput(module, item, false);
+  }
+
+  protected static void assertOutput(Module module, TestFileSystemBuilder item, final boolean forTests) {
+    File outputDir = getOutputDir(module, forTests);
+    Assert.assertTrue((forTests? "Test output" : "Output") +" directory " + outputDir.getAbsolutePath() + " doesn't exist", outputDir.exists());
     item.build().assertDirectoryEqual(outputDir);
   }
 
@@ -365,11 +387,35 @@ public abstract class BaseCompilerTestCase extends ModuleTestCase {
   }
 
   protected static File getOutputDir(Module module) {
+    return getOutputDir(module, false);
+  }
+
+  protected static File getOutputDir(Module module, boolean forTests) {
     CompilerModuleExtension extension = CompilerModuleExtension.getInstance(module);
     Assert.assertNotNull(extension);
-    String outputUrl = extension.getCompilerOutputUrl();
-    Assert.assertNotNull("Output directory for module '" + module.getName() + "' isn't specified", outputUrl);
+    String outputUrl = forTests? extension.getCompilerOutputUrlForTests() : extension.getCompilerOutputUrl();
+    Assert.assertNotNull((forTests? "Test output" : "Output") +" directory for module '" + module.getName() + "' isn't specified", outputUrl);
     return JpsPathUtil.urlToFile(outputUrl);
+  }
+
+  protected static void createFileInOutput(Module m, final String fileName) {
+    try {
+      boolean created = new File(getOutputDir(m), fileName).createNewFile();
+      assertTrue(created);
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  protected static void createFileInOutput(Artifact a, final String name)  {
+    try {
+      boolean created = new File(a.getOutputPath(), name).createNewFile();
+      assertTrue(created);
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   protected class CompilationLog {

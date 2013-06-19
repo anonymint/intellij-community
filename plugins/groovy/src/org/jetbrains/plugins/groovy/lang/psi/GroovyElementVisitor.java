@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package org.jetbrains.plugins.groovy.lang.psi;
 
 import org.jetbrains.plugins.groovy.lang.groovydoc.psi.api.*;
-import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.GrLabel;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.GrListOrMap;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.GrThrowsClause;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierList;
@@ -210,10 +209,6 @@ public abstract class GroovyElementVisitor {
 
   public void visitIndexProperty(GrIndexProperty expression) {
     visitExpression(expression);
-  }
-
-  public void visitLabel(GrLabel label) {
-    visitElement(label);
   }
 
   public void visitArgumentList(GrArgumentList list) {
@@ -442,5 +437,9 @@ public abstract class GroovyElementVisitor {
 
   public void visitTypeParameter(GrTypeParameter typeParameter) {
     visitTypeDefinition(typeParameter);
+  }
+
+  public void visitTupleExpression(GrTupleExpression tupleExpression) {
+    visitExpression(tupleExpression);
   }
 }

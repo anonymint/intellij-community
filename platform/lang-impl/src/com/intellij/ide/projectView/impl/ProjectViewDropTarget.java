@@ -35,6 +35,7 @@ import com.intellij.refactoring.actions.BaseRefactoringAction;
 import com.intellij.refactoring.copy.CopyHandler;
 import com.intellij.refactoring.move.MoveHandler;
 import com.intellij.ui.awt.RelativeRectangle;
+import com.intellij.util.ArrayUtilRt;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -55,7 +56,7 @@ import java.util.List;
  */
 class ProjectViewDropTarget implements DnDNativeTarget {
 
-  private JTree myTree;
+  private final JTree myTree;
   private final Retriever myRetriever;
   private final Project myProject;
 
@@ -80,6 +81,9 @@ class ProjectViewDropTarget implements DnDNativeTarget {
       return false;
     }
     else if (sourceNodes == null && !FileCopyPasteUtil.isFileListFlavorSupported(event)) {
+      return false;
+    }
+    else if (sourceNodes != null && ArrayUtilRt.find(sourceNodes, targetNode) != -1) {
       return false;
     }
     else if (sourceNodes != null && !dropHandler.isValidSource(sourceNodes, targetNode)) {
@@ -384,6 +388,7 @@ class ProjectViewDropTarget implements DnDNativeTarget {
 
     private void doDrop(TreeNode targetNode, PsiElement[] sourceElements) {
       final PsiElement targetElement = getPsiElement(targetNode);
+      if (targetElement == null) return;
       final PsiDirectory psiDirectory;
       if (targetElement instanceof PsiDirectoryContainer) {
         final PsiDirectoryContainer directoryContainer = (PsiDirectoryContainer)targetElement;

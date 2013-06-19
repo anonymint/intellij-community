@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.application.options;
 
+import com.intellij.CommonBundle;
 import com.intellij.application.options.colors.ColorAndFontOptions;
 import com.intellij.application.options.colors.NewColorAndFontPanel;
 import com.intellij.application.options.colors.SimpleEditorPreview;
@@ -23,11 +24,16 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.actions.CreateDesktopEntryAction;
 import com.intellij.ide.actions.CreateLauncherScriptAction;
 import com.intellij.ide.todo.TodoConfiguration;
-import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.ide.ui.LafComboBoxRenderer;
+import com.intellij.ide.ui.LafManager;
+import com.intellij.ide.ui.laf.LafManagerImpl;
+import com.intellij.ide.ui.laf.darcula.DarculaLookAndFeelInfo;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.keymap.Keymap;
@@ -37,11 +43,14 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vcs.changes.RefreshablePanel;
 import com.intellij.ui.AbstractTitledSeparatorWithIcon;
+import com.intellij.ui.ListCellRendererWrapper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -61,13 +70,19 @@ public class InitialConfigurationDialog extends DialogWrapper {
   private JTextField myScriptPathTextField;
   private JPanel myCreateScriptPanel;
   private JPanel myColorPreviewPanel;
+  private JPanel myHeaderPanel;
+  private JPanel myFooterPanel;
+  private JPanel myExtraOptionsPanel;
   private JCheckBox myCreateEntryCheckBox;
   private JCheckBox myGlobalEntryCheckBox;
   private JPanel myCreateEntryPanel;
-  private String myColorSettingsPage;
+  private ComboBox myAppearanceComboBox;
+  private JLabel myPreferencesLabel;
+  private final String myColorSettingsPage;
   private SimpleEditorPreview myPreviewEditor;
   private ColorAndFontOptions myPreviewOptions;
   private MyColorPreviewPanel myHidingPreviewPanel;
+  private NewColorAndFontPanel myColorAndFontPanel;
 
   public InitialConfigurationDialog(Component parent, String colorSettingsPage) {
     super(parent, true);
@@ -80,6 +95,31 @@ public class InitialConfigurationDialog extends DialogWrapper {
         keymaps.add(keymap);
       }
     }
+
+    myAppearanceComboBox.setModel(new DefaultComboBoxModel(LafManager.getInstance().getInstalledLookAndFeels()));
+    myAppearanceComboBox.setRenderer(new LafComboBoxRenderer());
+    myAppearanceComboBox.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent event) {
+        preselectColorScheme();
+      }
+    });
+    myAppearanceComboBox.setSelectedItem(LafManager.getInstance().getCurrentLookAndFeel());
+    myColorSchemeComboBox.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent event) {
+        EditorColorsScheme scheme = (EditorColorsScheme)myColorSchemeComboBox.getSelectedItem();
+        if (scheme.getName().equals("Darcula")) {
+          UIManager.LookAndFeelInfo[] lafs = LafManager.getInstance().getInstalledLookAndFeels();
+          for (UIManager.LookAndFeelInfo laf : lafs) {
+            if (laf.getName().contains("Darcula")) {
+              myAppearanceComboBox.setSelectedItem(laf);
+              break;
+            }
+          }
+        }
+      }
+    });
 
     myKeymapComboBox.setModel(new DefaultComboBoxModel(keymaps.toArray(new Keymap[keymaps.size()])));
     myKeymapComboBox.setRenderer(new ListCellRendererWrapper() {
@@ -118,10 +158,12 @@ public class InitialConfigurationDialog extends DialogWrapper {
         if (myHidingPreviewPanel != null) myHidingPreviewPanel.updateColorSchemePreview(true);
       }
     });
+    preselectColorScheme();
     setResizable(false);
+    setCancelButtonText("Skip");
     init();
 
-    final boolean canCreateLauncherScript = CreateLauncherScriptAction.isAvailable();
+    final boolean canCreateLauncherScript = canCreateLauncherScript();
     myCreateScriptCheckbox.setVisible(canCreateLauncherScript);
     myCreateScriptCheckbox.setSelected(canCreateLauncherScript);
     myCreateScriptPanel.setVisible(canCreateLauncherScript);
@@ -129,7 +171,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
       myScriptPathTextField.setText("/usr/local/bin/" + CreateLauncherScriptAction.defaultScriptName());
     }
 
-    final boolean canCreateDesktopEntry = CreateDesktopEntryAction.isAvailable();
+    final boolean canCreateDesktopEntry = canCreateDesktopEntry();
     myCreateEntryCheckBox.setVisible(canCreateDesktopEntry);
     myCreateEntryCheckBox.setSelected(canCreateDesktopEntry);
     myCreateEntryPanel.setVisible(canCreateDesktopEntry);
@@ -137,32 +179,69 @@ public class InitialConfigurationDialog extends DialogWrapper {
       myGlobalEntryCheckBox.setSelected(!PathManager.getHomePath().startsWith("/home"));
     }
 
+    myPreferencesLabel.setText("You can use "+ CommonBundle.settingsActionPath() + " to configure any of these settings later.");
+
     Disposer.register(myDisposable, new Disposable() {
       @Override
       public void dispose() {
-        if (myPreviewEditor != null) {
-          myPreviewEditor.disposeUIResources();
-        }
-        if (myPreviewOptions != null) {
-          myPreviewOptions.disposeUIResources();
-        }
+        disposeUIResources();
       }
     });
   }
 
+  private void preselectColorScheme() {
+    UIManager.LookAndFeelInfo selectedLaf = (UIManager.LookAndFeelInfo) myAppearanceComboBox.getSelectedItem();
+    if (selectedLaf.getName().contains("Darcula")) {
+      myColorSchemeComboBox.setSelectedItem(EditorColorsManager.getInstance().getScheme("Darcula"));
+    }
+  }
+
+  private void disposeUIResources() {
+    if (myPreviewEditor != null) {
+      myPreviewEditor.disposeUIResources();
+    }
+    if (myPreviewOptions != null) {
+      myPreviewOptions.disposeUIResources();
+    }
+    if (myColorAndFontPanel != null) {
+      myColorAndFontPanel.disposeUIResources();
+    }
+  }
+
+  protected boolean canCreateDesktopEntry() {
+    return CreateDesktopEntryAction.isAvailable();
+  }
+
+  protected boolean canCreateLauncherScript() {
+    return CreateLauncherScriptAction.isAvailable();
+  }
+
+  public JComboBox getKeymapComboBox() {
+    return myKeymapComboBox;
+  }
+
+  public JComboBox getColorSchemeComboBox() {
+    return myColorSchemeComboBox;
+  }
+
+  public ComboBox getAppearanceComboBox() {
+    return myAppearanceComboBox;
+  }
+
   private void preselectKeyMap(ArrayList<Keymap> keymaps) {
     final Keymap defaultKeymap = KeymapManager.getInstance().getActiveKeymap();
-    if (defaultKeymap != null) {
-      for (Keymap keymap : keymaps) {
-        if (keymap.equals(defaultKeymap)) {
-          myKeymapComboBox.setSelectedItem(keymap);
-          break;
-        }
+    for (Keymap keymap : keymaps) {
+      if (SystemInfo.isMac ? keymap.getName().contains("10.5+") : keymap.equals(defaultKeymap)) {
+        myKeymapComboBox.setSelectedItem(keymap);
+        break;
       }
     }
   }
 
   private void createUIComponents() {
+    myHeaderPanel = createHeaderPanel();
+    myFooterPanel = createFooterPanel();
+    myExtraOptionsPanel = createExtraOptionsPanel();
     myColorPreviewPanel = new AbstractTitledSeparatorWithIcon(AllIcons.General.ComboArrowRight,
                                                               AllIcons.General.ComboArrowDown,
                                                               "Click to preview") {
@@ -190,7 +269,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
         final InitialConfigurationDialog dialog = InitialConfigurationDialog.this;
         revalidate();
         myAddedWidth = getPreferredSize().width - getSize().width;
-        resizeTo(dialog.getSize().width + myAddedWidth, dialog.getSize().height + myPreviewEditor.getPanel().getPreferredSize().height);
+        resizeTo(dialog.getSize().width + myAddedWidth, dialog.getSize().height + getPreviewPreferredHeight());
       }
 
       @Override
@@ -198,12 +277,34 @@ public class InitialConfigurationDialog extends DialogWrapper {
         myLabel.setIcon(myIcon);
         setText("Click to preview");
         final InitialConfigurationDialog dialog = InitialConfigurationDialog.this;
-        resizeTo(dialog.getSize().width - myAddedWidth, dialog.getSize().height - myPreviewEditor.getPanel().getPreferredSize().height);
+        resizeTo(dialog.getSize().width - myAddedWidth, dialog.getSize().height - getPreviewPreferredHeight());
         myWrapper.removeAll();
         myWrapper.setVisible(false);
         myOn = false;
       }
     };
+  }
+
+  private int getPreviewPreferredHeight() {
+    return myPreviewEditor.getPanel().getPreferredSize().height / 2;
+  }
+
+  protected JPanel createFooterPanel() {
+    final JPanel panel = new JPanel();
+    panel.setVisible(false);
+    return panel;
+  }
+
+  protected JPanel createHeaderPanel() {
+    final JPanel panel = new JPanel();
+    panel.setVisible(false);
+    return panel;
+  }
+
+  protected JPanel createExtraOptionsPanel() {
+    final JPanel panel = new JPanel();
+    panel.setVisible(false);
+    return panel;
   }
 
   private void resizeTo(final int newWidth, final int newHeight) {
@@ -249,10 +350,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
 
     @Override
     public void dispose() {
-      if (myPreviewEditor != null) {
-        myPreviewEditor.disposeUIResources();
-      }
-      myPreviewOptions.disposeUIResources();
+      disposeUIResources();
     }
 
     public void updateColorSchemePreview(final boolean recalculateDialogSize) {
@@ -260,7 +358,7 @@ public class InitialConfigurationDialog extends DialogWrapper {
 
       int wrapperHeight = 0;
       if (myPreviewEditor != null) {
-        wrapperHeight = myPreviewEditor.getPanel().getPreferredSize().height;
+        wrapperHeight = getPreviewPreferredHeight();
         myPreviewEditor.disposeUIResources();
         myWrapper.removeAll();
       }
@@ -269,14 +367,14 @@ public class InitialConfigurationDialog extends DialogWrapper {
       }
       myPreviewOptions.reset();
       myPreviewOptions.selectScheme(((EditorColorsScheme)myColorSchemeComboBox.getSelectedItem()).getName());
-      final NewColorAndFontPanel page = myPreviewOptions.findPage(myColorSettingsPage);
-      assert page != null;
-      myPreviewEditor = new SimpleEditorPreview(myPreviewOptions, page.getSettingsPage(), false);
+      myColorAndFontPanel = myPreviewOptions.findPage(myColorSettingsPage);
+      assert myColorAndFontPanel != null;
+      myPreviewEditor = new SimpleEditorPreview(myPreviewOptions, myColorAndFontPanel.getSettingsPage(), false);
       myPreviewEditor.updateView();
       myWrapper.add(myPreviewEditor.getPanel(), BorderLayout.EAST);
       if (recalculateDialogSize) {
         final InitialConfigurationDialog dialog = InitialConfigurationDialog.this;
-        resizeTo(dialog.getSize().width, dialog.getSize().height - wrapperHeight + myPreviewEditor.getPanel().getPreferredSize().height);
+        resizeTo(dialog.getSize().width, dialog.getSize().height - wrapperHeight + getPreviewPreferredHeight());
       }
     }
   }
@@ -333,6 +431,20 @@ public class InitialConfigurationDialog extends DialogWrapper {
           indicator.setFraction(1.0);
         }
       });
+    }
+    UIManager.LookAndFeelInfo info = (UIManager.LookAndFeelInfo) myAppearanceComboBox.getSelectedItem();
+    LafManagerImpl lafManager = (LafManagerImpl)LafManager.getInstance();
+    if (info.getName().contains("Darcula") != (LafManager.getInstance().getCurrentLookAndFeel() instanceof DarculaLookAndFeelInfo)) {
+      lafManager.setLookAndFeelAfterRestart(info);
+      int rc = Messages.showYesNoDialog(project, "IDE appearance settings will be applied after restart. Would you like to restart now?",
+                                        "IDE Appearance", Messages.getQuestionIcon());
+      if (rc == Messages.YES) {
+        ((ApplicationImpl) ApplicationManager.getApplication()).restart(true);
+      }
+    }
+    else if (!info.equals(lafManager.getCurrentLookAndFeel())) {
+      lafManager.setCurrentLookAndFeel(info);
+      lafManager.updateUI();
     }
   }
 

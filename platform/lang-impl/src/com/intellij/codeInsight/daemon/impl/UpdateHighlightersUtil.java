@@ -55,7 +55,6 @@ import org.jetbrains.annotations.TestOnly;
 import java.awt.*;
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 public class UpdateHighlightersUtil {
   private static final Comparator<HighlightInfo> BY_START_OFFSET_NODUPS = new Comparator<HighlightInfo>() {
@@ -85,17 +84,11 @@ public class UpdateHighlightersUtil {
         return String.valueOf(o1.getGutterIconRenderer()).compareTo(String.valueOf(o2.getGutterIconRenderer()));
       }
 
-      return Comparing.compare(o1.description, o2.description);
+      return Comparing.compare(o1.getDescription(), o2.getDescription());
     }
   };
 
   private static final Key<List<HighlightInfo>> FILE_LEVEL_HIGHLIGHTS = Key.create("FILE_LEVEL_HIGHLIGHTS");
-  private static final Comparator<TextRange> BY_START_OFFSET = new Comparator<TextRange>() {
-    @Override
-    public int compare(final TextRange o1, final TextRange o2) {
-      return o1.getStartOffset() - o2.getStartOffset();
-    }
-  };
 
   static void cleanFileLevelHighlights(@NotNull Project project, final int group, PsiFile psiFile) {
     if (psiFile == null || !psiFile.getViewProvider().isPhysical()) return;
@@ -106,7 +99,7 @@ public class UpdateHighlightersUtil {
       if (infos == null) continue;
       List<HighlightInfo> infosToRemove = new ArrayList<HighlightInfo>();
       for (HighlightInfo info : infos) {
-        if (info.group == group) {
+        if (info.getGroup() == group) {
           manager.removeTopComponent(fileEditor, info.fileLevelComponent);
           infosToRemove.add(info);
         }
@@ -166,11 +159,11 @@ public class UpdateHighlightersUtil {
                                                   final int group,
                                                   @NotNull Map<TextRange, RangeMarker> ranges2markersCache) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    if (info.isFileLevelAnnotation || info.getGutterIconRenderer() != null) return;
+    if (info.isFileLevelAnnotation() || info.getGutterIconRenderer() != null) return;
     if (info.getStartOffset() < startOffset || info.getEndOffset() > endOffset) return;
 
     MarkupModel markup = DocumentMarkupModel.forDocument(document, project, true);
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     final boolean myInfoIsError = isSevere(info, severityRegistrar);
     Processor<HighlightInfo> otherHighlightInTheWayProcessor = new Processor<HighlightInfo>() {
       @Override
@@ -179,7 +172,7 @@ public class UpdateHighlightersUtil {
           return false;
         }
 
-        return oldInfo.group != group || !oldInfo.equalsByActualOffset(info);
+        return oldInfo.getGroup() != group || !oldInfo.equalsByActualOffset(info);
       }
     };
     boolean allIsClear = DaemonCodeAnalyzerImpl.processHighlights(document, project,
@@ -242,18 +235,18 @@ public class UpdateHighlightersUtil {
     final MarkupModel markup = DocumentMarkupModel.forDocument(document, project, true);
     assertMarkupConsistent(markup, project);
 
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     final HighlightersRecycler infosToRemove = new HighlightersRecycler();
     ContainerUtil.quickSort(infos, BY_START_OFFSET_NODUPS);
 
     DaemonCodeAnalyzerImpl.processHighlightsOverlappingOutside(document, project, null, range.getStartOffset(), range.getEndOffset(), new Processor<HighlightInfo>() {
       @Override
       public boolean process(HighlightInfo info) {
-        if (info.group == group) {
+        if (info.getGroup() == group) {
           RangeHighlighter highlighter = info.highlighter;
           int hiStart = highlighter.getStartOffset();
           int hiEnd = highlighter.getEndOffset();
-          if (!info.fromInjection && hiEnd < document.getTextLength() && (hiEnd <= startOffset || hiStart>=endOffset)) return true; // injections are oblivious to restricting range
+          if (!info.isFromInjection() && hiEnd < document.getTextLength() && (hiEnd <= startOffset || hiStart>=endOffset)) return true; // injections are oblivious to restricting range
           boolean toRemove = !(hiEnd == document.getTextLength() && range.getEndOffset() == document.getTextLength()) &&
                              !range.containsRange(hiStart, hiEnd)
                              ;
@@ -277,9 +270,9 @@ public class UpdateHighlightersUtil {
       @Override
       public boolean process(int offset, HighlightInfo info, boolean atStart, Collection<HighlightInfo> overlappingIntervals) {
         if (!atStart) return true;
-        if (!info.fromInjection && info.getEndOffset() < document.getTextLength() && (info.getEndOffset() <= startOffset || info.getStartOffset()>=endOffset)) return true; // injections are oblivious to restricting range
+        if (!info.isFromInjection() && info.getEndOffset() < document.getTextLength() && (info.getEndOffset() <= startOffset || info.getStartOffset()>=endOffset)) return true; // injections are oblivious to restricting range
 
-        if (info.isFileLevelAnnotation && psiFile != null && psiFile.getViewProvider().isPhysical()) {
+        if (info.isFileLevelAnnotation() && psiFile != null && psiFile.getViewProvider().isPhysical()) {
           addFileLevelHighlight(project, group, info, psiFile);
           changed[0] = true;
           return true;
@@ -315,12 +308,12 @@ public class UpdateHighlightersUtil {
                                      final int group) {
     ApplicationManager.getApplication().assertIsDispatchThread();
 
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     final HighlightersRecycler infosToRemove = new HighlightersRecycler();
     DaemonCodeAnalyzerImpl.processHighlights(document, project, null, range.getStartOffset(), range.getEndOffset(), new Processor<HighlightInfo>() {
       @Override
       public boolean process(HighlightInfo info) {
-        if (info.group == group) {
+        if (info.getGroup() == group) {
           RangeHighlighter highlighter = info.highlighter;
           int hiStart = highlighter.getStartOffset();
           int hiEnd = highlighter.getEndOffset();
@@ -350,7 +343,7 @@ public class UpdateHighlightersUtil {
         if (!atStart) {
           return true;
         }
-        if (info.isFileLevelAnnotation && psiFile != null && psiFile.getViewProvider().isPhysical()) {
+        if (info.isFileLevelAnnotation() && psiFile != null && psiFile.getViewProvider().isPhysical()) {
           addFileLevelHighlight(project, group, info, psiFile);
           changed[0] = true;
           return true;
@@ -416,13 +409,12 @@ public class UpdateHighlightersUtil {
       infoEndOffset = docLength;
       infoStartOffset = Math.min(infoStartOffset, infoEndOffset);
     }
-    if (infoEndOffset == infoStartOffset && !info.isAfterEndOfLine) {
+    if (infoEndOffset == infoStartOffset && !info.isAfterEndOfLine()) {
       if (infoEndOffset == docLength) return;  // empty highlighter beyond file boundaries
       infoEndOffset++; //show something in case of empty highlightinfo
     }
 
-    info.text = document.getText().substring(infoStartOffset, infoEndOffset);
-    info.group = group;
+    info.setGroup(group);
 
     int layer = getLayer(info, severityRegistrar);
     RangeHighlighterEx highlighter = infosToRemove == null ? null : (RangeHighlighterEx)infosToRemove.pickupHighlighterFromGarbageBin(info.startOffset, info.endOffset, layer);
@@ -435,7 +427,7 @@ public class UpdateHighlightersUtil {
         finalHighlighter.setTextAttributes(infoAttributes);
 
         info.highlighter = finalHighlighter;
-        finalHighlighter.setAfterEndOfLine(info.isAfterEndOfLine);
+        finalHighlighter.setAfterEndOfLine(info.isAfterEndOfLine());
 
         Color color = info.getErrorStripeMarkColor(psiFile, colorsScheme);
         finalHighlighter.setErrorStripeMarkColor(color);
@@ -454,7 +446,7 @@ public class UpdateHighlightersUtil {
             RangeMarker marker = getOrCreate(document, ranges2markersCache, textRange);
             list.add(Pair.create(pair.first, marker));
           }
-          info.quickFixActionMarkers = new CopyOnWriteArrayList<Pair<HighlightInfo.IntentionActionDescriptor, RangeMarker>>(list);
+          info.quickFixActionMarkers = ContainerUtil.createLockFreeCopyOnWriteList(list);
         }
         if (finalInfoRange.equalsToRange(info.fixStartOffset, info.fixEndOffset)) {
           info.fixMarker = null; // null means it the same as highlighter'
@@ -512,7 +504,7 @@ public class UpdateHighlightersUtil {
     final FileEditorManager manager = FileEditorManager.getInstance(project);
     for (FileEditor fileEditor : manager.getEditors(vFile)) {
       if (fileEditor instanceof TextEditor) {
-        FileLevelIntentionComponent component = new FileLevelIntentionComponent(info.description, info.severity, info.quickFixActionRanges,
+        FileLevelIntentionComponent component = new FileLevelIntentionComponent(info.getDescription(), info.getSeverity(), info.quickFixActionRanges,
                                                                                 project, psiFile, ((TextEditor)fileEditor).getEditor());
         manager.addTopComponent(fileEditor, component);
         List<HighlightInfo> fileLevelInfos = fileEditor.getUserData(FILE_LEVEL_HIGHLIGHTS);
@@ -521,7 +513,7 @@ public class UpdateHighlightersUtil {
           fileEditor.putUserData(FILE_LEVEL_HIGHLIGHTS, fileLevelInfos);
         }
         info.fileLevelComponent = component;
-        info.group = group;
+        info.setGroup(group);
         fileLevelInfos.add(info);
       }
     }
@@ -626,7 +618,7 @@ public class UpdateHighlightersUtil {
         if (info.needUpdateOnTyping()) {
           int highlighterStart = highlighter.getStartOffset();
           int highlighterEnd = highlighter.getEndOffset();
-          if (info.isAfterEndOfLine) {
+          if (info.isAfterEndOfLine()) {
             if (highlighterStart < document.getTextLength()) {
               highlighterStart += 1;
             }

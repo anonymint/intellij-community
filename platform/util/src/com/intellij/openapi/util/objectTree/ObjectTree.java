@@ -21,8 +21,6 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.Equality;
-import gnu.trove.THashMap;
-import gnu.trove.TObjectHashingStrategy;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -33,11 +31,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public final class ObjectTree<T> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.util.objectTree.ObjectTree");
 
-  private final CopyOnWriteArraySet<ObjectTreeListener> myListeners = new CopyOnWriteArraySet<ObjectTreeListener>();
+  private final List<ObjectTreeListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   // identity used here to prevent problems with hashCode/equals overridden by not very bright minds
-  private final Set<T> myRootObjects = ContainerUtil.<T>newIdentityTroveSet();
-  private final Map<T, ObjectNode<T>> myObject2NodeMap = ContainerUtil.<T, ObjectNode<T>>newIdentityTroveMap();
+  private final Set<T> myRootObjects = ContainerUtil.newIdentityTroveSet();
+  private final Map<T, ObjectNode<T>> myObject2NodeMap = ContainerUtil.newIdentityTroveMap();
 
   private final List<ObjectNode<T>> myExecutedNodes = new ArrayList<ObjectNode<T>>();
   private final List<T> myExecutedUnregisteredNodes = new ArrayList<T>();

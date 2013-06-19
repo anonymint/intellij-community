@@ -22,10 +22,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.*;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiPolyVariantReference;
-import com.intellij.psi.PsiReference;
-import com.intellij.psi.ResolveResult;
+import com.intellij.psi.*;
 import com.intellij.psi.impl.AnyPsiChangeListener;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.reference.SoftReference;
@@ -38,12 +35,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class ResolveCache {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.resolve.ResolveCache");
   private final ConcurrentMap[] myMaps = new ConcurrentMap[2*2*2]; //boolean physical, boolean incompleteCode, boolean isPoly
-  private final AtomicInteger myClearCount = new AtomicInteger(0);
   private final RecursionGuard myGuard = RecursionManager.createGuard("resolveCache");
 
   public static ResolveCache getInstance(Project project) {
@@ -84,7 +79,6 @@ public class ResolveCache {
   }
 
   public void clearCache(boolean isPhysical) {
-    myClearCount.incrementAndGet();
     int startIndex = isPhysical ? 0 : 1;
     for (int i=startIndex;i<2;i++)for (int j=0;j<2;j++)for (int k=0;k<2;k++) myMaps[i*4+j*2+k].clear();
   }
@@ -94,32 +88,29 @@ public class ResolveCache {
                                                                @NotNull final AbstractResolver<TRef, TResult> resolver,
                                                                boolean needToPreventRecursion,
                                                                final boolean incompleteCode,
-                                                               boolean isPoly) {
+                                                               boolean isPoly,
+                                                               boolean isPhysical) {
     ProgressIndicatorProvider.checkCanceled();
     ApplicationManager.getApplication().assertReadAccessAllowed();
 
-    int clearCountOnStart = myClearCount.intValue();
-    boolean physical = ref.getElement().isPhysical();
-    ConcurrentMap<TRef, Getter<TResult>> map = getMap(physical, incompleteCode, isPoly);
+    ConcurrentMap<TRef, Getter<TResult>> map = getMap(isPhysical, incompleteCode, isPoly);
     Getter<TResult> reference = map.get(ref);
     TResult result = reference == null ? null : reference.get();
     if (result != null) {
       return result;
     }
 
-    Computable<TResult> computable = new Computable<TResult>() {
+    RecursionGuard.StackStamp stamp = myGuard.markStack();
+    result = needToPreventRecursion ? myGuard.doPreventingRecursion(Trinity.create(ref, incompleteCode, isPoly), true, new Computable<TResult>() {
       @Override
       public TResult compute() {
         return resolver.resolve(ref, incompleteCode);
       }
-    };
-
-    RecursionGuard.StackStamp stamp = myGuard.markStack();
-    result = needToPreventRecursion ? myGuard.doPreventingRecursion(Trinity.create(ref, incompleteCode, isPoly), true, computable) : computable.compute();
+    }) : resolver.resolve(ref, incompleteCode);
     PsiElement element = result instanceof ResolveResult ? ((ResolveResult)result).getElement() : null;
     LOG.assertTrue(element == null || element.isValid(), result);
 
-    if (stamp.mayCacheNow() && clearCountOnStart == myClearCount.intValue()) {
+    if (stamp.mayCacheNow()) {
       cache(ref, map, result, isPoly);
     }
     return result;
@@ -130,7 +121,15 @@ public class ResolveCache {
                                                                                 @NotNull PolyVariantResolver<T> resolver,
                                                                                 boolean needToPreventRecursion,
                                                                                 boolean incompleteCode) {
-    ResolveResult[] result = resolve(ref, resolver, needToPreventRecursion, incompleteCode, true);
+    return resolveWithCaching(ref, resolver, needToPreventRecursion, incompleteCode, ref.getElement().getContainingFile());
+  }
+  @NotNull
+  public <T extends PsiPolyVariantReference> ResolveResult[] resolveWithCaching(@NotNull T ref,
+                                                                                @NotNull PolyVariantResolver<T> resolver,
+                                                                                boolean needToPreventRecursion,
+                                                                                boolean incompleteCode,
+                                                                                @NotNull PsiFile containingFile) {
+    ResolveResult[] result = resolve(ref, resolver, needToPreventRecursion, incompleteCode, true, containingFile.isPhysical());
     return result == null ? ResolveResult.EMPTY_ARRAY : result;
   }
 
@@ -144,7 +143,7 @@ public class ResolveCache {
                                        @NotNull Resolver resolver,
                                        boolean needToPreventRecursion,
                                        boolean incompleteCode) {
-    return resolve(ref, resolver, needToPreventRecursion, incompleteCode, false);
+    return resolve(ref, resolver, needToPreventRecursion, incompleteCode, false, ref.getElement().isPhysical());
   }
 
   @Nullable
@@ -152,7 +151,7 @@ public class ResolveCache {
                                        @NotNull AbstractResolver<TRef, TResult> resolver,
                                        boolean needToPreventRecursion,
                                        boolean incompleteCode) {
-    return resolve(ref, resolver, needToPreventRecursion, incompleteCode, false);
+    return resolve(ref, resolver, needToPreventRecursion, incompleteCode, false, ref.getElement().isPhysical());
   }
 
   private <TRef extends PsiReference,TResult> ConcurrentMap<TRef, Getter<TResult>> getMap(boolean physical, boolean incompleteCode, boolean isPoly) {

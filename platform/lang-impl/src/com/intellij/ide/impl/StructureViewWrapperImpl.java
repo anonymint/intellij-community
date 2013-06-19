@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,7 @@ package com.intellij.ide.impl;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.projectView.impl.ProjectRootsUtil;
-import com.intellij.ide.structureView.StructureView;
-import com.intellij.ide.structureView.StructureViewBuilder;
-import com.intellij.ide.structureView.StructureViewWrapper;
+import com.intellij.ide.structureView.*;
 import com.intellij.ide.structureView.impl.StructureViewComposite;
 import com.intellij.ide.structureView.newStructureView.StructureViewComponent;
 import com.intellij.openapi.Disposable;
@@ -49,6 +47,7 @@ import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.openapi.wm.ex.ToolWindowEx;
 import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
 import com.intellij.ui.content.*;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
@@ -88,15 +87,17 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
   public StructureViewWrapperImpl(Project project, ToolWindowEx toolWindow) {
     myProject = project;
     myToolWindow = toolWindow;
-    
+
     myUpdateQueue = new MergingUpdateQueue("StructureView", Registry.intValue("structureView.coalesceTime"), false, myToolWindow.getComponent(), this, myToolWindow.getComponent(), true);
     myUpdateQueue.setRestartTimerOnAdd(true);
 
     final TimerListener timerListener = new TimerListener() {
+      @Override
       public ModalityState getModalityState() {
         return ModalityState.stateForComponent(myToolWindow.getComponent());
       }
 
+      @Override
       public void run() {
         checkUpdate();
       }
@@ -110,6 +111,7 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
     });
 
     myToolWindow.getComponent().addHierarchyListener(new HierarchyListener() {
+      @Override
       public void hierarchyChanged(HierarchyEvent e) {
         if ((e.getChangeFlags() & HierarchyEvent.DISPLAYABILITY_CHANGED) != 0) {
           scheduleRebuild();
@@ -137,7 +139,10 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
     if (myProject.isDisposed()) return;
 
     final Component owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-    if (SwingUtilities.isDescendingFrom(myToolWindow.getComponent(), owner) || JBPopupFactory.getInstance().isPopupActive()) return;
+    final boolean insideToolwindow = SwingUtilities.isDescendingFrom(myToolWindow.getComponent(), owner);
+    if (!myFirstRun && (insideToolwindow || JBPopupFactory.getInstance().isPopupActive())) {
+      return;
+    }
 
     final DataContext dataContext = DataManager.getInstance().getDataContext(owner);
     if (dataContext.getData(myKey) == this) return;
@@ -178,7 +183,16 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
   }
 
   private void setFile(VirtualFile file) {
-    if (!Comparing.equal(file, myFile)) {
+    boolean forceRebuild = !Comparing.equal(file, myFile);
+    if (!forceRebuild && myStructureView != null) {
+      StructureViewModel model = myStructureView.getTreeModel();
+      StructureViewTreeElement treeElement = model.getRoot();
+      Object value = treeElement.getValue();
+      if (value == null || value instanceof PsiElement && !((PsiElement)value).isValid()) {
+        forceRebuild = true;
+      }
+    }
+    if (forceRebuild) {
       myFile = file;
       scheduleRebuild();
     }
@@ -189,17 +203,20 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
   // StructureView interface implementation
   // -------------------------------------------------------------------------
 
+  @Override
   public void dispose() {
     //we don't really need it
     //rebuild();
   }
 
+  @Override
   public boolean selectCurrentElement(final FileEditor fileEditor, final VirtualFile file, final boolean requestFocus) {
     //todo [kirillk]
     // this is dirty hack since some bright minds decided to used different TreeUi every time, so selection may be followed
     // by rebuild on completely different instance of TreeUi
 
     Runnable runnable = new Runnable() {
+      @Override
       public void run() {
         if (myStructureView != null) {
           if (!Comparing.equal(myStructureView.getFileEditor(), fileEditor)) {
@@ -226,6 +243,7 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
 
   private void scheduleRebuild() {
     myUpdateQueue.queue(new Update("rebuild") {
+      @Override
       public void run() {
         if (myProject.isDisposed()) return;
         rebuild();
@@ -394,6 +412,7 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
       super(new BorderLayout());
     }
 
+    @Override
     public Object getData(@NonNls String dataId) {
       if (dataId.equals(myKey)) return StructureViewWrapperImpl.this;
       return null;

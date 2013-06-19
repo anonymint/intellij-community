@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.ui;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.popup.AbstractPopup;
 import com.intellij.util.Alarm;
 import com.intellij.util.ui.UIUtil;
@@ -32,15 +33,14 @@ import java.util.Collection;
 import java.util.Collections;
 
 public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType extends JComponent> implements ExpandableItemsHandler<KeyType> {
-  private final Alarm myUpdateAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
-
   protected final ComponentType myComponent;
+
+  private final Alarm myUpdateAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
   private final CellRendererPane myRendererPane = new CellRendererPane();
   private final TipComponent myTipComponent;
 
-  private boolean isEnabled = true;
+  private boolean myEnabled = Registry.is("ide.expansion.hints.enabled");
   private Hint myHint;
-
   private KeyType myKey;
   private Rectangle myKeyItemBounds;
   private BufferedImage myImage;
@@ -51,6 +51,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
     myComponent.validate();
 
     myTipComponent = new TipComponent();
+
     myComponent.addMouseListener(
       new MouseListener() {
         @Override
@@ -146,8 +147,6 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
         }
       }
     );
-
-
   }
 
   protected void onFocusLost() {
@@ -156,8 +155,8 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   @Override
   public void setEnabled(boolean enabled) {
-    isEnabled = enabled;
-    if (!isEnabled) hideHint();
+    myEnabled = enabled;
+    if (!myEnabled) hideHint();
   }
 
   @NotNull
@@ -199,7 +198,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
   }
 
   private void doHandleSelectionChange(KeyType selected, boolean processIfUnfocused) {
-    if (!isEnabled) return;
+    if (!myEnabled) return;
 
     if (selected == null
         || !myComponent.isShowing()
@@ -229,7 +228,7 @@ public abstract class AbstractExpandableItemsHandler<KeyType, ComponentType exte
 
   protected boolean isPopup() {
     Window window = SwingUtilities.getWindowAncestor(myComponent);
-    return window != null 
+    return window != null
            && !(window instanceof Dialog || window instanceof Frame)
            && !isHintsAllowed(window);
   }

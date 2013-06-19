@@ -15,9 +15,10 @@
  */
 package git4idea;
 
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.execution.ui.ConsoleViewContentType;
-import com.intellij.notification.NotificationDisplayType;
-import com.intellij.notification.NotificationGroup;
+import com.intellij.ide.BrowserUtil;
+import com.intellij.notification.*;
 import com.intellij.notification.impl.NotificationsConfigurationImpl;
 import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.application.ApplicationManager;
@@ -26,12 +27,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.impl.patch.formove.FilePathComparator;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeProvider;
@@ -49,8 +50,6 @@ import com.intellij.openapi.vcs.update.UpdateEnvironment;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.StatusBar;
-import com.intellij.openapi.wm.WindowManager;
 import com.intellij.util.containers.ComparatorDelegate;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.ui.UIUtil;
@@ -60,13 +59,14 @@ import git4idea.changes.GitCommittedChangeListProvider;
 import git4idea.changes.GitOutgoingChangesProvider;
 import git4idea.checkin.GitCheckinEnvironment;
 import git4idea.checkin.GitCommitAndPushExecutor;
+import git4idea.checkout.GitCheckoutProvider;
 import git4idea.commands.Git;
 import git4idea.config.*;
 import git4idea.diff.GitDiffProvider;
 import git4idea.diff.GitTreeDiffProvider;
 import git4idea.history.GitHistoryProvider;
 import git4idea.history.NewGitUsersComponent;
-import git4idea.history.browser.GitCommit;
+import git4idea.history.browser.GitHeavyCommit;
 import git4idea.history.browser.GitProjectLogManager;
 import git4idea.history.wholeTree.GitCommitDetailsProvider;
 import git4idea.history.wholeTree.GitCommitsSequentialIndex;
@@ -85,6 +85,8 @@ import git4idea.vfs.GitVFSListener;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.event.HyperlinkEvent;
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
@@ -114,16 +116,16 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
    * @see VcsDataKeys#CHANGES
    * @see #SELECTED_COMMITS
    */
-  public static final DataKey<GitCommit> GIT_COMMIT = DataKey.create("Git.Commit");
+  public static final DataKey<GitHeavyCommit> GIT_COMMIT = DataKey.create("Git.Commit");
 
   /**
    * Provides the list of Git commits selected in some list, for example, in the Git log.
    * @see #GIT_COMMIT
    */
-  public static final DataKey<List<GitCommit>> SELECTED_COMMITS = DataKey.create("Git.Selected.Commits");
+  public static final DataKey<List<GitHeavyCommit>> SELECTED_COMMITS = DataKey.create("Git.Selected.Commits");
 
   /**
-   * Provides the possibility to receive on demand those commit details which usually are not accessible from the {@link GitCommit} object.
+   * Provides the possibility to receive on demand those commit details which usually are not accessible from the {@link git4idea.history.browser.GitHeavyCommit} object.
    */
   public static final DataKey<GitCommitDetailsProvider> COMMIT_DETAILS_PROVIDER = DataKey.create("Git.Commits.Details.Provider");
 
@@ -142,8 +144,6 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
   private final GitVcsApplicationSettings myAppSettings;
   private final Configurable myConfigurable;
   private final RevisionSelector myRevSelector;
-  private final GitMergeProvider myMergeProvider;
-  private final GitMergeProvider myReverseMergeProvider;
   private final GitCommittedChangeListProvider myCommittedChangeListProvider;
   private final @NotNull GitPlatformFacade myPlatformFacade;
 
@@ -188,8 +188,6 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
     myRevSelector = new GitRevisionSelector();
     myConfigurable = new GitVcsConfigurable(gitProjectSettings, myProject);
     myUpdateEnvironment = new GitUpdateEnvironment(myProject, this, gitProjectSettings);
-    myMergeProvider = new GitMergeProvider(myProject);
-    myReverseMergeProvider = new GitMergeProvider(myProject, true);
     myCommittedChangeListProvider = new GitCommittedChangeListProvider(myProject);
     myOutgoingChangesProvider = new GitOutgoingChangesProvider(myProject);
     myTreeDiffProvider = new GitTreeDiffProvider(myProject);
@@ -209,14 +207,6 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
    */
   public static void runInBackground(Task.Backgroundable task) {
     task.queue();
-  }
-
-  /**
-   * @return a reverse merge provider for git (with reversed meaning of "theirs" and "yours", needed for the rebase and unstash)
-   */
-  @NotNull
-  public MergeProvider getReverseMergeProvider() {
-    return myReverseMergeProvider;
   }
 
   @Override
@@ -239,7 +229,7 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
   @NotNull
   @Override
   public MergeProvider getMergeProvider() {
-    return myMergeProvider;
+    return GitMergeProvider.detect(myProject);
   }
 
   @Override
@@ -339,11 +329,7 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
 
   @Override
   protected void activate() {
-    if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      if (myExecutableValidator.checkExecutableAndNotifyIfNeeded()) {
-        checkVersion();
-      }
-    }
+    checkExecutableAndVersion();
 
     if (myVFSListener == null) {
       myVFSListener = new GitVFSListener(myProject, this, myGit);
@@ -352,16 +338,31 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
     GitProjectLogManager.getInstance(myProject).activate();
 
     if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      StatusBar statusBar = WindowManager.getInstance().getStatusBar(myProject);
-      if (statusBar != null) {
-        myBranchWidget = new GitBranchWidget(myProject);
-        statusBar.addWidget(myBranchWidget, "after " + (SystemInfo.isMac ? "Encoding" : "InsertOverwrite"), myProject);
-      }
+      myBranchWidget = new GitBranchWidget(myProject);
+      DvcsUtil.installStatusBarWidget(myProject, myBranchWidget);
     }
     if (myRepositoryForAnnotationsListener == null) {
       myRepositoryForAnnotationsListener = new GitRepositoryForAnnotationsListener(myProject);
     }
     ((GitCommitsSequentialIndex) ServiceManager.getService(GitCommitsSequentially.class)).activate();
+  }
+
+  private void checkExecutableAndVersion() {
+    boolean executableIsAlreadyCheckedAndFine = false;
+    String pathToGit = myAppSettings.getPathToGit();
+    if (!pathToGit.contains(File.separator)) { // no path, just sole executable, with a hope that it is in path
+      // subject to redetect the path if executable validator fails
+      if (!myExecutableValidator.isExecutableValid()) {
+        myAppSettings.setPathToGit(new GitExecutableDetector().detect());
+      }
+      else {
+        executableIsAlreadyCheckedAndFine = true; // not to check it twice
+      }
+    }
+
+    if (executableIsAlreadyCheckedAndFine || myExecutableValidator.checkExecutableAndNotifyIfNeeded()) {
+      checkVersion();
+    }
   }
 
   @Override
@@ -373,9 +374,8 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
     NewGitUsersComponent.getInstance(myProject).deactivate();
     GitProjectLogManager.getInstance(myProject).deactivate();
 
-    StatusBar statusBar = WindowManager.getInstance().getStatusBar(myProject);
-    if (statusBar != null && myBranchWidget != null) {
-      statusBar.removeWidget(myBranchWidget.ID());
+    if (myBranchWidget != null) {
+      DvcsUtil.removeStatusBarWidget(myProject, myBranchWidget);
       myBranchWidget = null;
     }
     ((GitCommitsSequentialIndex) ServiceManager.getService(GitCommitsSequentially.class)).deactivate();
@@ -447,11 +447,24 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
     try {
       myVersion = GitVersion.identifyVersion(executable);
       if (! myVersion.isSupported()) {
-        String message = GitBundle.message("vcs.unsupported.version", myVersion, GitVersion.MIN);
-        if (! myProject.isDefault()) {
-          showMessage(message, ConsoleViewContentType.SYSTEM_OUTPUT.getAttributes());
-        }
-        VcsBalloonProblemNotifier.showOverVersionControlView(myProject, message, MessageType.ERROR);
+        log.info("Unsupported Git version: " + myVersion);
+        final String SETTINGS_LINK = "settings";
+        final String UPDATE_LINK = "update";
+        String message = String.format("The <a href='" + SETTINGS_LINK + "'>configured</a> version of Git is not supported: %s.<br/> " +
+                                       "The minimal supported version is %s. Please <a href='" + UPDATE_LINK + "'>update</a>.",
+                                       myVersion, GitVersion.MIN);
+        IMPORTANT_ERROR_NOTIFICATION.createNotification("Unsupported Git version", message, NotificationType.ERROR,
+          new NotificationListener.Adapter() {
+            @Override
+            protected void hyperlinkActivated(@NotNull Notification notification, @NotNull HyperlinkEvent e) {
+              if (SETTINGS_LINK.equals(e.getDescription())) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(myProject, getConfigurable().getDisplayName());
+              }
+              else if (UPDATE_LINK.equals(e.getDescription())) {
+                BrowserUtil.browse("http://git-scm.com");
+              }
+            }
+        }).notify(myProject);
       }
     } catch (Exception e) {
       if (getExecutableValidator().checkExecutableAndNotifyIfNeeded()) { // check executable before notifying error
@@ -575,5 +588,10 @@ public class GitVcs extends AbstractVcs<CommittedChangeList> {
         new GitIntegrationEnabler(myProject, myGit, myPlatformFacade).enable(detectInfo);
       }
     });
+  }
+
+  @Override
+  public CheckoutProvider getCheckoutProvider() {
+    return new GitCheckoutProvider(ServiceManager.getService(Git.class));
   }
 }

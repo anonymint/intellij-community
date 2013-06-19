@@ -36,15 +36,18 @@ public class ChangeSignatureAction extends BaseRefactoringAction {
     setInjectedContext(true);
   }
 
+  @Override
   public boolean isAvailableInEditorOnly() {
     return false;
   }
 
-  public boolean isEnabledOnElements(PsiElement[] elements) {
+  @Override
+  public boolean isEnabledOnElements(@NotNull PsiElement[] elements) {
     return elements.length == 1 && findTargetMember(elements[0]) != null;
   }
 
-  protected boolean isAvailableOnElementInEditorAndFile(final PsiElement element, final Editor editor, PsiFile file, DataContext context) {
+  @Override
+  protected boolean isAvailableOnElementInEditorAndFile(@NotNull final PsiElement element, @NotNull final Editor editor, @NotNull PsiFile file, @NotNull DataContext context) {
     PsiElement targetMember = findTargetMember(file, editor);
     if (targetMember == null) {
       final ChangeSignatureHandler targetHandler = getChangeSignatureHandler(file.getLanguage());
@@ -88,7 +91,7 @@ public class ChangeSignatureAction extends BaseRefactoringAction {
   }
 
   @Override
-  protected boolean hasAvailableHandler(DataContext dataContext) {
+  protected boolean hasAvailableHandler(@NotNull DataContext dataContext) {
     final Project project = PlatformDataKeys.PROJECT.getData(dataContext);
     if (project == null) return false;
     final Editor editor = PlatformDataKeys.EDITOR.getData(dataContext);
@@ -105,7 +108,8 @@ public class ChangeSignatureAction extends BaseRefactoringAction {
     return targetMember != null && getChangeSignatureHandler(targetMember.getLanguage()) != null;
   }
 
-  public RefactoringActionHandler getHandler(DataContext dataContext) {
+  @Override
+  public RefactoringActionHandler getHandler(@NotNull DataContext dataContext) {
     Language language = LangDataKeys.LANGUAGE.getData(dataContext);
     if (language == null) {
       PsiElement psiElement = LangDataKeys.PSI_ELEMENT.getData(dataContext);
@@ -115,6 +119,7 @@ public class ChangeSignatureAction extends BaseRefactoringAction {
     }
     if (language != null) {
       return new RefactoringActionHandler() {
+        @Override
         public void invoke(@NotNull Project project, Editor editor, PsiFile file, DataContext dataContext) {
           editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
           final PsiElement targetMember = findTargetMember(file, editor);
@@ -133,6 +138,7 @@ public class ChangeSignatureAction extends BaseRefactoringAction {
           handler.invoke(project, new PsiElement[]{targetMember}, dataContext);
         }
 
+        @Override
         public void invoke(@NotNull Project project, @NotNull PsiElement[] elements, DataContext dataContext) {
           if (elements.length != 1) return;
           final PsiElement targetMember = findTargetMember(elements[0]);

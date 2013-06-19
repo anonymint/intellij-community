@@ -47,7 +47,7 @@ public class UntrackedFilesNotifier {
   public static void notifyUntrackedFilesOverwrittenBy(@NotNull final Project project, @NotNull GitPlatformFacade platformFacade,
                                                        @NotNull final Collection<VirtualFile> untrackedFiles,
                                                        @NotNull final String operation, @Nullable String description) {
-    final String notificationTitle = StringUtil.capitalize(operation) + " error";
+    final String notificationTitle = StringUtil.capitalize(operation) + " failed";
     final String notificationDesc = description == null ? createUntrackedFilesOverwrittenDescription(operation, true) : description;
 
     platformFacade.getNotificator(project).notifyError(notificationTitle, notificationDesc,
@@ -81,8 +81,10 @@ public class UntrackedFilesNotifier {
 
     public UntrackedFilesDialog(Project project, Collection<VirtualFile> untrackedFiles, String dialogDesc) {
       super(project, new ArrayList<VirtualFile>(untrackedFiles), StringUtil.stripHtml(dialogDesc, true), null, false, false, true);
+      init();
     }
 
+    @NotNull
     @Override
     protected Action[] createActions() {
       return new Action[]{getOKAction()};

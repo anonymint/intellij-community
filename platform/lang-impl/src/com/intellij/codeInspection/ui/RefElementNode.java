@@ -36,8 +36,8 @@ import javax.swing.tree.MutableTreeNode;
 public class RefElementNode extends InspectionTreeNode {
   private boolean myHasDescriptorsUnder = false;
   private CommonProblemDescriptor mySingleDescriptor = null;
-  protected InspectionTool myTool;
-  private ComputableIcon myIcon = new ComputableIcon(new Computable<Icon>() {
+  protected final InspectionTool myTool;
+  private final ComputableIcon myIcon = new ComputableIcon(new Computable<Icon>() {
     @Override
     public Icon compute() {
       final RefEntity refEntity = getElement();
@@ -48,28 +48,31 @@ public class RefElementNode extends InspectionTreeNode {
     }
   });
 
-  public RefElementNode(final Object userObject, final InspectionTool tool) {
+  public RefElementNode(@NotNull Object userObject, @NotNull InspectionTool tool) {
     super(userObject);
     myTool = tool;
   }
 
-  public RefElementNode(@NotNull RefElement element, final InspectionTool inspectionTool) {
-    super(element);
-    myTool = inspectionTool;
+  public RefElementNode(@NotNull RefElement element, @NotNull InspectionTool tool) {
+    this((Object)element, tool);
   }
 
-  public boolean hasDescriptorsUnder() { return myHasDescriptorsUnder; }
+  public boolean hasDescriptorsUnder() {
+    return myHasDescriptorsUnder;
+  }
 
   @Nullable
   public RefEntity getElement() {
     return (RefEntity)getUserObject();
   }
 
+  @Override
   @Nullable
   public Icon getIcon(boolean expanded) {
     return myIcon.getIcon();
   }
 
+  @Override
   public int getProblemCount() {
     return Math.max(1, super.getProblemCount());
   }
@@ -82,30 +85,36 @@ public class RefElementNode extends InspectionTreeNode {
     return element.getRefManager().getRefinedElement(element).getQualifiedName();
   }
 
+  @Override
   public boolean isValid() {
     final RefEntity refEntity = getElement();
     return refEntity != null && refEntity.isValid();
   }
 
+  @Override
   public boolean isResolved() {
     return myTool.isElementIgnored(getElement());
   }
 
 
+  @Override
   public void ignoreElement() {
     myTool.ignoreCurrentElement(getElement());
     super.ignoreElement();
   }
 
+  @Override
   public void amnesty() {
     myTool.amnesty(getElement());
     super.amnesty();
   }
 
+  @Override
   public FileStatus getNodeStatus() {
-    return  myTool.getElementStatus(getElement());    
+    return  myTool.getElementStatus(getElement());
   }
 
+  @Override
   public void add(MutableTreeNode newChild) {
     super.add(newChild);
     if (newChild instanceof ProblemDescriptionNode) {
@@ -113,7 +122,7 @@ public class RefElementNode extends InspectionTreeNode {
     }
   }
 
-  public void setProblem(CommonProblemDescriptor descriptor) {
+  public void setProblem(@NotNull CommonProblemDescriptor descriptor) {
     mySingleDescriptor = descriptor;
   }
 

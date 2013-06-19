@@ -34,7 +34,7 @@ public abstract class JarFileSystem extends NewVirtualFileSystem implements JarC
   @Nullable
   public abstract VirtualFile getVirtualFileForJar(@Nullable VirtualFile entryVFile);
   @Nullable
-  public abstract JarFile getJarFile(VirtualFile entryVFile) throws IOException;
+  public abstract JarFile getJarFile(@NotNull VirtualFile entryVFile) throws IOException;
 
   @SuppressWarnings("MethodMayBeStatic")
   @Nullable
@@ -46,5 +46,14 @@ public abstract class JarFileSystem extends NewVirtualFileSystem implements JarC
   @Override
   public VirtualFile getLocalVirtualFileFor(@Nullable VirtualFile entryVFile) {
     return getVirtualFileForJar(entryVFile);
+  }
+
+  @Nullable
+  @Override
+  public VirtualFile findLocalVirtualFileByPath(@NotNull String path) {
+    if (!path.contains(JAR_SEPARATOR)) {
+      path += JAR_SEPARATOR;
+    }
+    return findFileByPath(path);
   }
 }

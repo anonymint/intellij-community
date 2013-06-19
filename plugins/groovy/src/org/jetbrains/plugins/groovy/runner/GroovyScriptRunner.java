@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ public abstract class GroovyScriptRunner {
     }
   }
 
-  protected static void setGroovyHome(JavaParameters params, String groovyHome) {
+  protected static void setGroovyHome(JavaParameters params, @NotNull String groovyHome) {
     params.getVMParametersList().add("-Dgroovy.home=" + groovyHome);
     if (groovyHome.contains("grails")) { //a bit of a hack
       params.getVMParametersList().add("-Dgrails.home=" + groovyHome);
@@ -104,7 +104,7 @@ public abstract class GroovyScriptRunner {
     final VirtualFile[] files = OrderEnumerator.orderEntries(module).getAllLibrariesAndSdkClassesRoots();
     for (VirtualFile root : files) {
       if (root.getName().matches(GroovyConfigUtils.GROOVY_JAR_PATTERN)
-          || GroovyConfigUtils.GROOVY_ALL_JAR_PATTERN.matcher(root.getName()).matches())
+          || GroovyConfigUtils.matchesGroovyAll(root.getName()))
       {
         return root;
       }
@@ -119,7 +119,10 @@ public abstract class GroovyScriptRunner {
 
   protected static void addClasspathFromRootModel(@Nullable Module module, boolean isTests, JavaParameters params, boolean allowDuplication) throws CantRunException {
     PathsList nonCore = getClassPathFromRootModel(module, isTests, params, allowDuplication);
-    if (nonCore == null) return;
+    if (nonCore == null) {
+      nonCore = new PathsList();
+    }
+    nonCore.add(".");
 
     final String cp = nonCore.getPathsString();
     if (!StringUtil.isEmptyOrSpaces(cp)) {

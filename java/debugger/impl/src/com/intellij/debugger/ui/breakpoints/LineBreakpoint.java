@@ -87,6 +87,9 @@ public class LineBreakpoint extends BreakpointWithHighlighter {
   }
 
   protected Icon getSetIcon(boolean isMuted) {
+    if (REMOVE_AFTER_HIT) {
+      return isMuted ? AllIcons.Debugger.Db_muted_temporary_breakpoint : AllIcons.Debugger.Db_temporary_breakpoint;
+    }
     return isMuted? AllIcons.Debugger.Db_muted_breakpoint : AllIcons.Debugger.Db_set_breakpoint;
   }
 
@@ -95,6 +98,9 @@ public class LineBreakpoint extends BreakpointWithHighlighter {
   }
 
   protected Icon getVerifiedIcon(boolean isMuted) {
+    if (REMOVE_AFTER_HIT) {
+      return isMuted ? AllIcons.Debugger.Db_muted_temporary_breakpoint : AllIcons.Debugger.Db_temporary_breakpoint;
+    }
     return isMuted? AllIcons.Debugger.Db_muted_verified_breakpoint : AllIcons.Debugger.Db_verified_breakpoint;
   }
 
@@ -119,6 +125,9 @@ public class LineBreakpoint extends BreakpointWithHighlighter {
 
   protected void createRequestForPreparedClass(final DebugProcessImpl debugProcess, final ReferenceType classType) {
     if (!isInScopeOf(debugProcess, classType.name())) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(classType.name() + " is out of debug-process scope, breakpoint request won't be created for line " + getLineIndex());
+      }
       return;
     }
     try {
@@ -180,10 +189,16 @@ public class LineBreakpoint extends BreakpointWithHighlighter {
       if (breakpointFile != null && fileIndex.isInSourceContent(breakpointFile)) {
         // apply filtering to breakpoints from content sources only, not for sources attached to libraries
         final Collection<VirtualFile> candidates = findClassCandidatesInSourceContent(className, debugProcess.getSearchScope(), fileIndex);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Found "+ (candidates == null? "null" : candidates.size()) + " candidate containing files for class " + className);
+        }
         if (candidates == null) {
           return true;
         }
         for (VirtualFile classFile : candidates) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Breakpoint file: " + breakpointFile.getPath()+ "; candidate file: " + classFile.getPath());
+          }
           if (breakpointFile.equals(classFile)) {
             return true;
           }
@@ -202,12 +217,30 @@ public class LineBreakpoint extends BreakpointWithHighlighter {
       @Nullable
       public Collection<VirtualFile> compute() {
         final PsiClass[] classes = JavaPsiFacade.getInstance(myProject).findClasses(topLevelClassName, scope);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Found "+ classes.length + " classes " + topLevelClassName + " in scope");
+        }
         if (classes.length == 0) {
           return null;
         }
         final List<VirtualFile> list = new ArrayList<VirtualFile>(classes.length);
         for (PsiClass aClass : classes) {
           final PsiFile psiFile = aClass.getContainingFile();
+          
+          if (LOG.isDebugEnabled()) {
+            final StringBuilder msg = new StringBuilder();
+            msg.append("Checking class ").append(aClass.getQualifiedName());
+            msg.append("\n\t").append("PsiFile=").append(psiFile);
+            if (psiFile != null) {
+              final VirtualFile vFile = psiFile.getVirtualFile();
+              msg.append("\n\t").append("VirtualFile=").append(vFile);
+              if (vFile != null) {
+                msg.append("\n\t").append("isInSourceContent=").append(fileIndex.isInSourceContent(vFile));
+              }
+            }
+            LOG.debug(msg.toString());
+          }
+          
           if (psiFile != null) {
             final VirtualFile vFile = psiFile.getVirtualFile();
             if (vFile != null && fileIndex.isInSourceContent(vFile)) {

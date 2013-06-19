@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,9 +78,13 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
 
   private FileTypeAssocTable<FileType> myPatternsTable = new FileTypeAssocTable<FileType>();
   private final IgnoredPatternSet myIgnoredPatterns = new IgnoredPatternSet();
+  private final IgnoredFileCache myIgnoredFileCache = new IgnoredFileCache(myIgnoredPatterns);
+
   private final FileTypeAssocTable<FileType> myInitialAssociations = new FileTypeAssocTable<FileType>();
   private final Map<FileNameMatcher, String> myUnresolvedMappings = new THashMap<FileNameMatcher, String>();
-  private final Map<FileNameMatcher, String> myUnresolvedRemovedMappings = new THashMap<FileNameMatcher, String>();
+  private final Map<FileNameMatcher, Trinity<String, String, Boolean>> myUnresolvedRemovedMappings = new THashMap<FileNameMatcher, Trinity<String, String, Boolean>>();
+  /** This will contain removed mappings with "approved" states */
+  private final Map<FileNameMatcher, Pair<FileType, Boolean>> myRemovedMappings = new THashMap<FileNameMatcher, Pair<FileType, Boolean>>();
 
   @NonNls private static final String ELEMENT_FILETYPE = "filetype";
   @NonNls private static final String ELEMENT_FILETYPES = "filetypes";
@@ -145,12 +149,12 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
       }
     };
 
-    for (final FileTypeFactory factory : Extensions.getExtensions(FileTypeFactory.FILE_TYPE_FACTORY_EP)) {
+    for (FileTypeFactory factory : Extensions.getExtensions(FileTypeFactory.FILE_TYPE_FACTORY_EP)) {
       try {
         factory.createFileTypes(consumer);
       }
-      catch (final Error ex) {
-        PluginManager.disableIncompatiblePlugin(factory, ex);
+      catch (Throwable t) {
+        PluginManager.handleComponentError(t, factory.getClass().getName(), null);
       }
     }
   }
@@ -187,13 +191,11 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
         }
 
         return null;
-
       }
 
       @Override
       public boolean shouldBeSaved(final AbstractFileType fileType) {
         return shouldBeSavedToFile(fileType);
-
       }
 
       @Override
@@ -215,7 +217,6 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
         }
 
         return new Document(root);
-
       }
 
       @Override
@@ -314,28 +315,34 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
     FileType fileType = file.getUserData(FILE_TYPE_KEY);
     if (fileType != null) return fileType;
 
-    final FileType assignedFileType = file instanceof LightVirtualFile? ((LightVirtualFile)file).getAssignedFileType() : null;
-    if (assignedFileType != null) return assignedFileType;
+    if (file instanceof LightVirtualFile) {
+      fileType = ((LightVirtualFile)file).getAssignedFileType();
+      if (fileType != null) return fileType;
+    }
 
     //noinspection ForLoopReplaceableByForEach
     for (int i = 0, size = mySpecialFileTypes.size(); i < size; i++) {
-      final FileTypeIdentifiableByVirtualFile type = mySpecialFileTypes.get(i);
-      if (type.isMyFileType(file)) return type;
+      FileTypeIdentifiableByVirtualFile type = mySpecialFileTypes.get(i);
+      if (type.isMyFileType(file)) {
+        return type;
+      }
     }
 
-    FileType byFileName = getFileTypeByFileName(file.getName());
-    if (byFileName != UnknownFileType.INSTANCE) return byFileName;
-    FileType detected = file.getUserData(DETECTED_FROM_CONTENT_FILE_TYPE_KEY);
-    if (detected != null) {
-      return detected;
-    }
+    fileType = getFileTypeByFileName(file.getName());
+    if (fileType != UnknownFileType.INSTANCE) return fileType;
+
+    fileType = file.getUserData(DETECTED_FROM_CONTENT_FILE_TYPE_KEY);
+    if (fileType != null) return fileType;
+
     return UnknownFileType.INSTANCE;
   }
 
   @NotNull
   @Override
   public FileType detectFileTypeFromContent(@NotNull VirtualFile file) {
-    if (file.isDirectory() || !file.isValid() || file.isSpecialFile()) return UnknownFileType.INSTANCE;
+    if (file.isDirectory() || !file.isValid() || file.is(VirtualFile.PROP_SPECIAL)) {
+      return UnknownFileType.INSTANCE;
+    }
     FileType fileType = file.getUserData(DETECTED_FROM_CONTENT_FILE_TYPE_KEY);
     if (fileType == null) {
       fileType = detectFromContent(file);
@@ -510,6 +517,7 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
   @Override
   public void setIgnoredFilesList(@NotNull String list) {
     fireBeforeFileTypesChanged();
+    myIgnoredFileCache.clearCache();
     myIgnoredPatterns.setIgnoreMasks(list);
     fireFileTypesChanged();
   }
@@ -531,7 +539,7 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
 
   @Override
   public boolean isFileIgnored(@NonNls @NotNull VirtualFile file) {
-    return isFileIgnored(file.getName());
+    return myIgnoredFileCache.isFileIgnored(file);
   }
 
   @Override
@@ -670,6 +678,7 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
     if (savedVersion < VERSION) {
       addIgnore("*.rbc");
     }
+    myIgnoredFileCache.clearCache();
   }
 
   private void readGlobalMappings(final Element e) {
@@ -686,15 +695,17 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
       }
     }
 
-    List<Pair<FileNameMatcher, String>> removedAssociations = AbstractFileType.readRemovedAssociations(e);
+    List<Trinity<FileNameMatcher, String, Boolean>> removedAssociations = AbstractFileType.readRemovedAssociations(e);
 
-    for (Pair<FileNameMatcher, String> removedAssociation : removedAssociations) {
-      FileType type = getFileTypeByName(removedAssociation.getSecond());
+    for (Trinity<FileNameMatcher, String, Boolean> trinity : removedAssociations) {
+      FileType type = getFileTypeByName(trinity.getSecond());
+      FileNameMatcher matcher = trinity.getFirst();
       if (type != null) {
-        removeAssociation(type, removedAssociation.getFirst(), false);
+        removeAssociation(type, matcher, false);
       }
       else {
-        myUnresolvedRemovedMappings.put(removedAssociation.getFirst(), removedAssociation.getSecond());
+        myUnresolvedRemovedMappings.put(matcher, Trinity
+          .create(trinity.getSecond(), myUnresolvedMappings.get(matcher), trinity.getThird()));
       }
     }
   }
@@ -707,9 +718,9 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
       associate(type, association.getFirst(), false);
     }
 
-    List<Pair<FileNameMatcher, String>> removedAssociations = AbstractFileType.readRemovedAssociations(e);
+    List<Trinity<FileNameMatcher, String, Boolean>> removedAssociations = AbstractFileType.readRemovedAssociations(e);
 
-    for (Pair<FileNameMatcher, String> removedAssociation : removedAssociations) {
+    for (Trinity<FileNameMatcher, String, Boolean> removedAssociation : removedAssociations) {
       removeAssociation(type, removedAssociation.getFirst(), false);
     }
 
@@ -791,7 +802,7 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
     }
 
     for (FileNameMatcher matcher : defaultAssocs) {
-      Element content = AbstractFileType.writeRemovedMapping(type, matcher, specifyTypeName);
+      Element content = AbstractFileType.writeRemovedMapping(type, matcher, specifyTypeName, isApproved(matcher));
       if (content != null) {
         map.addContent(content);
       }
@@ -801,13 +812,18 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
       List<FileNameMatcher> original = ((ImportedFileType)type).getOriginalPatterns();
       for (FileNameMatcher matcher : original) {
         if (!assocs.contains(matcher)) {
-          Element content = AbstractFileType.writeRemovedMapping(type, matcher, specifyTypeName);
+          Element content = AbstractFileType.writeRemovedMapping(type, matcher, specifyTypeName, isApproved(matcher));
           if (content != null) {
             map.addContent(content);
           }
         }
       }
     }
+  }
+
+  private boolean isApproved(FileNameMatcher matcher) {
+    Pair<FileType, Boolean> pair = myRemovedMappings.get(matcher);
+    return pair != null && pair.getSecond();
   }
 
   // -------------------------------------------------------------------------
@@ -855,12 +871,14 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
     }
 
     for (FileNameMatcher matcher : new THashSet<FileNameMatcher>(myUnresolvedRemovedMappings.keySet())) {
-      String name = myUnresolvedRemovedMappings.get(matcher);
-      if (Comparing.equal(name, fileType.getName())) {
+      Trinity<String, String, Boolean> trinity = myUnresolvedRemovedMappings.get(matcher);
+      if (Comparing.equal(trinity.getFirst(), fileType.getName())) {
+        if (trinity.getSecond() == null || PlainTextFileType.INSTANCE.getName().equals(trinity.getSecond())) {
+          myRemovedMappings.put(matcher, Pair.create(fileType, trinity.getThird()));
+        }
         removeAssociation(fileType, matcher, false);
         myUnresolvedRemovedMappings.remove(matcher);
       }
-
     }
   }
 
@@ -1032,6 +1050,10 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
   @Override
   @NotNull
   public String getComponentName() {
+    return getFileTypeComponentName();
+  }
+
+  public static String getFileTypeComponentName() {
     return PlatformUtils.isCommunity() ? "CommunityFileTypes" : "FileTypeManager";
   }
 
@@ -1091,5 +1113,9 @@ public class FileTypeManagerImpl extends FileTypeManagerEx implements NamedJDOME
   @Override
   public FileType getKnownFileTypeOrAssociate(@NotNull VirtualFile file, @NotNull Project project) {
     return FileTypeChooser.getKnownFileTypeOrAssociate(file, project);
+  }
+
+  Map<FileNameMatcher, Pair<FileType, Boolean>> getRemovedMappings() {
+    return myRemovedMappings;
   }
 }

@@ -285,10 +285,31 @@ public class MavenRootModelAdapter {
     return myModuleModel.findModuleByName(moduleName);
   }
 
+  public void addSystemDependency(MavenArtifact artifact, DependencyScope scope) {
+    assert MavenConstants.SCOPE_SYSTEM.equals(artifact.getScope());
+
+    String libraryName = artifact.getLibraryName();
+
+    Library library = myRootModel.getModuleLibraryTable().getLibraryByName(libraryName);
+    if (library == null) {
+      library = myRootModel.getModuleLibraryTable().createLibrary(libraryName);
+    }
+
+    LibraryOrderEntry orderEntry = myRootModel.findLibraryOrderEntry(library);
+    assert orderEntry != null;
+    orderEntry.setScope(scope);
+
+    Library.ModifiableModel modifiableModel = library.getModifiableModel();
+    updateUrl(modifiableModel, OrderRootType.CLASSES, artifact, null, null, true);
+    modifiableModel.commit();
+  }
+
   public void addLibraryDependency(MavenArtifact artifact,
                                    DependencyScope scope,
                                    MavenModifiableModelsProvider provider,
                                    MavenProject project) {
+    assert !MavenConstants.SCOPE_SYSTEM.equals(artifact.getScope()); // System dependencies must be added ad module library, not as project wide library.
+
     String libraryName = artifact.getLibraryName();
 
     Library library = provider.getLibraryByName(libraryName);
@@ -298,10 +319,8 @@ public class MavenRootModelAdapter {
     Library.ModifiableModel libraryModel = provider.getLibraryModel(library);
 
     updateUrl(libraryModel, OrderRootType.CLASSES, artifact, null, null, true);
-    if (!MavenConstants.SCOPE_SYSTEM.equals(artifact.getScope())) {
-      updateUrl(libraryModel, OrderRootType.SOURCES, artifact, MavenExtraArtifactType.SOURCES, project, false);
-      updateUrl(libraryModel, JavadocOrderRootType.getInstance(), artifact, MavenExtraArtifactType.DOCS, project, false);
-    }
+    updateUrl(libraryModel, OrderRootType.SOURCES, artifact, MavenExtraArtifactType.SOURCES, project, false);
+    updateUrl(libraryModel, JavadocOrderRootType.getInstance(), artifact, MavenExtraArtifactType.DOCS, project, false);
 
     LibraryOrderEntry e = myRootModel.addLibraryEntry(library);
     e.setScope(scope);
@@ -325,17 +344,26 @@ public class MavenRootModelAdapter {
 
     String newPath = artifact.getPathForExtraArtifact(classifier, extension);
     String newUrl = VirtualFileManager.constructUrl(JarFileSystem.PROTOCOL, newPath) + JarFileSystem.JAR_SEPARATOR;
+
+    boolean urlExists = false;
+
     for (String url : library.getUrls(type)) {
-      if (newUrl.equals(url)) return;
-      if (clearAll || isRepositoryUrl(artifact, url, classifier, extension)) {
+      if (newUrl.equals(url)) {
+        urlExists = true;
+        continue;
+      }
+      if (clearAll || isRepositoryUrl(artifact, url)) {
         library.removeRoot(url, type);
       }
     }
-    library.addRoot(newUrl, type);
+
+    if (!urlExists) {
+      library.addRoot(newUrl, type);
+    }
   }
 
-  private static boolean isRepositoryUrl(MavenArtifact artifact, String url, String classifier, String extension) {
-    return url.endsWith(artifact.getRelativePathForExtraArtifact(classifier, extension) + JarFileSystem.JAR_SEPARATOR);
+  private static boolean isRepositoryUrl(MavenArtifact artifact, String url) {
+    return url.contains(artifact.getGroupId().replace('.', '/') + '/' + artifact.getArtifactId() + '/' + artifact.getBaseVersion() + '/' + artifact.getArtifactId() + '-');
   }
 
   public static boolean isChangedByUser(Library library) {

@@ -21,7 +21,7 @@ import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleServiceManager;
-import com.intellij.openapi.roots.impl.storage.ClasspathStorage;
+import com.intellij.openapi.roots.impl.storage.ClassPathStorageUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import org.jdom.Element;
@@ -63,7 +63,7 @@ public class EclipseModuleManagerImpl implements EclipseModuleManager, Persisten
   private Map<String, Integer> mySrcPlace = new LinkedHashMap<String, Integer>();
   private String myInvalidJdk;
 
-  private Set<String> myGroovyDslSupport = new LinkedHashSet<String>();
+  private Set<String> myKnownCons = new LinkedHashSet<String>();
 
   public EclipseModuleManagerImpl(Module module) {
     myModule = module;
@@ -80,13 +80,13 @@ public class EclipseModuleManagerImpl implements EclipseModuleManager, Persisten
   }
 
   @Override
-  public void addGroovySupport(String name) {
-    myGroovyDslSupport.add(name);
+  public void registerCon(String name) {
+    myKnownCons.add(name);
   }
 
   @Override
-  public String[] getGroovySupport() {
-    return ArrayUtil.toStringArray(myGroovyDslSupport);
+  public String[] getUsedCons() {
+    return ArrayUtil.toStringArray(myKnownCons);
   }
 
   public static EclipseModuleManagerImpl getInstance(Module module) {
@@ -174,7 +174,7 @@ public class EclipseModuleManagerImpl implements EclipseModuleManager, Persisten
 
   @Override
   public Element getState() {
-    if (!ClasspathStorage.getStorageType(myModule).equals(JpsEclipseClasspathSerializer.CLASSPATH_STORAGE_ID)) {
+    if (!ClassPathStorageUtil.getStorageType(myModule).equals(JpsEclipseClasspathSerializer.CLASSPATH_STORAGE_ID)) {
       if (!myEclipseUrls.isEmpty() || !myEclipseVariablePaths.isEmpty() || myForceConfigureJDK || !myUnknownCons.isEmpty()) {
         Element root = new Element("EclipseModuleSettings");
         for (String eclipseUrl : myEclipseUrls) {
@@ -260,7 +260,7 @@ public class EclipseModuleManagerImpl implements EclipseModuleManager, Persisten
     myEclipseVariablePaths.clear();
     myUnknownCons.clear();
     mySrcPlace.clear();
-    myGroovyDslSupport.clear();
+    myKnownCons.clear();
   }
 
   @Override

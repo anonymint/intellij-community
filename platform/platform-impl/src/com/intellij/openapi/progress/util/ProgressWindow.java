@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.DialogWrapperPeer;
 import com.intellij.openapi.ui.impl.FocusTrackbackProvider;
 import com.intellij.openapi.ui.impl.GlassPaneDialogWrapperPeer;
-import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
@@ -431,10 +428,10 @@ public class ProgressWindow extends BlockingProgressIndicator implements Disposa
     }
 
     private void initDialog(boolean shouldShowBackground, String cancelText) {
-      if (UIUtil.isUnderAquaLookAndFeel()) {
+      if (SystemInfo.isMac) {
         UIUtil.applyStyle(UIUtil.ComponentStyle.SMALL, myText2Label);
       }
-      myInnerPanel.setPreferredSize(new Dimension(UIUtil.isUnderAquaLookAndFeel() ? 350 : 450, -1));
+      myInnerPanel.setPreferredSize(new Dimension(SystemInfo.isMac ? 350 : 450, -1));
 
       myCancelButton.addActionListener(new ActionListener() {
         public void actionPerformed(ActionEvent e) {
@@ -633,7 +630,7 @@ public class ProgressWindow extends BlockingProgressIndicator implements Disposa
       }
 
       @Override
-      protected DialogWrapperPeer createPeer(final Component parent, final boolean canBeParent) {
+      protected DialogWrapperPeer createPeer(@NotNull final Component parent, final boolean canBeParent) {
         if (System.getProperty("vintage.progress") == null) {
           try {
             return new GlassPaneDialogWrapperPeer(this, parent, canBeParent);
@@ -648,17 +645,22 @@ public class ProgressWindow extends BlockingProgressIndicator implements Disposa
       }
 
       @Override
-      protected DialogWrapperPeer createPeer(final boolean canBeParent, final boolean toolkitModalIfPossible) {
+      protected DialogWrapperPeer createPeer(final boolean canBeParent, final boolean applicationModalIfPossible) {
+        return createPeer(null, canBeParent, applicationModalIfPossible);
+      }
+
+      @Override
+      protected DialogWrapperPeer createPeer(final Window owner, final boolean canBeParent, final boolean applicationModalIfPossible) {
         if (System.getProperty("vintage.progress") == null) {
           try {
             return new GlassPaneDialogWrapperPeer(this, canBeParent);
           }
           catch (GlassPaneDialogWrapperPeer.GlasspanePeerUnavailableException e) {
-            return super.createPeer(canBeParent, toolkitModalIfPossible);
+            return super.createPeer(WindowManager.getInstance().suggestParentWindow(myProject), canBeParent, applicationModalIfPossible);
           }
         }
         else {
-          return super.createPeer(canBeParent, toolkitModalIfPossible);
+          return super.createPeer(WindowManager.getInstance().suggestParentWindow(myProject), canBeParent, applicationModalIfPossible);
         }
       }
 

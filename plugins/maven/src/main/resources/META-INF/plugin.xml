@@ -50,13 +50,13 @@
     <junitPatcher implementation="org.jetbrains.idea.maven.execution.MavenJUnitPatcher" />
 
     <compiler implementation="org.jetbrains.idea.maven.compiler.MavenResourceCompiler" order="last"/>
-    <compileServer.plugin classpath="jps/maven-jps-plugin.jar"/>
+    <compileServer.plugin classpath="maven-jps-plugin.jar;maven3/plexus-utils-2.0.6.jar"/>
 
-    <languageInjector implementation="org.jetbrains.idea.maven.plugins.sql.MavenSqlInjector"/>
+    <languageInjector implementation="org.jetbrains.idea.maven.plugins.api.MavenPluginConfigurationLanguageInjector"/>
 
     <selectInTarget implementation="org.jetbrains.idea.maven.navigator.SelectInMavenNavigatorTarget"/>
 
-    <iconProvider implementation="org.jetbrains.idea.maven.utils.MavenIconProvider"/>
+    <fileIconProvider implementation="org.jetbrains.idea.maven.utils.MavenIconProvider"/>
     <editorTabTitleProvider implementation="org.jetbrains.idea.maven.utils.MavenEditorTabTitleProvider"/>
 
     <problemFileHighlightFilter implementation="org.jetbrains.idea.maven.utils.MavenProblemFileHighlighter"/>
@@ -65,6 +65,7 @@
 
     <liveTemplateContext implementation="org.jetbrains.idea.maven.utils.MavenLiveTemplateContextType"/>
     <defaultLiveTemplatesProvider implementation="org.jetbrains.idea.maven.utils.MavenLiveTemplatesProvider"/>
+    <projectTemplateFileProcessor implementation="org.jetbrains.idea.maven.utils.MavenTemplateFileProcessor"/>
 
     <xml.elementDescriptorProvider implementation="org.jetbrains.idea.maven.dom.MavenDomElementDescriptorProvider"/>
     <dom.fileDescription implementation="org.jetbrains.idea.maven.dom.MavenDomProjectModelDescription"/>
@@ -87,6 +88,9 @@
     <localInspection language="XML" shortName="MavenDuplicateDependenciesInspection" bundle="MavenDomBundle" key="inspection.duplicate.dependencies.name"
                      groupKey="inspection.group" enabledByDefault="true" level="WARNING"
                      implementationClass="org.jetbrains.idea.maven.dom.inspections.MavenDuplicateDependenciesInspection"/>
+    <localInspection language="XML" shortName="MavenRedundantGroupId" bundle="MavenDomBundle" key="inspection.redundant.groupId.name"
+                     groupKey="inspection.group" enabledByDefault="true" level="WARNING"
+                     implementationClass="org.jetbrains.idea.maven.dom.inspections.MavenRedundantGroupIdInspection"/>
 
     <dom.extender domClass="org.jetbrains.idea.maven.dom.model.MavenDomConfiguration"
                   extenderClass="org.jetbrains.idea.maven.dom.MavenPluginConfigurationDomExtender"/>
@@ -98,6 +102,8 @@
                             id="Maven" order="after propertiesCompletion, before javaClassReference"/>
     <completion.contributor language="XML"
                             implementationClass="org.jetbrains.idea.maven.dom.model.completion.MavenSmartCompletionContributor"/>
+    <completion.contributor language="XML"
+                            implementationClass="org.jetbrains.idea.maven.dom.model.completion.MavenVersionCompletionContributor"/>
 
     <psi.referenceContributor implementation="org.jetbrains.idea.maven.dom.references.MavenPropertyPsiReferenceContributor"/>
 
@@ -111,11 +117,13 @@
     <standardResourceProvider implementation="org.jetbrains.idea.maven.dom.MavenSchemaProvider"/>
 
     <projectService serviceImplementation="org.jetbrains.idea.maven.dom.MavenDomElementDescriptorHolder"/>
+    <projectService serviceImplementation="org.jetbrains.idea.maven.navigator.actions.ExecuteMavenGoalHistoryService"/>
     <applicationService serviceImplementation="org.jetbrains.idea.maven.dom.converters.MavenDomConvertersRegistry"/>
     <applicationService serviceImplementation="org.jetbrains.idea.maven.dom.converters.repositories.MavenRepositoriesProvider"/>
 
     <typedHandler implementation="org.jetbrains.idea.maven.dom.code.MavenTypedHandlerDelegate"/>
     <library.type implementation="org.jetbrains.idea.maven.utils.library.RepositoryLibraryType"/>
+    <postStartupActivity implementation="org.jetbrains.idea.maven.utils.library.RepositoryLibrarySynchronizer"/>
     <backspaceHandlerDelegate implementation="org.jetbrains.idea.maven.dom.code.MavenBackspaceHandlerDelegate"/>
 
     <intentionAction>
@@ -143,6 +151,98 @@
   <extensions defaultExtensionNs="org.jetbrains.idea.maven">
     <pluginDescriptor mavenId="org.apache.maven.plugins:maven-surefire-plugin">
       <param name="additionalClasspathElements/additionalClasspathElement" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="classpathDependencyExcludes/classpathDependencyExclude" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+      <param name="forkMode" values="never, once, always, perthread" soft="true"/>
+      <param name="junitArtifactName" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+      <param name="reportFormat" values="brief, plain" soft="true"/>
+      <param name="runOrder" values="alphabetical, reversealphabetical, random, hourly, failedfirst, balanced, filesystem" soft="true"/>
+      <param name="testNGArtifactName" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-failsafe-plugin">
+      <param name="classpathDependencyExcludes/classpathDependencyExclude" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="forkMode" values="never, once, always, perthread, none, pertest" soft="true"/>
+      <param name="junitArtifactName" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+      <param name="reportFormat" values="brief, plain" soft="true"/>
+      <param name="runOrder" values="alphabetical, reversealphabetical, random, hourly, failedfirst, balanced, filesystem" soft="true"/>
+      <param name="testNGArtifactName" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DependencyWithoutVersion"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-ear-plugin">
+      <param name="outputDirectory" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+      <param name="applicationXml" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-ejb-plugin">
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-war-plugin">
+      <param name="outputDirectory" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+      <param name="resourceEncoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-acr-plugin">
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-invoker-plugin">
+      <param name="extraArtifacts/extraArtifact" refProvider="org.jetbrains.idea.maven.dom.references.MavenDependencyReferenceProvider"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="goals/goal" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Goal"/>
+      <param name="goal" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Goal"/>
+      <param name="invokerPropertiesFile" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+      <param name="profiles/profile" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Profile"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-checkstyle-plugin">
+      <param name="sourceDirectory" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="configLocation" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="outputFileFormat" values="plain, xml" soft="true"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-changelog-plugin">
+      <param name="connectionType" values="connection, developerConnection" soft="true"/>
+      <param name="issueIDRegexPattern" language="RegExp"/>
+      <param name="outputEncoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="goal" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Goal"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-rar-plugin">
+      <param name="outputDirectory" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="workDirectory" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$DirPath"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="ru.concerteza.buildnumber:maven-jgit-buildnumber-plugin">
+      <property name="git.revision"/>
+      <property name="git.buildnumber"/>
+      <property name="git.commitsCount"/>
+      <property name="git.tag"/>
+      <property name="git.branch"/>
+
+      <param name="javaScriptBuildnumberCallback" language="JavaScript" languageInjectionPrefix="function() {return a + " languageInjectionSuffix="}" />
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.codehaus.mojo:sql-maven-plugin">
+      <param name="sqlCommand" language="SQL"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-compiler-plugin">
+      <param name="compilerReuseStrategy" values="reuseCreated, reuseSame, alwaysNew"/>
+      <param name="proc" values="none, both, only"/>
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
+      <param name="filters/filter" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$FilePath"/>
+    </pluginDescriptor>
+
+    <pluginDescriptor mavenId="org.apache.maven.plugins:maven-resources-plugin">
+      <param name="encoding" refProvider="org.jetbrains.idea.maven.plugins.api.common.MavenCommonParamReferenceProviders$Encoding"/>
     </pluginDescriptor>
   </extensions>
 
@@ -311,6 +411,26 @@
             icon="AllIcons.Actions.Collapseall"
             use-shortcut-of="CollapseAll"/>
 
+    <action id="Maven.ExecuteGoal" class="org.jetbrains.idea.maven.navigator.actions.MavenExecuteGoalAction" text="Execute Maven Goal"
+            icon="MavenIcons.ExecuteMavenGoal">
+    </action>
+
+    <action id="Maven.GroupProjects"
+            class="org.jetbrains.idea.maven.navigator.actions.GroupProjectsAction"
+            text="Group Modules"
+            description="Group projects according to Maven structure"
+            icon="AllIcons.Nodes.Folder"/>
+    <action id="Maven.ShowIgnored"
+            class="org.jetbrains.idea.maven.navigator.actions.ShowIgnoredProjectsAction"
+            text="Show Ignored Projects"
+            description="Show ignored projects"
+            icon="AllIcons.Actions.ShowHiddens"/>
+    <action id="Maven.ShowBasicPhasesOnly"
+            class="org.jetbrains.idea.maven.navigator.actions.ShowBasicPhasesOnlyAction"
+            text="Show Basic Phases Only"
+            description="Show basic phases only"
+            icon="AllIcons.General.Filter"/>
+
     <group id="Maven.TasksGroup">
       <action id="Maven.BeforeCompile"
               class="org.jetbrains.idea.maven.tasks.actions.ToggleBeforeCompileTasksAction" text="Execute Before Make"
@@ -331,8 +451,7 @@
       </action>
     </group>
 
-    <group id="Maven.DownloadAllGroup" popup="true" class="org.jetbrains.idea.maven.project.actions.DownloadActionGroup"
-           icon="AllIcons.Actions.Download">
+    <group id="Maven.DownloadAllGroup">
       <reference id="Maven.DownloadAllSources"/>
       <reference id="Maven.DownloadAllDocs"/>
       <reference id="Maven.DownloadAllSourcesAndDocs"/>
@@ -341,35 +460,22 @@
     <group id="Maven.NavigatorActionsToolbar">
       <reference id="Maven.Reimport"/>
       <reference id="Maven.UpdateFolders"/>
-      <reference id="Maven.DownloadAllGroup"/>
+
+      <group id="Maven.DownloadAllGroupPopup" popup="true" class="org.jetbrains.idea.maven.project.actions.DownloadActionGroup"
+             icon="AllIcons.Actions.Download">
+        <reference id="Maven.DownloadAllGroup"/>
+      </group>
       <separator/>
       <reference id="Maven.AddManagedFiles"/>
       <separator/>
       <reference id="Maven.RunBuild"/>
+      <reference id="Maven.ExecuteGoal"/>
       <reference id="Maven.ToggleOffline"/>
       <reference id="Maven.ToggleSkipTests"/>
       <reference id="Maven.CollapseAll"/>
       <separator/>
       <reference id="Maven.ShowSettings"/>
       <reference id="Maven.Help"/>
-      <action id="Maven.GroupProjects"
-              class="org.jetbrains.idea.maven.navigator.actions.GroupProjectsAction"
-              text="Group Modules"
-              description="Group projects according to Maven structure"
-              secondary="true"
-              icon="AllIcons.Nodes.Folder"/>
-      <action id="Maven.ShowIgnored"
-              class="org.jetbrains.idea.maven.navigator.actions.ShowIgnoredProjectsAction"
-              text="Show Ignored Projects"
-              description="Show ignored projects"
-              secondary="true"
-              icon="AllIcons.Actions.ShowHiddens"/>
-      <action id="Maven.ShowBasicPhasesOnly"
-              class="org.jetbrains.idea.maven.navigator.actions.ShowBasicPhasesOnlyAction"
-              text="Show Basic Phases Only"
-              description="Show basic phases only"
-              secondary="true"
-              icon="AllIcons.General.Filter"/>
     </group>
 
     <group id="Maven.DependencyMenu">
@@ -388,7 +494,7 @@
       <reference id="Maven.OpenSettingsXml"/>
       <reference id="Maven.OpenProfilesXml"/>
       <separator/>
-      <reference ref="Maven.DependencyMenu"/>
+      <reference id="Maven.DownloadAllGroup"/>
       <separator/>
     </group>
 

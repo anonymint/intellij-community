@@ -1,6 +1,6 @@
 
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.stubs.EmptyStub;
 import com.intellij.psi.util.CachedValueProvider;
@@ -28,7 +29,6 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.groovy.lang.GrReferenceAdjuster;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
 import org.jetbrains.plugins.groovy.lang.parser.GroovyElementTypes;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyElementVisitor;
@@ -49,6 +49,9 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyPsiElementImpl;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author: Dmitry.Krasilschikov
@@ -118,7 +121,7 @@ public class GrVariableDeclarationImpl extends GrStubElementBase<EmptyStub> impl
       newTypeElement = (GrTypeElement)typeElement.replace(newTypeElement);
     }
 
-    GrReferenceAdjuster.shortenReferences(newTypeElement);
+    JavaCodeStyleManager.getInstance(getProject()).shortenClassReferences(newTypeElement);
   }
 
   @Override
@@ -129,7 +132,7 @@ public class GrVariableDeclarationImpl extends GrStubElementBase<EmptyStub> impl
   @Nullable
   @Override
   public GrExpression getTupleInitializer() {
-    return findChildByClass(GrExpression.class);
+    return GroovyPsiElementImpl.findExpressionChild(this);
   }
 
   @Override
@@ -170,7 +173,11 @@ public class GrVariableDeclarationImpl extends GrStubElementBase<EmptyStub> impl
   }
 
   public GrMember[] getMembers() {
-    return findChildrenByClass(GrMember.class);
+    List<GrMember> result = new ArrayList<GrMember>();
+    for (PsiElement cur = getFirstChild(); cur != null; cur = cur.getNextSibling()) {
+      if (cur instanceof GrMember) result.add((GrMember)cur);
+    }
+    return result.toArray(new GrMember[result.size()]);
   }
 
   @NotNull

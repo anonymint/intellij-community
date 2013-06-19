@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ public class JavaStylePropertiesUtil {
 
   public static void fixJavaStyleProperty(GrMethodCall call) {
     GrExpression invoked = call.getInvokedExpression();
-    String accessorName = ((GrReferenceExpression)invoked).getName();
+    String accessorName = ((GrReferenceExpression)invoked).getReferenceName();
     if (isGetterInvocation(call) && invoked instanceof GrReferenceExpression) {
       final GrExpression newCall = genRefForGetter(call, accessorName);
       call.replaceWithExpression(newCall, true);
@@ -59,10 +59,14 @@ public class JavaStylePropertiesUtil {
     String name = getPropertyNameBySetterName(accessorName);
     GrExpression value = call.getExpressionArguments()[0];
     GrReferenceExpression refExpr = (GrReferenceExpression)call.getInvokedExpression();
-    String oldNameStr = refExpr.getReferenceNameElement().getText();
-    String newRefExpr = StringUtil.trimEnd(refExpr.getText(), oldNameStr) + name;
+
     final GroovyPsiElementFactory factory = GroovyPsiElementFactory.getInstance(call.getProject());
-    return (GrAssignmentExpression)factory.createStatementFromText(newRefExpr + " = " + value.getText(), call);
+    final GrAssignmentExpression assignment = (GrAssignmentExpression)factory.createStatementFromText(name + " = xxx", call);
+
+    ((GrReferenceExpression)assignment.getLValue()).setQualifier(refExpr.getQualifier());
+    assignment.getRValue().replaceWithExpression(value, true);
+
+    return assignment;
   }
 
   private static GrExpression genRefForGetter(GrMethodCall call, String accessorName) {
@@ -109,7 +113,7 @@ public class JavaStylePropertiesUtil {
       return false;
     }
 
-    GrAssignmentExpression assignment = genRefForSetter(call, refExpr.getName());
+    GrAssignmentExpression assignment = genRefForSetter(call, refExpr.getReferenceName());
     GrExpression value = assignment.getLValue();
     if (value instanceof GrReferenceExpression &&
         call.getManager().areElementsEquivalent(((GrReferenceExpression)value).resolve(), method)) {
@@ -137,7 +141,7 @@ public class JavaStylePropertiesUtil {
       return false;
     }
 
-    GrExpression ref = genRefForGetter(call, ((GrReferenceExpression)expr).getName());
+    GrExpression ref = genRefForGetter(call, ((GrReferenceExpression)expr).getReferenceName());
     if (ref instanceof GrReferenceExpression) {
       PsiElement resolved = ((GrReferenceExpression)ref).resolve();
       PsiManager manager = call.getManager();

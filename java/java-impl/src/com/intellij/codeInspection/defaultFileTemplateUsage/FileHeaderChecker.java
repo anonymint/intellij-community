@@ -50,15 +50,12 @@ public class FileHeaderChecker {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.defaultFileTemplateUsage.FileHeaderChecker");
 
   static ProblemDescriptor checkFileHeader(@NotNull final PsiFile file, final InspectionManager manager, boolean onTheFly) {
-    FileTemplate template = FileTemplateManager.getInstance().getDefaultTemplate(FileTemplateManager.FILE_HEADER_TEMPLATE_NAME);
     TIntObjectHashMap<String> offsetToProperty = new TIntObjectHashMap<String>();
-    String templateText = template.getText().trim();
-    String regex = templateToRegex(templateText, offsetToProperty, file.getProject());
-    regex = StringUtil.replace(regex, "with", "(?:with|by)");
-    regex = ".*("+regex+").*";
-    String fileText = file.getText();
-    Pattern pattern = Pattern.compile(regex, Pattern.DOTALL);
-    Matcher matcher = pattern.matcher(fileText);
+    Pattern pattern = getTemplatePattern(FileTemplateManager.getInstance()
+      .getDefaultTemplate(FileTemplateManager.FILE_HEADER_TEMPLATE_NAME),
+                                         file.getProject(), offsetToProperty
+    );
+    Matcher matcher = pattern.matcher(file.getText());
     if (matcher.matches()) {
       final int startOffset = matcher.start(1);
       final int endOffset = matcher.end(1);
@@ -83,6 +80,14 @@ public class FileHeaderChecker {
     return null;
   }
 
+  public static Pattern getTemplatePattern(FileTemplate template, Project project, TIntObjectHashMap<String> offsetToProperty) {
+    String templateText = template.getText().trim();
+    String regex = templateToRegex(templateText, offsetToProperty, project);
+    regex = StringUtil.replace(regex, "with", "(?:with|by)");
+    regex = ".*("+regex+").*";
+    return Pattern.compile(regex, Pattern.DOTALL);
+  }
+
   private static Properties computeProperties(final Matcher matcher, final TIntObjectHashMap<String> offsetToProperty) {
     Properties properties = new Properties(FileTemplateManager.getInstance().getDefaultProperties());
     int[] offsets = offsetToProperty.keys();
@@ -103,6 +108,7 @@ public class FileHeaderChecker {
     final FileTemplate template = FileTemplateManager.getInstance().getPattern(FileTemplateManager.FILE_HEADER_TEMPLATE_NAME);
 
     final ReplaceWithFileTemplateFix replaceTemplateFix = new ReplaceWithFileTemplateFix() {
+      @Override
       public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
         PsiElement element = descriptor.getPsiElement();
         if (element == null || !element.isValid()) return;

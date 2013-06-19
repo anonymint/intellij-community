@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,9 +38,31 @@ class SlideComponent extends JComponent {
   private final boolean myVertical;
   private final String myTitle;
 
-  private final List<Consumer<Integer>> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<Consumer<Integer>> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private LightweightHint myTooltipHint;
   private final JLabel myLabel = new JLabel();
+  private Unit myUnit = Unit.LEVEL;
+
+  enum Unit {
+    PERCENT,
+    LEVEL;
+
+    private static final float PERCENT_MAX_VALUE = 100f;
+    private static final float LEVEL_MAX_VALUE = 255f;
+
+    private static float getMaxValue(Unit unit) {
+      return LEVEL.equals(unit) ? LEVEL_MAX_VALUE : PERCENT_MAX_VALUE;
+    }
+
+    private static String formatValue(int value, Unit unit) {
+      return String.format("%d%s", (int) (getMaxValue(unit) / LEVEL_MAX_VALUE * value),
+          unit.equals(PERCENT) ? "%" : "");
+    }
+  }
+
+  void setUnits(Unit unit) {
+    myUnit = unit;
+  }
 
   SlideComponent(String title, boolean vertical) {
     myTitle = title;
@@ -108,7 +130,7 @@ class SlideComponent extends JComponent {
 
   private void updateBalloonText() {
     final Point point = myVertical ? new Point(0, myPointerValue) : new Point(myPointerValue, 0);
-    myLabel.setText(myTitle + ": " + myValue);
+    myLabel.setText(myTitle + ": " + Unit.formatValue(myValue, myUnit));
     if (myTooltipHint == null) {
       myTooltipHint = new LightweightHint(myLabel);
       myTooltipHint.setCancelOnClickOutside(false);
@@ -203,7 +225,7 @@ class SlideComponent extends JComponent {
     final Graphics2D g2d = (Graphics2D)g;
 
     if (myVertical) {
-      g2d.setPaint(new GradientPaint(0f, 0f, Color.WHITE, 0f, getHeight(), Color.BLACK));
+      g2d.setPaint(UIUtil.getGradientPaint(0f, 0f, Color.WHITE, 0f, getHeight(), Color.BLACK));
       g.fillRect(7, 10, 12, getHeight() - 20);
 
       g.setColor(Gray._150);
@@ -213,7 +235,7 @@ class SlideComponent extends JComponent {
       g.drawRect(8, 11, 10, getHeight() - 22);
     }
     else {
-      g2d.setPaint(new GradientPaint(0f, 0f, Color.WHITE, getWidth(), 0f, Color.BLACK));
+      g2d.setPaint(UIUtil.getGradientPaint(0f, 0f, Color.WHITE, getWidth(), 0f, Color.BLACK));
       g.fillRect(10, 7, getWidth() - 20, 12);
 
       g.setColor(Gray._150);

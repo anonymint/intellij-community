@@ -26,6 +26,7 @@ import org.jetbrains.jps.model.java.compiler.JpsJavaCompilerOptions;
 import org.jetbrains.jps.model.java.compiler.ProcessorConfigProfile;
 import org.jetbrains.jps.model.module.JpsModule;
 
+import java.io.File;
 import java.util.*;
 
 /**
@@ -35,15 +36,16 @@ public class JpsJavaCompilerConfigurationImpl extends JpsCompositeElementBase<Jp
   public static final JpsElementChildRole<JpsJavaCompilerConfiguration> ROLE = JpsElementChildRoleBase.create("compiler configuration");
   private boolean myAddNotNullAssertions = true;
   private boolean myClearOutputDirectoryOnRebuild = true;
-  private JpsCompilerExcludes myCompilerExcludes = new JpsCompilerExcludesImpl();
-  private List<String> myResourcePatterns = new ArrayList<String>();
-  private List<ProcessorConfigProfile> myAnnotationProcessingProfiles = new ArrayList<ProcessorConfigProfile>();
-  private ProcessorConfigProfileImpl myDefaultAnnotationProcessingProfile = new ProcessorConfigProfileImpl("Default");
+  private final JpsCompilerExcludes myCompilerExcludes = new JpsCompilerExcludesImpl();
+  private final List<String> myResourcePatterns = new ArrayList<String>();
+  private final List<ProcessorConfigProfile> myAnnotationProcessingProfiles = new ArrayList<ProcessorConfigProfile>();
+  private final ProcessorConfigProfileImpl myDefaultAnnotationProcessingProfile = new ProcessorConfigProfileImpl("Default");
   private String myProjectByteCodeTargetLevel;
-  private Map<String, String> myModulesByteCodeTargetLevels = new HashMap<String, String>();
-  private Map<String, JpsJavaCompilerOptions> myCompilerOptions = new HashMap<String, JpsJavaCompilerOptions>();
+  private final Map<String, String> myModulesByteCodeTargetLevels = new HashMap<String, String>();
+  private final Map<String, JpsJavaCompilerOptions> myCompilerOptions = new HashMap<String, JpsJavaCompilerOptions>();
   private String myJavaCompilerId = "Javac";
   private Map<JpsModule, ProcessorConfigProfile> myAnnotationProcessingProfileMap;
+  private ResourcePatterns myCompiledPatterns;
 
   public JpsJavaCompilerConfigurationImpl() {
   }
@@ -104,6 +106,15 @@ public class JpsJavaCompilerConfigurationImpl extends JpsCompositeElementBase<Jp
   @Override
   public List<String> getResourcePatterns() {
     return myResourcePatterns;
+  }
+
+  @Override
+  public boolean isResourceFile(@NotNull File file, @NotNull File srcRoot) {
+    ResourcePatterns patterns = myCompiledPatterns;
+    if (patterns == null) {
+      myCompiledPatterns = patterns = new ResourcePatterns(this);
+    }
+    return patterns.isResourceFile(file, srcRoot);
   }
 
   @Override

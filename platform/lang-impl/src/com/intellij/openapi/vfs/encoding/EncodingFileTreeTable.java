@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,11 @@
 package com.intellij.openapi.vfs.encoding;
 
 import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -37,13 +41,13 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.io.IOException;
 import java.nio.charset.Charset;
 
 class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
   public EncodingFileTreeTable(@NotNull Project project) {
     super(project, Charset.class, "Default Encoding", VirtualFileFilter.ALL, false);
     reset(EncodingProjectManager.getInstance(project).getAllMappings());
-
     getValueColumn().setCellRenderer(new DefaultTableCellRenderer(){
       @Override
       public Component getTableCellRendererComponent(final JTable table, final Object value,
@@ -52,7 +56,7 @@ class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
         final Charset t = (Charset)value;
         final Object userObject = table.getModel().getValueAt(row, 0);
         final VirtualFile file = userObject instanceof VirtualFile ? (VirtualFile)userObject : null;
-        Pair<Charset, String> check = file == null || file.isDirectory() ? null : ChooseFileEncodingAction.checkCanReload(file);
+        Pair<Charset, String> check = file == null || file.isDirectory() ? null : EncodingUtil.checkSomeActionEnabled(file);
         String failReason = check == null ? null : check.second;
         boolean enabled = failReason == null;
 
@@ -88,27 +92,33 @@ class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
 
       @Override
       public Component getTableCellEditorComponent(JTable table, final Object value, boolean isSelected, int row, int column) {
-        final Object o = table.getModel().getValueAt(row, 0);
-        myVirtualFile = o instanceof Project ? null : (VirtualFile)o;
+        myVirtualFile = (VirtualFile)table.getModel().getValueAt(row, 0);
+        byte[] b = null;
+        try {
+          b = myVirtualFile == null || myVirtualFile.isDirectory() ? null : myVirtualFile.contentsToByteArray();
+        }
+        catch (IOException ignored) {
+        }
+        final byte[] bytes = b;
+        final Document document = myVirtualFile == null ? null : FileDocumentManager.getInstance().getDocument(myVirtualFile);
 
-        ChooseFileEncodingAction changeAction = new ChooseFileEncodingAction(myVirtualFile) {
+        final ChangeFileEncodingAction cfa = new ChangeFileEncodingAction(true) {
+          @Override
+          protected boolean chosen(Document document,
+                                   Editor editor,
+                                   @NotNull VirtualFile virtualFile,
+                                   byte[] bytes,
+                                   @NotNull Charset charset) {
+            getValueColumn().getCellEditor().stopCellEditing();
+            getTableModel().setValueAt(charset, new DefaultMutableTreeNode(virtualFile), 1);
+            return true;
+          }
+        };
+        ComboBoxAction changeAction = new ComboBoxAction() {
           @NotNull
           @Override
           protected DefaultActionGroup createPopupActionGroup(JComponent button) {
-            return createGroup("<Clear>", null, "Encoding ''{1}''", null);
-          }
-
-          @Override
-          public void update(AnActionEvent e) {
-          }
-
-          @Override
-          protected void chosen(VirtualFile virtualFile, @NotNull Charset charset) {
-            getValueColumn().getCellEditor().stopCellEditing();
-            if (clearSubdirectoriesOnDemandOrCancel(
-                virtualFile, "There are encodings specified for the subdirectories. Override them?", "Override Subdirectory Encoding")) {
-              getTableModel().setValueAt(charset, new DefaultMutableTreeNode(virtualFile), 1);
-            }
+            return cfa.createActionGroup(myVirtualFile, null, document, bytes, "<Clear>");
           }
         };
         Presentation templatePresentation = changeAction.getTemplatePresentation();
@@ -147,6 +157,6 @@ class EncodingFileTreeTable extends AbstractFileTreeTable<Charset> {
   @Override
   protected boolean isValueEditableForFile(final VirtualFile virtualFile) {
     return virtualFile == null || virtualFile.isDirectory() ||
-           ChooseFileEncodingAction.checkCanReload(virtualFile).second == null;
+           EncodingUtil.checkSomeActionEnabled(virtualFile) == null;
   }
 }

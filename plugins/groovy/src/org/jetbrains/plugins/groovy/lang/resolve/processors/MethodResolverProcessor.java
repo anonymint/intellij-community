@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUt
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrGdkMethodImpl;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
+import org.jetbrains.plugins.groovy.lang.resolve.GrMethodComparator;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 
 import java.util.*;
@@ -43,7 +44,7 @@ import java.util.*;
 /**
  * @author ven
  */
-public class MethodResolverProcessor extends ResolverProcessor {
+public class MethodResolverProcessor extends ResolverProcessor implements GrMethodComparator.Context {
   private final PsiType myThisType;
 
   @Nullable
@@ -63,17 +64,23 @@ public class MethodResolverProcessor extends ResolverProcessor {
 
   private final boolean myTypedContext;
 
-  public MethodResolverProcessor(String name, GroovyPsiElement place, boolean isConstructor, PsiType thisType, @Nullable PsiType[] argumentTypes, PsiType[] typeArguments) {
+  public MethodResolverProcessor(@Nullable String name,
+                                 @NotNull GroovyPsiElement place,
+                                 boolean isConstructor,
+                                 @Nullable PsiType thisType,
+                                 @Nullable PsiType[] argumentTypes,
+                                 @Nullable PsiType[] typeArguments) {
     this(name, place, isConstructor, thisType, argumentTypes, typeArguments, false, false);
   }
 
-  public MethodResolverProcessor(String name,
-                                 PsiElement place,
+  public MethodResolverProcessor(@Nullable String name,
+                                 @NotNull PsiElement place,
                                  boolean isConstructor,
-                                 PsiType thisType,
+                                 @Nullable PsiType thisType,
                                  @Nullable PsiType[] argumentTypes,
-                                 PsiType[] typeArguments,
-                                 boolean allVariants, final boolean byShape) {
+                                 @Nullable PsiType[] typeArguments,
+                                 boolean allVariants,
+                                 final boolean byShape) {
     super(name, RESOLVE_KINDS_METHOD_PROPERTY, place, PsiType.EMPTY_ARRAY);
     myIsConstructor = isConstructor;
     myThisType = thisType;
@@ -86,7 +93,7 @@ public class MethodResolverProcessor extends ResolverProcessor {
   }
 
 
-  public boolean execute(@NotNull PsiElement element, ResolveState state) {
+  public boolean execute(@NotNull PsiElement element, @NotNull ResolveState state) {
     if (myStopExecuting) {
       return false;
     }
@@ -244,13 +251,17 @@ public class MethodResolverProcessor extends ResolverProcessor {
     }
     return type;
   }
-  
 
+
+  //method1 has more general parameter types thn method2
   private boolean dominated(PsiMethod method1,
                             PsiSubstitutor substitutor1,
                             PsiMethod method2,
-                            PsiSubstitutor substitutor2) {  //method1 has more general parameter types thn method2
+                            PsiSubstitutor substitutor2) {
     if (!method1.getName().equals(method2.getName())) return false;
+
+    final Boolean custom = GrMethodComparator.checkDominated(method1, substitutor1, method2, substitutor2, this);
+    if (custom != null) return custom;
 
     PsiType[] argTypes = myArgumentTypes;
     if (method1 instanceof GrGdkMethod && method2 instanceof GrGdkMethod) {
@@ -305,10 +316,20 @@ public class MethodResolverProcessor extends ResolverProcessor {
       if (!typesAgree(TypeConversionUtil.erasure(ptype1), TypeConversionUtil.erasure(ptype2))) return false;
     }
 
+    if (!(method1 instanceof SyntheticElement) && !(method2 instanceof SyntheticElement)) {
+      final PsiType returnType1 = substitutor1.substitute(method1.getReturnType());
+      final PsiType returnType2 = substitutor2.substitute(method2.getReturnType());
+
+      if (!TypesUtil.isAssignableWithoutConversions(returnType1, returnType2, myPlace) &&
+          TypesUtil.isAssignableWithoutConversions(returnType2, returnType1, myPlace)) {
+        return false;
+      }
+    }
+
     return true;
   }
 
-  private boolean typesAgree(PsiType type1, PsiType type2) {
+  private boolean typesAgree(@NotNull PsiType type1, @NotNull PsiType type2) {
     if (argumentsSupplied() && type1 instanceof PsiArrayType && !(type2 instanceof PsiArrayType)) {
       type1 = ((PsiArrayType) type1).getComponentType();
     }
@@ -335,6 +356,12 @@ public class MethodResolverProcessor extends ResolverProcessor {
     return myArgumentTypes;
   }
 
+  @Nullable
+  @Override
+  public PsiType[] getTypeArguments() {
+    return mySubstitutorComputer.getTypeArguments();
+  }
+
   @Override
   public void handleEvent(Event event, Object associated) {
     super.handleEvent(event, associated);
@@ -342,4 +369,17 @@ public class MethodResolverProcessor extends ResolverProcessor {
       myStopExecuting = true;
     }
   }
+
+  @Nullable
+  @Override
+  public PsiType getThisType() {
+    return myThisType;
+  }
+
+  @NotNull
+  @Override
+  public PsiElement getPlace() {
+    return myPlace;
+  }
+
 }

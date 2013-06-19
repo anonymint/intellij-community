@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.editor.impl.FontInfo;
 import com.intellij.openapi.editor.impl.IterationState;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NotNull;
@@ -301,7 +302,8 @@ public class EditorUtil {
     boolean useOptimization = true;
     boolean hasNonTabs = false;
     boolean hasTabs = false;
-    for (int i = start; i < end; i++) {
+    int scanEndOffset = Math.min(end, start + columnNumber - currentColumn[0] + 1);
+    for (int i = start; i < scanEndOffset; i++) {
       char c = text.charAt(i);
       if (debugBuffer != null) {
         debugBuffer.append(String.format("Found symbol '%c' at the offset %d%n", c, i));
@@ -509,7 +511,7 @@ public class EditorUtil {
 
   public static FontInfo fontForChar(final char c, @JdkConstants.FontStyle int style, @NotNull Editor editor) {
     EditorColorsScheme colorsScheme = editor.getColorsScheme();
-    return ComplementaryFontsRegistry.getFontAbleToDisplay(c, colorsScheme.getEditorFontSize(), style, colorsScheme.getEditorFontName());
+    return ComplementaryFontsRegistry.getFontAbleToDisplay(c, style, colorsScheme.getFontPreferences());
   }
 
   public static int charWidth(char c, @JdkConstants.FontStyle int fontType, @NotNull Editor editor) {
@@ -758,6 +760,24 @@ public class EditorUtil {
 
   public static boolean inVirtualSpace(@NotNull Editor editor, @NotNull LogicalPosition logicalPosition) {
     return !editor.offsetToLogicalPosition(editor.logicalPositionToOffset(logicalPosition)).equals(logicalPosition);
+  }
+
+  public static void reinitSettings() {
+    for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
+      if (editor instanceof EditorEx) {
+        ((EditorEx)editor).reinitSettings();
+      }
+    }
+  }
+
+  @NotNull
+  public static TextRange getSelectionInAnyMode(Editor editor) {
+    SelectionModel selection = editor.getSelectionModel();
+    int[] starts = selection.getBlockSelectionStarts();
+    int[] ends = selection.getBlockSelectionEnds();
+    int start = starts.length > 0 ? starts[0] : selection.getSelectionStart();
+    int end = ends.length > 0 ? ends[ends.length - 1] : selection.getSelectionEnd();
+    return TextRange.create(start, end);
   }
 }
 

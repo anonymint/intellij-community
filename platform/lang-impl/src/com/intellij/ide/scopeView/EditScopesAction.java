@@ -18,6 +18,7 @@ package com.intellij.ide.scopeView;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.projectView.ProjectView;
+import com.intellij.ide.projectView.impl.AbstractProjectViewPane;
 import com.intellij.ide.util.scopeChooser.ScopeChooserConfigurable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -39,6 +40,7 @@ public class EditScopesAction extends AnAction implements DumbAware {
     getTemplatePresentation().setIcon(AllIcons.Ide.LocalScope);
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     final DataContext dataContext = e.getDataContext();
     final Project project = PlatformDataKeys.PROJECT.getData(dataContext);
@@ -47,6 +49,7 @@ public class EditScopesAction extends AnAction implements DumbAware {
     LOG.assertTrue(scopeName != null);
     final ScopeChooserConfigurable scopeChooserConfigurable = new ScopeChooserConfigurable(project);
     ShowSettingsUtil.getInstance().editConfigurable(project, scopeChooserConfigurable, new Runnable(){
+      @Override
       public void run() {
         scopeChooserConfigurable.selectNodeInTree(scopeName);
       }
@@ -60,9 +63,12 @@ public class EditScopesAction extends AnAction implements DumbAware {
     final DataContext dataContext = e.getDataContext();
     final Project project = PlatformDataKeys.PROJECT.getData(dataContext);
     if (project != null) {
-      final String scopeName = ProjectView.getInstance(project).getCurrentProjectViewPane().getSubId();
-      if (scopeName != null) {
-        e.getPresentation().setEnabled(true);
+      final AbstractProjectViewPane projectViewPane = ProjectView.getInstance(project).getCurrentProjectViewPane();
+      if (projectViewPane != null) {
+        final String scopeName = projectViewPane.getSubId();
+        if (scopeName != null) {
+          e.getPresentation().setEnabled(true);
+        }
       }
     }
   }

@@ -25,6 +25,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.refactoring.RefactoringSettings;
 import com.intellij.refactoring.safeDelete.SafeDeleteHandler;
 import com.intellij.ui.StateRestoringCheckBox;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
@@ -63,10 +64,13 @@ public class DeleteDialog extends DialogWrapper {
     return myCbSearchInNonJava.isSelected();
   }
 
+  @Override
+  @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(), getCancelAction()/*, getHelpAction()*/};
   }
 
+  @NotNull
   @Override
    protected Action getOKAction() {
      Action result = super.getOKAction();
@@ -74,10 +78,12 @@ public class DeleteDialog extends DialogWrapper {
      return result;
    }
 
+  @Override
   protected void doHelpAction() {
     HelpManager.getInstance().invokeHelp("refactoring.safeDelete");
   }
 
+  @Override
   protected JComponent createNorthPanel() {
     final JPanel panel = new JPanel(new GridBagLayout());
     final GridBagConstraints gbc = new GridBagConstraints();
@@ -121,6 +127,7 @@ public class DeleteDialog extends DialogWrapper {
     myCbSearchInNonJava.setSelected(refactoringSettings.SAFE_DELETE_SEARCH_IN_NON_JAVA);
 
     myCbSafeDelete.addItemListener(new ItemListener() {
+      @Override
       public void itemStateChanged(ItemEvent e) {
         updateControls();
       }
@@ -140,11 +147,13 @@ public class DeleteDialog extends DialogWrapper {
     }
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     return null;
   }
 
 
+  @Override
   protected void doOKAction() {
     final RefactoringSettings refactoringSettings = RefactoringSettings.getInstance();
     refactoringSettings.SAFE_DELETE_WHEN_DELETE = myCbSafeDelete.isSelected();

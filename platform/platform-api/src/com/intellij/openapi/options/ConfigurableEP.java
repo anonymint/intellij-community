@@ -90,6 +90,8 @@ public class ConfigurableEP<T extends UnnamedConfigurable> extends AbstractExten
   @Attribute("id")
   public String id;
 
+
+  /** Marks project level configurables that do not apply to the default project. */
   @Attribute("nonDefaultProject")
   public boolean nonDefaultProject;
 
@@ -146,6 +148,9 @@ public class ConfigurableEP<T extends UnnamedConfigurable> extends AbstractExten
   public T createConfigurable() {
     try {
       return myFactory.getValue().create();
+    }
+    catch (LinkageError e) {
+      LOG.error(e);
     }
     catch (Exception e) {
       LOG.error(e);

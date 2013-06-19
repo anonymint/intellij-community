@@ -1,11 +1,14 @@
 package org.jetbrains.plugins.gradle.config;
 
+import com.intellij.openapi.externalSystem.service.project.PlatformFacade;
+import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.plugins.gradle.model.intellij.ModuleAwareContentRoot;
+import com.intellij.openapi.externalSystem.service.project.ModuleAwareContentRoot;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
-import org.jetbrains.plugins.gradle.util.GradleInstallationManager;
+import org.jetbrains.plugins.gradle.service.GradleInstallationManager;
 import org.jetbrains.plugins.groovy.annotator.DefaultGroovyFrameworkConfigNotification;
 
 /**
@@ -41,6 +44,14 @@ public class GradleGroovyConfigNotification extends DefaultGroovyFrameworkConfig
   public boolean hasFrameworkLibrary(@NotNull Module module) {
     // Expecting groovy library to always be available at the gradle distribution. I.e. consider that when correct gradle
     // distribution is defined for the project, groovy jar is there.
-    return super.hasFrameworkLibrary(module) || myLibraryManager.getAllLibraries(module.getProject()) != null;
+    if (super.hasFrameworkLibrary(module)) {
+      return true;
+    }
+    String linkedProjectPath = module.getOptionValue(ExternalSystemConstants.LINKED_PROJECT_PATH_KEY);
+    if (StringUtil.isEmpty(linkedProjectPath)) {
+      return false;
+    }
+    assert linkedProjectPath != null;
+    return myLibraryManager.getAllLibraries(module.getProject(), linkedProjectPath) != null;
   }
 }

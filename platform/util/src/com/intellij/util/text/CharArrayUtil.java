@@ -19,9 +19,13 @@ import com.intellij.openapi.util.TextRange;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Reader;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class CharArrayUtil {
@@ -162,18 +166,64 @@ public class CharArrayUtil {
     return seq.toString().toCharArray();
   }
 
+  @NotNull
+  public static char[] fromSequence(@NotNull CharSequence seq, int start, int end) {
+    if (seq instanceof CharSequenceBackedByArray) {
+      return Arrays.copyOfRange(((CharSequenceBackedByArray)seq).getChars(), start, end);
+    }
+
+    if (seq instanceof CharBuffer) {
+      CharBuffer buffer = (CharBuffer)seq;
+      char[] chars = new char[end-start];
+      buffer.position(start);
+      buffer.get(chars, 0, end-start);
+      buffer.position(0);
+      return chars;
+    }
+
+    if (seq instanceof StringBuffer) {
+      char[] chars = new char[end-start];
+      ((StringBuffer)seq).getChars(start, end, chars, 0);
+      return chars;
+    }
+
+    String s = seq.toString();
+    char[] chars = new char[end-start];
+    s.getChars(start, end, chars, 0);
+    return chars;
+  }
+
   public static int shiftForward(@NotNull CharSequence buffer, int offset, @NotNull String chars) {
-    while (true) {
-      if (offset >= buffer.length()) break;
+    return shiftForward(buffer, offset, buffer.length(), chars);
+  }
+
+  /**
+   * Tries to find an offset from the <code>[startOffset; endOffset)</code> interval such that a char from the given buffer is
+   * not contained at the given 'chars' string.
+   * <p/>
+   * Example:
+   * {@code buffer="abc", startOffset=0, endOffset = 3, chars="ab". Result: 2}
+   * 
+   * @param buffer       target buffer which symbols should be checked
+   * @param startOffset  start offset to use within the given buffer (inclusive)
+   * @param endOffset    end offset to use within the given buffer (exclusive)
+   * @param chars        pass-through symbols
+   * @return             offset from the <code>[startOffset; endOffset)</code> which points to a symbol at the given buffer such
+   *                     as that that symbol is not contained at the given 'chars';
+   *                     <code>endOffset</code> otherwise
+   */
+  public static int shiftForward(@NotNull CharSequence buffer, final int startOffset, final int endOffset, @NotNull String chars) {
+    for (int offset = startOffset, limit = Math.min(endOffset, buffer.length()); offset < limit; offset++) {
       char c = buffer.charAt(offset);
-      int i;      
+      int i;
       for (i = 0; i < chars.length(); i++) {
         if (c == chars.charAt(i)) break;
       }
-      if (i == chars.length()) break;
-      offset++;
+      if (i >= chars.length()) {
+        return offset;
+      }
     }
-    return offset;
+    return endOffset;
   }
 
   public static int shiftForwardCarefully(@NotNull CharSequence buffer, int offset, @NotNull String chars) {
@@ -200,10 +250,15 @@ public class CharArrayUtil {
   }
 
   public static int shiftBackward(@NotNull CharSequence buffer, int offset, @NotNull String chars) {
-    if (offset >= buffer.length()) return offset;
-
+    return shiftBackward(buffer, 0, offset, chars);
+  }
+  
+  public static int shiftBackward(@NotNull CharSequence buffer, int minOffset, int maxOffset, @NotNull String chars) {
+    if (maxOffset >= buffer.length()) return maxOffset;
+    
+    int offset = maxOffset;
     while (true) {
-      if (offset < 0) break;
+      if (offset < minOffset) break;
       char c = buffer.charAt(offset);
       int i;
       for (i = 0; i < chars.length(); i++) {
@@ -218,12 +273,6 @@ public class CharArrayUtil {
   public static int shiftBackward(@NotNull char[] buffer, int offset, @NotNull String chars) {
     return shiftBackward(new CharArrayCharSequence(buffer), offset, chars);
   }
-
-  //Commented in order to apply to green code policy as the method is unused.
-  //
-  //public static int shiftForwardUntil(char[] buffer, int offset, String chars) {
-  //  return shiftForwardUntil(new CharArrayCharSequence(buffer), offset, chars);
-  //}
 
   public static int shiftForwardUntil(@NotNull CharSequence buffer, int offset, @NotNull String chars) {
     while (true) {

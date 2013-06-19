@@ -15,6 +15,9 @@
  */
 package com.intellij.ui.components;
 
+import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.TypeSafeDataProvider;
 import com.intellij.util.IconUtil;
 import org.jetbrains.annotations.Nullable;
 
@@ -24,7 +27,7 @@ import java.awt.*;
 /**
  * @author Konstantin Bulenkov
  */
-public class JBPanel extends JPanel {
+public class JBPanel extends JPanel implements TypeSafeDataProvider {
   @Nullable
   private Icon myBackgroundImage;
   @Nullable
@@ -68,14 +71,15 @@ public class JBPanel extends JPanel {
   protected void paintComponent(Graphics g) {
     super.paintComponent(g);
 
-    if (myBackgroundImage != null) {
-      final int w = myBackgroundImage.getIconWidth();
-      final int h = myBackgroundImage.getIconHeight();
+    Icon image = getBackgroundImage();
+    if (image != null) {
+      final int w = image.getIconWidth();
+      final int h = image.getIconHeight();
       int x = 0;
       int y = 0;
       while (w > 0 &&  x < getWidth()) {
         while (h > 0 && y < getHeight()) {
-          myBackgroundImage.paintIcon(this, g, x, y);
+          image.paintIcon(this, g, x, y);
           y+=h;
         }
         y=0;
@@ -83,8 +87,14 @@ public class JBPanel extends JPanel {
       }
     }
 
-    if (myCenterImage != null) {
-      IconUtil.paintInCenterOf(this, g, myCenterImage);
+    Icon centerImage = getCenterImage();
+    if (centerImage != null) {
+      IconUtil.paintInCenterOf(this, g, centerImage);
     }
+  }
+
+  @Override
+  public void calcData(DataKey key, DataSink sink) {
+    // override this to provide additional context
   }
 }

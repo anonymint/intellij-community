@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.psi.impl.source.tree.*;
 import com.intellij.psi.tree.ChildRoleBase;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.CharTable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -134,12 +135,17 @@ public class ClassElement extends CompositeElement implements Constants {
       }
     }
     else if (psiClass.isInterface()) {
+      final boolean level8OrHigher = PsiUtil.isLanguageLevel8OrHigher(psiClass);
       for (ASTNode child = first; child != afterLast; child = next) {
         next = child.getTreeNext();
-        if (child.getElementType() == JavaElementType.METHOD || child.getElementType() == JavaElementType.FIELD) {
+        final IElementType childElementType = child.getElementType();
+        if (childElementType == JavaElementType.METHOD || childElementType == JavaElementType.FIELD) {
           CompositeElement modifierList = (CompositeElement)((CompositeElement)child).findChildByRole(ChildRole.MODIFIER_LIST);
+          final TokenSet removeModifiersBitSet = level8OrHigher && childElementType == JavaElementType.METHOD
+                                                 ? MODIFIERS_TO_REMOVE_IN_INTERFACE_BIT_SET_18_METHOD
+                                                 : MODIFIERS_TO_REMOVE_IN_INTERFACE_BIT_SET;
           while (true) {
-            ASTNode modifier = modifierList.findChildByType(MODIFIERS_TO_REMOVE_IN_INTERFACE_BIT_SET);
+            ASTNode modifier = modifierList.findChildByType(removeModifiersBitSet);
             if (modifier == null) break;
             modifierList.deleteChildInternal(modifier);
           }
@@ -214,7 +220,7 @@ public class ClassElement extends CompositeElement implements Constants {
         }
       }
     }
-    
+
     super.deleteChildInternal(child);
   }
 
@@ -230,6 +236,12 @@ public class ClassElement extends CompositeElement implements Constants {
   private static final TokenSet MODIFIERS_TO_REMOVE_IN_INTERFACE_BIT_SET = TokenSet.create(
     PUBLIC_KEYWORD, ABSTRACT_KEYWORD,
     STATIC_KEYWORD, FINAL_KEYWORD,
+    NATIVE_KEYWORD
+  );
+
+  private static final TokenSet MODIFIERS_TO_REMOVE_IN_INTERFACE_BIT_SET_18_METHOD = TokenSet.create(
+    PUBLIC_KEYWORD, ABSTRACT_KEYWORD,
+    FINAL_KEYWORD,
     NATIVE_KEYWORD
   );
 
@@ -364,7 +376,7 @@ public class ClassElement extends CompositeElement implements Constants {
     else if (i == JavaDocElementType.DOC_COMMENT) {
       return getChildRole(child, ChildRole.DOC_COMMENT);
     }
-    else if (i == C_STYLE_COMMENT || i == END_OF_LINE_COMMENT) {
+    else if (ElementType.JAVA_PLAIN_COMMENT_BIT_SET.contains(i)) {
       return ChildRoleBase.NONE;
     }
     else if (i == MODIFIER_LIST) {
@@ -376,7 +388,7 @@ public class ClassElement extends CompositeElement implements Constants {
     else if (i == IMPLEMENTS_LIST) {
       return ChildRole.IMPLEMENTS_LIST;
     }
-    else if (i == CLASS_KEYWORD || i == INTERFACE_KEYWORD || i == ENUM_KEYWORD) {
+    else if (ElementType.CLASS_KEYWORD_BIT_SET.contains(i)) {
       return getChildRole(child, ChildRole.CLASS_OR_INTERFACE_KEYWORD);
     }
     else if (i == IDENTIFIER) {
@@ -403,5 +415,4 @@ public class ClassElement extends CompositeElement implements Constants {
   protected boolean isVisibilitySupported() {
     return true;
   }
-
 }

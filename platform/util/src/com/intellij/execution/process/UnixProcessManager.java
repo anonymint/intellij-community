@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,11 @@ import com.intellij.util.Processor;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Platform;
-import org.jetbrains.annotations.NotNull;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.util.*;
 
@@ -32,6 +34,8 @@ import java.util.*;
  * @author traff
  */
 public class UnixProcessManager {
+  private static final Logger LOG = Logger.getInstance(UnixProcessManager.class);
+
   public static final int SIGINT = 2;
   public static final int SIGKILL = 9;
   public static final int SIGTERM = 15;
@@ -52,13 +56,7 @@ public class UnixProcessManager {
     }
   }
 
-  private UnixProcessManager() {
-  }
-
-  public static int getProcessPid() {
-    checkCLib();
-    return C_LIB.getpid();
-  }
+  private UnixProcessManager() { }
 
   public static int getProcessPid(Process process) {
     try {
@@ -72,11 +70,6 @@ public class UnixProcessManager {
     catch (IllegalAccessException e) {
       throw new IllegalStateException("system is not unix", e);
     }
-  }
-
-  public static void sendSignal(Process process, int signal) {
-    int process_pid = getProcessPid(process);
-    sendSignal(process_pid, signal);
   }
 
   public static void sendSignal(int pid, int signal) {
@@ -104,39 +97,37 @@ public class UnixProcessManager {
    * @param process tree root process
    */
   public static boolean sendSignalToProcessTree(Process process, int signal) {
-    checkCLib();
+    try {
+      checkCLib();
 
-    final int our_pid = C_LIB.getpid();
-    final int process_pid = getProcessPid(process);
+      final int our_pid = C_LIB.getpid();
+      final int process_pid = getProcessPid(process);
 
-    final Ref<Integer> foundPid = new Ref<Integer>();
-    final ProcessInfo processInfo = new ProcessInfo();
-    final List<Integer> childrenPids = new ArrayList<Integer>();
-
-    findChildProcesses(our_pid, process_pid, foundPid, processInfo, childrenPids);
-
-    boolean result;
-    if (!foundPid.isNull()) {
-      processInfo.killProcTree(foundPid.get(), signal, UNIX_KILLER);
-      result = true;
-    }
-    else {
-      for (Integer pid : childrenPids) {
-        processInfo.killProcTree(pid, signal, UNIX_KILLER);
-      }
-      result = !childrenPids.isEmpty(); //we've tried to kill at least one process
-    }
-
-    if (result) {
-      foundPid.set(null);
-      childrenPids.clear();
+      final Ref<Integer> foundPid = new Ref<Integer>();
+      final ProcessInfo processInfo = new ProcessInfo();
+      final List<Integer> childrenPids = new ArrayList<Integer>();
 
       findChildProcesses(our_pid, process_pid, foundPid, processInfo, childrenPids);
 
-      return foundPid.isNull() && childrenPids.isEmpty(); //all processes have been killed
+      // result is true if signal was sent to at least one process
+      final boolean result;
+      if (!foundPid.isNull()) {
+        processInfo.killProcTree(foundPid.get(), signal, UNIX_KILLER);
+        result = true;
+      }
+      else {
+        for (Integer pid : childrenPids) {
+          processInfo.killProcTree(pid, signal, UNIX_KILLER);
+        }
+        result = !childrenPids.isEmpty(); //we've tried to kill at least one process
+      }
+
+      return result;
     }
-    else {
-      return true; //the parent process was already killed
+    catch (Exception e) {
+      //If we fail somehow just return false
+      LOG.warn("Error killing the process", e);
+      return false;
     }
   }
 
@@ -179,41 +170,49 @@ public class UnixProcessManager {
   }
 
   public static void processPSOutput(String[] cmd, Processor<String> processor) {
+    processCommandOutput(cmd, processor, true, true);
+  }
+
+  public static void processCommandOutput(String[] cmd, Processor<String> processor, boolean skipFirstLine, boolean throwOnError) {
     try {
       Process p = Runtime.getRuntime().exec(cmd);
-
-      processPSOutput(p, processor);
+      processCommandOutput(p, processor, skipFirstLine, throwOnError);
     }
     catch (IOException e) {
       throw new IllegalStateException(e);
     }
   }
 
-  public static void processPSOutput(Process psProcess, Processor<String> processor) throws IOException {
-    @SuppressWarnings({"IOResourceOpenedButNotSafelyClosed"})
-    BufferedReader stdOutput = new BufferedReader(new
-                                                  InputStreamReader(psProcess.getInputStream()));
-    BufferedReader stdError = new BufferedReader(new
-                                                 InputStreamReader(psProcess.getErrorStream()));
-
+  private static void processCommandOutput(Process process, Processor<String> processor, boolean skipFirstLine, boolean throwOnError) throws IOException {
+    BufferedReader stdOutput = new BufferedReader(new InputStreamReader(process.getInputStream()));
     try {
-      String s;
-      stdOutput.readLine(); //ps output header
-      while ((s = stdOutput.readLine()) != null) {
-        processor.process(s);
-      }
+      BufferedReader stdError = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+      try {
+        if (skipFirstLine) {
+          stdOutput.readLine(); //ps output header
+        }
+        String s;
+        while ((s = stdOutput.readLine()) != null) {
+          processor.process(s);
+        }
 
-      StringBuilder errorStr = new StringBuilder();
-      while ((s = stdError.readLine()) != null) {
-        errorStr.append(s).append("\n");
+        StringBuilder errorStr = new StringBuilder();
+        while ((s = stdError.readLine()) != null) {
+          if (s.contains("environment variables being ignored")) {  // PY-8160
+            continue;
+          }
+          errorStr.append(s).append("\n");
+        }
+        if (throwOnError && errorStr.length() > 0) {
+          throw new IOException("Error reading ps output:" + errorStr.toString());
+        }
       }
-      if (errorStr.length() > 0) {
-        throw new IllegalStateException("error:" + errorStr.toString());
+      finally {
+        stdError.close();
       }
     }
     finally {
       stdOutput.close();
-      stdError.close();
     }
   }
 
@@ -238,20 +237,8 @@ public class UnixProcessManager {
     }
   }
 
-  @NotNull
-  public static String readProcEnviron(int child_pid) throws FileNotFoundException {
-    StringBuffer res = new StringBuffer();
-    Scanner s = new Scanner(new File("/proc/" + child_pid + "/environ"));
-    while (s.hasNextLine()) {
-      res.append(s).append("\n");
-    }
-    return res.toString();
-  }
-
-
-  public interface CLib extends Library {
+  private interface CLib extends Library {
     int getpid();
-
     int kill(int pid, int signal);
   }
 

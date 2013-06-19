@@ -228,7 +228,7 @@ public class ImportHelperTest extends DaemonAnalyzerTestCase {
       ((UndoManagerImpl)UndoManager.getInstance(getProject())).clearUndoRedoQueueInTests(getFile().getVirtualFile());
       type(" ");
       backspace();
-      
+
       assertOneElement(highlightErrors());
 
       int offset = myEditor.getCaretModel().getOffset();
@@ -260,7 +260,7 @@ public class ImportHelperTest extends DaemonAnalyzerTestCase {
       ((UndoManagerImpl)UndoManager.getInstance(getProject())).clearUndoRedoQueueInTests(getFile().getVirtualFile());
       type(" ");
       backspace();
-      
+
       assertEquals(2, highlightErrors().size());
       UIUtil.dispatchAllInvocationEvents();
 
@@ -429,6 +429,30 @@ public class ImportHelperTest extends DaemonAnalyzerTestCase {
      }
    }
 
+   public void testAutoImportSkipsClassReferenceInMethodPosition() throws Throwable {
+     @NonNls String text = "package x; import java.util.HashMap; class S { HashMap<String,String> f(){ return  Hash<caret>Map <String, String >();} }  ";
+     configureByText(StdFileTypes.JAVA, text);
+
+     boolean old = CodeInsightSettings.getInstance().ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY;
+     CodeInsightSettings.getInstance().ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY = true;
+     DaemonCodeAnalyzerSettings.getInstance().setImportHintEnabled(true);
+
+     try {
+       List<HighlightInfo> errs = highlightErrors();
+       assertTrue(errs.size() > 1);
+
+       PsiJavaFile javaFile = (PsiJavaFile)getFile();
+       assertEquals(1, javaFile.getImportList().getAllImportStatements().length);
+
+       PsiReference ref = javaFile.findReferenceAt(getEditor().getCaretModel().getOffset());
+       ImportClassFix fix = new ImportClassFix((PsiJavaCodeReferenceElement)ref);
+       assertFalse(fix.isAvailable(getProject(), getEditor(), getFile()));
+     }
+     finally {
+        CodeInsightSettings.getInstance().ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY = old;
+     }
+   }
+
    public void testAutoImportDoNotBreakCode() throws Throwable {
      @NonNls String text = "package x; class S {{ S.<caret>\n Runnable r; }}";
      configureByText(StdFileTypes.JAVA, text);
@@ -447,6 +471,16 @@ public class ImportHelperTest extends DaemonAnalyzerTestCase {
         CodeInsightSettings.getInstance().ADD_UNAMBIGIOUS_IMPORTS_ON_THE_FLY = old;
         CodeInsightSettings.getInstance().OPTIMIZE_IMPORTS_ON_THE_FLY = opt;
      }
+   }
+
+   public void testAutoImportIgnoresUnresolvedImportReferences() throws Throwable {
+     @NonNls String text = "package x; import xxx.yyy.ArrayList; class S {{ ArrayList<caret> r; }}";
+     configureByText(StdFileTypes.JAVA, text);
+
+     PsiJavaFile javaFile = (PsiJavaFile)getFile();
+     PsiReference ref = javaFile.findReferenceAt(getEditor().getCaretModel().getOffset()-1);
+     ImportClassFix fix = new ImportClassFix((PsiJavaCodeReferenceElement)ref);
+     assertFalse(fix.isAvailable(getProject(), getEditor(), getFile()));
    }
 
 }

@@ -37,6 +37,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
+import com.intellij.profile.codeInspection.InspectionProjectProfileManagerImpl;
 import com.intellij.psi.PsiElement;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -56,10 +57,12 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     projectOpened(context.getProject());
   }
 
+  @NotNull
   public GlobalInspectionContextImpl getContext() {
     return myContext;
   }
 
+  @NotNull
   public RefManager getRefManager() {
     return getContext().getRefManager();
   }
@@ -69,32 +72,35 @@ public abstract class InspectionTool extends InspectionProfileEntry {
   public void exportResults(@NotNull final Element parentNode) {
     getRefManager().iterate(new RefVisitor(){
       @Override
-      public void visitElement(RefEntity elem) {
+      public void visitElement(@NotNull RefEntity elem) {
         exportResults(parentNode, elem);
       }
     });
   }
 
-  public abstract void exportResults(@NotNull Element parentNode, RefEntity refEntity);
+  public abstract void exportResults(@NotNull Element parentNode, @NotNull RefEntity refEntity);
 
   public abstract boolean isGraphNeeded();
   @Nullable
-  public QuickFixAction[] getQuickFixes(final RefEntity[] refElements) {
+  public QuickFixAction[] getQuickFixes(@NotNull RefEntity[] refElements) {
     return null;
   }
 
   @NotNull
-  public abstract JobDescriptor[] getJobDescriptors(GlobalInspectionContext globalInspectionContext);
+  public abstract JobDescriptor[] getJobDescriptors(@NotNull GlobalInspectionContext globalInspectionContext);
 
-  public boolean queryExternalUsagesRequests(final InspectionManager manager) {
+  public boolean queryExternalUsagesRequests(@NotNull InspectionManager manager) {
     return false;
   }
 
+  @Override
   public boolean isEnabledByDefault() {
     return getDefaultLevel() != HighlightDisplayLevel.DO_NOT_SHOW;
   }
 
+  @Override
   @SuppressWarnings({"HardCodedStringLiteral"})
+  @NotNull
   public final String getDescriptionFileName() {
     return getShortName() + ".html";
   }
@@ -103,6 +109,7 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     return getShortName();
   }
 
+  @Override
   public void cleanup() {
     if (myContext != null) {
       projectClosed(myContext.getProject());
@@ -114,6 +121,7 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     cleanup();
   }
 
+  @NotNull
   public abstract HTMLComposerImpl getComposer();
 
   public abstract boolean hasReportedProblems();
@@ -137,15 +145,17 @@ public abstract class InspectionTool extends InspectionProfileEntry {
 
   public abstract void ignoreCurrentElement(RefEntity refElement);
 
+  @NotNull
   public abstract Collection<RefEntity> getIgnoredRefElements();
 
   public abstract void amnesty(RefEntity refEntity);
 
   public abstract boolean isElementIgnored(final RefEntity element);
 
-
+  @NotNull
   public abstract FileStatus getElementStatus(final RefEntity element);
 
+  @NotNull
   protected static FileStatus calcStatus(boolean old, boolean current) {
     if (old) {
       if (!current) {
@@ -158,7 +168,7 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     return FileStatus.NOT_CHANGED;
   }
 
-  protected static boolean contains(RefEntity element, Collection<RefEntity> entities){
+  protected static boolean contains(RefEntity element, @NotNull Collection<RefEntity> entities){
     for (RefEntity refEntity : entities) {
       if (Comparing.equal(refEntity, element)) {
         return true;
@@ -167,14 +177,15 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     return false;
   }
 
-  protected HighlightSeverity getCurrentSeverity(RefElement element) {
+  protected HighlightSeverity getCurrentSeverity(@NotNull RefElement element) {
     final PsiElement psiElement = element.getPointer().getContainingFile();
     if (psiElement != null) {
       if (myContext != null) {
         final Tools tools = myContext.getTools().get(getShortName());
         if (tools != null) {
           for (ScopeToolState state : tools.getTools()) {
-            if (state.getTool() == this) {
+            InspectionToolWrapper toolWrapper = (InspectionToolWrapper)state.getTool();
+            if (toolWrapper == this) {
               return myContext.getCurrentProfile().getErrorLevel(HighlightDisplayKey.find(getShortName()), psiElement).getSeverity();
             }
           }
@@ -188,17 +199,18 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     return null;
   }
 
-  protected static String getTextAttributeKey(final Project project, HighlightSeverity severity, ProblemHighlightType highlightType) {
+  protected static String getTextAttributeKey(@NotNull Project project, @NotNull HighlightSeverity severity, @NotNull ProblemHighlightType highlightType) {
     if (highlightType == ProblemHighlightType.LIKE_DEPRECATED) {
       return HighlightInfoType.DEPRECATED.getAttributesKey().getExternalName();
     }
-    else if (highlightType == ProblemHighlightType.LIKE_UNKNOWN_SYMBOL && severity == HighlightSeverity.ERROR) {
+    if (highlightType == ProblemHighlightType.LIKE_UNKNOWN_SYMBOL && severity == HighlightSeverity.ERROR) {
       return HighlightInfoType.WRONG_REF.getAttributesKey().getExternalName();
     }
-    else if (highlightType == ProblemHighlightType.LIKE_UNUSED_SYMBOL) {
+    if (highlightType == ProblemHighlightType.LIKE_UNUSED_SYMBOL) {
       return HighlightInfoType.UNUSED_SYMBOL.getAttributesKey().getExternalName();
     }
-    return SeverityRegistrar.getInstance(project).getHighlightInfoTypeBySeverity(severity).getAttributesKey().getExternalName();
+    SeverityRegistrar registrar = InspectionProjectProfileManagerImpl.getInstanceImpl(project).getSeverityRegistrar();
+    return registrar.getHighlightInfoTypeBySeverity(severity).getAttributesKey().getExternalName();
   }
 
   public static void setOutputPath(final String output) {
@@ -211,14 +223,15 @@ public abstract class InspectionTool extends InspectionProfileEntry {
     return null;
   }
 
-  public InspectionNode createToolNode(final InspectionRVContentProvider provider, final InspectionTreeNode parentNode, final boolean showStructure) {
-    myToolNode = new InspectionNode(this);
-    provider.appendToolNodeContent(myToolNode, parentNode, showStructure);
-    return myToolNode;
-  }
-  
   @Nullable
   public SuppressIntentionAction[] getSuppressActions() {
     return null;
+  }
+
+  @NotNull
+  public InspectionNode createToolNode(@NotNull InspectionRVContentProvider provider, @NotNull InspectionTreeNode parentNode, final boolean showStructure) {
+    myToolNode = new InspectionNode(this);
+    provider.appendToolNodeContent(myToolNode, parentNode, showStructure);
+    return myToolNode;
   }
 }

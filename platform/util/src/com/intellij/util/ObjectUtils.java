@@ -15,6 +15,7 @@
  */
 package com.intellij.util;
 
+import com.intellij.openapi.util.Condition;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -53,5 +54,13 @@ public class ObjectUtils {
       return clazz.cast(obj);
     }
     return null;
+  }
+
+  @Nullable
+  public static <T> T nullizeByCondition(@Nullable final T obj, @NotNull final Condition<T> condition) {
+    if (condition.value(obj)) {
+      return null;
+    }
+    return obj;
   }
 }

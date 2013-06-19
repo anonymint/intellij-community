@@ -98,11 +98,11 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testDispreferDeclared() throws Throwable {
-    checkPreferredItems(0, "aabbb", "aaa");
+    checkPreferredItems(0, "aabbb", "aaa", "Aaaaaaa");
   }
 
   public void testDispreferDeclaredOfExpectedType() throws Throwable {
-    checkPreferredItems(0, "aabbb", "aaa");
+    checkPreferredItems(0, "aabbb", "aaa", "Aaaaaaa");
   }
 
   public void testDispreferImpls() throws Throwable {
@@ -181,6 +181,27 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
     assertPreferredItems(0, "getComponents", "getComponent");
   }
 
+  public void testAbandonSameStatsForDifferentQualifiers() throws Throwable {
+    invokeCompletion(getTestName(false) + ".java");
+    assertPreferredItems 0, "method1", "equals"
+    myFixture.type('eq\n2);\nf2.')
+
+    myFixture.completeBasic();
+    assertPreferredItems 0, "equals", "method2"
+    myFixture.type('me\n);\n')
+
+    for (i in 0..StatisticsManager.OBLIVION_THRESHOLD) {
+      myFixture.type('f2.')
+      myFixture.completeBasic()
+      assertPreferredItems 0, "method2", "equals"
+      myFixture.type('me\n);\n')
+    }
+
+    myFixture.type('f3.')
+    myFixture.completeBasic()
+    assertPreferredItems 0, "method3", "equals"
+  }
+
   public void testDispreferFinalize() throws Throwable {
     checkPreferredItems(0, "final", "finalize");
   }
@@ -195,12 +216,12 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
 
   public void testDeclaredMembersGoFirst() throws Exception {
     invokeCompletion(getTestName(false) + ".java");
-    assertStringItems("fromThis", "overridden", "fromSuper", "equals", "getClass", "hashCode", "notify", "notifyAll", "toString", "wait",
+    assertStringItems("fromThis", "overridden", "fromSuper", "equals", "hashCode", "toString", "getClass", "notify", "notifyAll", "wait",
                       "wait", "wait");
   }
 
   public void testLocalVarsOverMethods() {
-    checkPreferredItems(0, "value", "validate", "validateTree", "valueOf");
+    checkPreferredItems(0, "value", "validate", "validateTree");
   }
 
   public void testCurrentClassBest() {
@@ -244,7 +265,7 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testPreferClassStaticMembers() {
-    checkPreferredItems(0, "Zoo", "Zoo.A", "Zoo.B", "Zoo.C", "Zoo.D", "Zoo.E", "Zoo.F", "Zoo.G", "Zoo.H");
+    checkPreferredItems(0, "Zoo.A", "Zoo", "Zoo.B", "Zoo.C", "Zoo.D", "Zoo.E", "Zoo.F", "Zoo.G", "Zoo.H");
   }
 
   public void testPreferFinallyToFinal() {
@@ -257,6 +278,10 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
 
   public void testPreferModifiers() {
     checkPreferredItems(0, "private", "protected", "public", "paaa", "paab");
+  }
+
+  public void testPreferEnumConstants() {
+    checkPreferredItems(0, "MyEnum.bar", "MyEnum", "MyEnum.foo");
   }
 
   public void testPreferElse() {
@@ -308,6 +333,11 @@ public class NormalCompletionOrderingTest extends CompletionSortingTestCase {
     for (i in 0..<pkgs.size()) {
       assert LookupElementPresentation.renderElement(myFixture.lookupElements[i]).tailText?.contains(pkgs[i])
     }
+  }
+
+  public void testAlphaSortingStartMatchesFirst() {
+    UISettings.getInstance().SORT_LOOKUP_ELEMENTS_LEXICOGRAPHICALLY = true
+    checkPreferredItems 0, 'xxbar', 'xxfoo', 'xxgoo', 'barxx', 'fooxx', 'gooxx'
   }
 
   public void testSortSameNamedVariantsByProximity() {
@@ -385,11 +415,21 @@ import java.lang.annotation.Target;
   public void testDoNotPreferGetClass() {
     checkPreferredItems 0, 'get', 'getClass'
     incUseCount(lookup, 1)
+    assertPreferredItems 0, 'getClass', 'get'
+    incUseCount(lookup, 1)
     assertPreferredItems 0, 'get', 'getClass'
   }
 
+  public void testEqualsStats() {
+    checkPreferredItems 0, 'equals', 'equalsIgnoreCase'
+    incUseCount(lookup, 1)
+    assertPreferredItems 0, 'equalsIgnoreCase', 'equals'
+    incUseCount(lookup, 1)
+    checkPreferredItems 0, 'equals', 'equalsIgnoreCase'
+  }
+
   public void testPreferClassToItsConstants() {
-    checkPreferredItems 0, 'Calendar', 'Calendar.FIELD_COUNT'
+    checkPreferredItems 0, 'Calendar.FIELD_COUNT', 'Calendar', 'Calendar.AM'
   }
 
   public void testPreferLocalsToStaticsInSecondCompletion() {
@@ -493,7 +533,7 @@ import java.lang.annotation.Target;
     invokeCompletion(getTestName(false) + ".java")
     assertPreferredItems 0, 'getNumber', 'getNumProvider'
     lookup.currentItem = lookup.items[1]
-    myFixture.type '\n, getn'
+    myFixture.type '\n);\ntest(getnu'
     myFixture.completeBasic()
     assertPreferredItems 0, 'getNumProvider', 'getNumber'
   }
@@ -530,6 +570,38 @@ import java.lang.annotation.Target;
 
   public void testNoExpectedTypeInStringConcatenation() {
     checkPreferredItems(0, 'vx')
+  }
+
+  public void testLocalVarsOverStats() {
+    CodeInsightSettings.getInstance().COMPLETION_CASE_SENSITIVE = CodeInsightSettings.NONE;
+    checkPreferredItems 0, 'psiElement', 'PsiElement'
+    incUseCount lookup, 1
+    assertPreferredItems 0, 'psiElement', 'PsiElement'
+  }
+
+  public void testHonorRecency() {
+    invokeCompletion(getTestName(false) + ".java")
+    myFixture.completeBasic()
+    myFixture.type('setou\nz.')
+
+    myFixture.completeBasic()
+    myFixture.type('set')
+    assertPreferredItems 0, 'setOurText', 'setText'
+    myFixture.type('te')
+    assertPreferredItems 0, 'setText', 'setOurText'
+    myFixture.type('\nz.')
+
+    myFixture.completeBasic()
+    myFixture.type('set')
+    assertPreferredItems 0, 'setText', 'setOurText'
+  }
+
+  public void testEnumConstantStartMatching() {
+    checkPreferredItems(0, 'rMethod', 'Zoo.RIGHT')
+    myFixture.type('i\n;\nreturn r')
+    myFixture.completeBasic()
+    assertPreferredItems 0, 'Zoo.RIGHT', 'rMethod'
+
   }
 
 }

@@ -18,6 +18,7 @@ package com.intellij.psi.impl.source.tree.injected;
 
 import com.intellij.injected.editor.*;
 import com.intellij.lang.Language;
+import com.intellij.lang.LanguageUtil;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -161,6 +162,7 @@ public class InjectedLanguageUtil {
     return EditorWindow.create(documentWindow, (EditorImpl)hostEditor, injectedFile);
   }
 
+  @Nullable
   public static PsiFile findInjectedPsiNoCommit(@NotNull PsiFile host, int offset) {
     PsiElement injected = findInjectedElementNoCommit(host, offset);
     return injected == null ? null : injected.getContainingFile();
@@ -312,10 +314,6 @@ public class InjectedLanguageUtil {
 
   private static final Key<List<DocumentWindow>> INJECTED_DOCS_KEY = Key.create("INJECTED_DOCS_KEY");
 
-  public static boolean areInjectionsProcessed(@NotNull PsiFile hostPsiFile) {
-    return hostPsiFile.getUserData(INJECTED_DOCS_KEY) != null;
-  }
-  
   @NotNull
   public static List<DocumentWindow> getCachedInjectedDocuments(@NotNull PsiFile hostPsiFile) {
     // modification of cachedInjectedDocuments must be under PsiLock only
@@ -355,8 +353,6 @@ public class InjectedLanguageUtil {
         }
       }
     }
-    //FileDocumentManagerImpl.registerDocument(null, virtualFile);
-    //FileDocumentManagerImpl.registerDocument(documentWindow, null);
   }
 
 
@@ -378,7 +374,7 @@ public class InjectedLanguageUtil {
     return editor;
   }
 
-  public static PsiFile getTopLevelFile(@NotNull PsiElement element) {
+  static PsiFile getTopLevelFile(@NotNull PsiElement element) {
     PsiFile containingFile = element.getContainingFile();
     if (containingFile == null) return null;
     Document document = PsiDocumentManager.getInstance(element.getProject()).getCachedDocument(containingFile);
@@ -458,7 +454,7 @@ public class InjectedLanguageUtil {
         if (element == endElement) myState = Boolean.FALSE;
         if (Boolean.FALSE == myState) return;
         if (Boolean.TRUE == myState && element.getFirstChild() == null) {
-          sb.append(manager.getUnescapedText(element));
+          sb.append(getUnescapedLeafText(element, false));
         }
         else {
           super.visitElement(element);
@@ -466,5 +462,30 @@ public class InjectedLanguageUtil {
       }
     });
     return sb.toString();
+  }
+
+  @Nullable
+  public static String getUnescapedLeafText(PsiElement element, boolean strict) {
+    String unescaped = element.getCopyableUserData(LeafPatcher.UNESCAPED_TEXT);
+    if (unescaped != null) {
+      return unescaped;
+    }
+    if (!strict && element.getFirstChild() == null) {
+      return element.getText();
+    }
+    return null;
+  }
+
+  @Nullable
+  public static DocumentWindow getDocumentWindow(@NotNull PsiElement element) {
+    PsiFile file = element.getContainingFile();
+    if (file == null) return null;
+    VirtualFile virtualFile = file.getVirtualFile();
+    if (virtualFile instanceof VirtualFileWindow) return ((VirtualFileWindow)virtualFile).getDocumentWindow();
+    return null;
+  }
+
+  public static boolean isInjectableLanguage(Language language) {
+    return LanguageUtil.isInjectableLanguage(language);
   }
 }

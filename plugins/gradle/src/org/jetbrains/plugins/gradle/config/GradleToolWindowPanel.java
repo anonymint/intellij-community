@@ -8,15 +8,13 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SideBorder;
-import com.intellij.util.Consumer;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.notification.GradleConfigNotificationManager;
+import org.jetbrains.plugins.gradle.settings.GradleSettings;
+import org.jetbrains.plugins.gradle.settings.GradleSettingsListener;
 import org.jetbrains.plugins.gradle.ui.RichTextControlBuilder;
 import org.jetbrains.plugins.gradle.util.GradleBundle;
-import org.jetbrains.plugins.gradle.util.GradleUtil;
 
 import javax.swing.*;
 import java.awt.*;
@@ -59,50 +57,17 @@ public abstract class GradleToolWindowPanel extends SimpleToolWindowPanel {
     setContent(myContent);
 
     MessageBusConnection connection = project.getMessageBus().connect(project);
-    connection.subscribe(GradleConfigNotifier.TOPIC, new GradleConfigNotifier() {
-      
-      private boolean myRefresh;
-      private boolean myInBulk;
-
-      @Override
-      public void onBulkChangeStart() {
-        myInBulk = true; 
-      }
-
-      @Override
-      public void onBulkChangeEnd() {
-        myInBulk = false;
-        if (myRefresh) {
-          myRefresh = false;
-          refreshAll();
-        }
-      }
-
-      @Override public void onLinkedProjectPathChange(@Nullable String oldPath, @Nullable String newPath) { refreshAll(); }
-      @Override public void onPreferLocalGradleDistributionToWrapperChange(boolean preferLocalToWrapper) { refreshAll(); }
-      @Override public void onGradleHomeChange(@Nullable String oldPath, @Nullable String newPath) { refreshAll(); }
-      @Override public void onServiceDirectoryPathChange(@Nullable String oldPath, @Nullable String newPath) { refreshAll(); }
-      
-      private void refreshAll() {
-        if (myInBulk) {
-          myRefresh = true;
-          return;
-        }
-        GradleUtil.refreshProject(myProject, new Consumer<String>() {
-          @Override
-          public void consume(String s) {
-            GradleConfigNotificationManager notificationManager = myProject.getComponent(GradleConfigNotificationManager.class);
-            notificationManager.processRefreshError(s);
-            UIUtil.invokeLaterIfNeeded(new Runnable() {
-              @Override
-              public void run() {
-                update();
-              }
-            });
-          }
-        });
-        update();
-      }
+    connection.subscribe(GradleSettingsListener.TOPIC, new GradleSettingsListenerAdapter() {
+      // TODO den implement
+//      @Override public void onLinkedProjectConfigChange(@Nullable String oldPath, @Nullable String newPath) {
+//        if (StringUtil.isEmpty(newPath)) {
+//          myLayout.show(myContent, NON_LINKED_CARD_NAME);
+//          return;
+//        }
+//        if (StringUtil.isEmpty(oldPath) && !StringUtil.isEmpty(newPath)) {
+//          myLayout.show(myContent, CONTENT_CARD_NAME);
+//        }
+//      }
     });
   }
 
@@ -151,14 +116,14 @@ public abstract class GradleToolWindowPanel extends SimpleToolWindowPanel {
    */
   public void update() {
     final GradleSettings settings = GradleSettings.getInstance(myProject);
-    String cardToShow = settings.getLinkedProjectPath() == null ? NON_LINKED_CARD_NAME : CONTENT_CARD_NAME;
+    // TODO den implement
+    String cardToShow = "sf";
+//    String cardToShow = StringUtil.isEmpty(settings.getLinkedExternalProjectPath()) ? NON_LINKED_CARD_NAME : CONTENT_CARD_NAME;
     myLayout.show(myContent, cardToShow);
     boolean showToolbar = cardToShow != NON_LINKED_CARD_NAME;
     for (JComponent component : getToolbarControls()) {
       component.setVisible(showToolbar);
     }
-    
-    updateContent();
   }
 
   @NotNull

@@ -24,10 +24,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
-import com.intellij.ui.ColoredListCellRenderer;
-import com.intellij.ui.ColoredTreeCellRenderer;
-import com.intellij.ui.FileColorManager;
-import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.*;
 import com.intellij.ui.popup.util.DetailView;
 import com.intellij.ui.popup.util.ItemWrapper;
 
@@ -52,8 +49,16 @@ public class BookmarkItem extends ItemWrapper {
     return myBookmark;
   }
 
+  @Override
   public void setupRenderer(ColoredListCellRenderer renderer, Project project, boolean selected) {
-    VirtualFile file = myBookmark.getFile();
+    setupRenderer(renderer, project, myBookmark, selected);
+  }
+
+  public static void setupRenderer(SimpleColoredComponent renderer, Project project, Bookmark bookmark, boolean selected) {
+    VirtualFile file = bookmark.getFile();
+    if (!file.isValid()) {
+      return;
+    }
 
     PsiManager psiManager = PsiManager.getInstance(project);
 
@@ -62,13 +67,17 @@ public class BookmarkItem extends ItemWrapper {
       renderer.setIcon(fileOrDir.getIcon(0));
     }
 
+    String description = bookmark.getDescription();
+    if (description != null) {
+      renderer.append(description + " ", SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+    }
 
     FileStatus fileStatus = FileStatusManager.getInstance(project).getStatus(file);
     TextAttributes attributes = new TextAttributes(fileStatus.getColor(), null, null, EffectType.LINE_UNDERSCORE, Font.PLAIN);
     renderer.append(file.getName(), SimpleTextAttributes.fromTextAttributes(attributes));
-    if (myBookmark.getLine() >= 0) {
+    if (bookmark.getLine() >= 0) {
       renderer.append(":", SimpleTextAttributes.GRAYED_ATTRIBUTES);
-      renderer.append(String.valueOf(myBookmark.getLine() + 1), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+      renderer.append(String.valueOf(bookmark.getLine() + 1), SimpleTextAttributes.GRAYED_ATTRIBUTES);
     }
 
     if (!selected) {
@@ -80,18 +89,14 @@ public class BookmarkItem extends ItemWrapper {
         }
       }
     }
-
-    String description = myBookmark.getDescription();
-    if (description != null) {
-      renderer.append(" " + description, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
-    }
   }
 
   @Override
-  public void setupRenderer(ColoredTreeCellRenderer renderer) {
-    //bookmarks tree view not supported
+  public void setupRenderer(ColoredTreeCellRenderer renderer, Project project, boolean selected) {
+    setupRenderer(renderer, project, myBookmark, selected);
   }
 
+  @Override
   public void updateAccessoryView(JComponent component) {
     JLabel label = (JLabel)component;
     final char mnemonic = myBookmark.getMnemonic();
@@ -103,14 +108,17 @@ public class BookmarkItem extends ItemWrapper {
     }
   }
 
+  @Override
   public String speedSearchText() {
     return myBookmark.getFile().getName() + " " + myBookmark.getDescription();
   }
 
+  @Override
   public String footerText() {
     return myBookmark.getFile().getPresentableUrl();
   }
 
+  @Override
   protected void doUpdateDetailView(DetailView panel, boolean editorOnly) {
     panel.navigateInPreviewEditor(DetailView.PreviewEditorState.create(myBookmark.getFile(), myBookmark.getLine()));
   }

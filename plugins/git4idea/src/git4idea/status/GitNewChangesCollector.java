@@ -121,7 +121,6 @@ class GitNewChangesCollector extends GitChangesCollector {
     GitSimpleHandler handler = new GitSimpleHandler(myProject, myVcsRoot, GitCommand.STATUS);
     final String[] params = {"--porcelain", "-z", "--untracked-files=no"};   // untracked files are stored separately
     handler.addParameters(params);
-    handler.setNoSSH(true);
     handler.setSilent(true);
     handler.setStdoutSuppressed(true);
     handler.endOptions();
@@ -130,7 +129,6 @@ class GitNewChangesCollector extends GitChangesCollector {
       // if there are too much files, just get all changes for the project
       handler = new GitSimpleHandler(myProject, myVcsRoot, GitCommand.STATUS);
       handler.addParameters(params);
-      handler.setNoSSH(true);
       handler.setSilent(true);
       handler.setStdoutSuppressed(true);
       handler.endOptions();
@@ -285,7 +283,7 @@ class GitNewChangesCollector extends GitChangesCollector {
   private VcsRevisionNumber getHeadFromGit() throws VcsException {
     VcsRevisionNumber nativeHead = VcsRevisionNumber.NULL;
     try {
-      nativeHead = GitChangeUtils.loadRevision(myProject, myVcsRoot, "HEAD");
+      nativeHead = GitChangeUtils.resolveReference(myProject, myVcsRoot, "HEAD");
     }
     catch (VcsException e) {
       if (!GitChangeUtils.isHeadMissing(e)) { // fresh repository

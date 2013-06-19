@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,40 +16,33 @@
 package org.jetbrains.plugins.groovy.lang.psi.impl.synthetic;
 
 import com.intellij.navigation.ItemPresentation;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.*;
 import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.impl.light.LightMethodBuilder;
 import com.intellij.psi.impl.light.LightModifierList;
 import com.intellij.psi.javadoc.PsiDocComment;
-import com.intellij.psi.scope.BaseScopeProcessor;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
-import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.ui.RowIcon;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.GroovyFileType;
+import org.jetbrains.plugins.groovy.dsl.GroovyDslFileIndex;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
-import org.jetbrains.plugins.groovy.lang.psi.GroovyRecursiveElementVisitor;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrField;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrTopLevelDefinition;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariableDeclaration;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod;
 import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
-import org.jetbrains.plugins.groovy.lang.psi.util.GrClassImplUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames;
-import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 
 import javax.swing.*;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -114,14 +107,17 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
     return myFile.isValid() && myFile.isScript();
   }
 
-  @NotNull
+  @Nullable
   public String getQualifiedName() {
+    final String name = getName();
+    if (name == null) return null;
+
     final String packName = myFile.getPackageName();
     if (packName.length() == 0) {
-      return getName();
+      return name;
     }
     else {
-      return packName + "." + getName();
+      return packName + "." + name;
     }
   }
 
@@ -167,7 +163,8 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
 
   @NotNull
   public PsiClassType[] getExtendsListTypes() {
-    return new PsiClassType[]{ TypesUtil.createTypeByFQClassName(GroovyCommonClassNames.GROOVY_LANG_SCRIPT, this)};
+    final PsiClassType superClassFromDSL = GroovyDslFileIndex.pocessScriptSuperClasses(myFile);
+    return new PsiClassType[]{ superClassFromDSL != null ? superClassFromDSL : TypesUtil.createTypeByFQClassName(GroovyCommonClassNames.GROOVY_LANG_SCRIPT, this)};
   }
 
   @NotNull
@@ -204,25 +201,35 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
 
   @NotNull
   public PsiField[] getFields() {
-    return getScriptFields();
+    return GrScriptField.getScriptFields(this);
   }
 
   @NotNull
   public PsiMethod[] getMethods() {
-    GrMethod[] methods = myFile.getMethods();
-    byte hasMain = 1;
-    byte hasRun = 1;
-    for (GrMethod method : methods) {
-      if (method.isEquivalentTo(myMainMethod)) hasMain = 0;
-      else if (method.isEquivalentTo(myRunMethod)) hasRun = 0;
-    }
-    if (hasMain + hasRun == 0) return methods;
+    return CachedValuesManager.getManager(getProject()).getCachedValue(this, new CachedValueProvider<PsiMethod[]>() {
+      @Nullable
+      @Override
+      public Result<PsiMethod[]> compute() {
+        PsiMethod[] methods = myFile.getMethods();
 
-    PsiMethod[] result = new PsiMethod[methods.length + hasMain + hasRun];
-    if (hasMain == 1) result[0] = myMainMethod;
-    if (hasRun == 1) result[hasMain] = myRunMethod;
-    System.arraycopy(methods, 0, result, hasMain + hasRun, methods.length);
-    return result;
+        byte hasMain = 1;
+        byte hasRun = 1;
+        for (PsiMethod method : methods) {
+          if (method.isEquivalentTo(myMainMethod)) {
+            hasMain = 0;
+          }
+          else if (method.isEquivalentTo(myRunMethod)) hasRun = 0;
+        }
+        if (hasMain + hasRun == 0) return Result.create(methods, myFile);
+
+        PsiMethod[] result = new PsiMethod[methods.length + hasMain + hasRun];
+        if (hasMain == 1) result[0] = myMainMethod;
+        if (hasRun == 1) result[hasMain] = myRunMethod;
+        System.arraycopy(methods, 0, result, hasMain + hasRun, methods.length);
+
+        return Result.create(result, myFile);
+      }
+    });
   }
 
   @NotNull
@@ -257,11 +264,11 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
 
   @NotNull
   public PsiClass[] getAllInnerClasses() {
-    return PsiClass.EMPTY_ARRAY;
+    return PsiClassImplUtil.getAllInnerClasses(this);
   }
 
   public PsiField findFieldByName(String name, boolean checkBases) {
-    return null;
+    return PsiClassImplUtil.findFieldByName(this, name, checkBases);
   }
 
   public PsiMethod findMethodBySignature(PsiMethod patternMethod, boolean checkBases) {
@@ -280,16 +287,16 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
 
   @NotNull
   public List<Pair<PsiMethod, PsiSubstitutor>> findMethodsAndTheirSubstitutorsByName(String name, boolean checkBases) {
-    return new ArrayList<Pair<PsiMethod, PsiSubstitutor>>();
+    return PsiClassImplUtil.findMethodsAndTheirSubstitutorsByName(this, name, checkBases);
   }
 
   @NotNull
   public List<Pair<PsiMethod, PsiSubstitutor>> getAllMethodsAndTheirSubstitutors() {
-    return new ArrayList<Pair<PsiMethod, PsiSubstitutor>>();
+    return PsiClassImplUtil.getAllWithSubstitutorsByMap(this, PsiClassImplUtil.MemberType.METHOD);
   }
 
   public PsiClass findInnerClassByName(String name, boolean checkBases) {
-    return null;
+    return PsiClassImplUtil.findInnerByName(this, name, checkBases);
   }
 
   public PsiTypeParameterList getTypeParameterList() {
@@ -325,11 +332,16 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
     return InheritanceImplUtil.isInheritor(this, baseClass, checkDeep);
   }
 
-  @NotNull
+  @Nullable
   public String getName() {
-    String name = myFile.getName();
-    int i = name.indexOf('.');
-    return i > 0 ? name.substring(0, i) : name;
+    String fileName = myFile.getName();
+    final String name = FileUtilRt.getNameWithoutExtension(fileName);
+    if (StringUtil.isJavaIdentifier(name)) {
+      return name;
+    }
+    else {
+      return null;
+    }
   }
 
   public PsiElement setName(@NotNull String name) throws IncorrectOperationException {
@@ -353,75 +365,11 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
     return false;
   }
 
-  private GrField[] getScriptFields() {
-    return CachedValuesManager.getManager(getProject()).getCachedValue(this, new CachedValueProvider<GrField[]>() {
-      @Override
-      public Result<GrField[]> compute() {
-        List<GrField> result = RecursionManager.doPreventingRecursion(GroovyScriptClass.this, true, new Computable<List<GrField>>() {
-          @Override
-          public List<GrField> compute() {
-            final List<GrField> result = new ArrayList<GrField>();
-            myFile.accept(new GroovyRecursiveElementVisitor() {
-              @Override
-              public void visitVariableDeclaration(GrVariableDeclaration element) {
-                if (element.getModifierList().findAnnotation(GroovyCommonClassNames.GROOVY_TRANSFORM_FIELD) != null) {
-                  for (GrVariable variable : element.getVariables()) {
-                    result.add(GrScriptField.createScriptFieldFrom(variable));
-                  }
-                }
-                super.visitVariableDeclaration(element);
-              }
-            });
-            return result;
-          }
-        });
-
-        if (result == null) {
-          result = Collections.emptyList();
-        }
-        return Result.create(result.toArray(new GrField[result.size()]), PsiModificationTracker.JAVA_STRUCTURE_MODIFICATION_COUNT, myFile);
-      }
-    });
-  }
-
   public boolean processDeclarations(@NotNull final PsiScopeProcessor processor,
                                      @NotNull final ResolveState state,
                                      @Nullable PsiElement lastParent,
                                      @NotNull PsiElement place) {
-    for (GrTopLevelDefinition definition : myFile.getTopLevelDefinitions()) {
-      if (!(definition instanceof PsiClass)) {
-        if (!ResolveUtil.processElement(processor, definition, state)) return false;
-      }
-    }
-
-    for (GrVariable variable : getScriptFields()) {
-      if (!GrClassImplUtil.isSameDeclaration(place, variable)) {
-        if (!ResolveUtil.processElement(processor, variable, state)) {
-          return false;
-        }
-      }
-    }
-
-    if (!ResolveUtil.processElement(processor, myMainMethod, state) || !ResolveUtil.processElement(processor, myRunMethod, state)) {
-      return false;
-    }
-
-    final PsiClass scriptClass = getSuperClass();
-    //noinspection RedundantIfStatement
-    if (scriptClass != null && !scriptClass.processDeclarations(new BaseScopeProcessor() {
-      public boolean execute(@NotNull PsiElement element, ResolveState state) {
-        return !(element instanceof PsiNamedElement) || ResolveUtil.processElement(processor, (PsiNamedElement)element, state);
-      }
-
-      @Override
-      public <T> T getHint(@NotNull Key<T> hintKey) {
-        return processor.getHint(hintKey);
-      }
-    }, state, lastParent, place)) {
-      return false;
-    }
-
-    return true;
+    return PsiClassImplUtil.processDeclarationsInClass(this, processor, state, ContainerUtil.<PsiClass>newHashSet(), lastParent, place, false);
   }
 
   @Override
@@ -433,7 +381,8 @@ public class GroovyScriptClass extends LightElement implements PsiClass, Synthet
   public ItemPresentation getPresentation() {
     return new ItemPresentation() {
       public String getPresentableText() {
-        return getName();
+        final String name = getName();
+        return name != null ? name : "<unnamed>";
       }
 
       public String getLocationString() {

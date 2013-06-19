@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ import org.jetbrains.annotations.Nullable;
  * Represents a reference found in Java code (either an identifier or a sequence of identifiers
  * separated by periods, optionally with generic type arguments).
  */
-public interface PsiJavaCodeReferenceElement extends PsiJavaReference, PsiQualifiedReference {
+public interface PsiJavaCodeReferenceElement extends PsiJavaReference, PsiQualifiedReferenceElement {
   /**
    * The empty array of PSI Java code references which can be reused to avoid unnecessary allocations.
    */
   PsiJavaCodeReferenceElement[] EMPTY_ARRAY = new PsiJavaCodeReferenceElement[0];
 
   ArrayFactory<PsiJavaCodeReferenceElement> ARRAY_FACTORY = new ArrayFactory<PsiJavaCodeReferenceElement>() {
+    @NotNull
     @Override
     public PsiJavaCodeReferenceElement[] create(int count) {
       return count == 0 ? EMPTY_ARRAY : new PsiJavaCodeReferenceElement[count];
@@ -40,7 +41,7 @@ public interface PsiJavaCodeReferenceElement extends PsiJavaReference, PsiQualif
    * Returns the element representing the name of the referenced element.
    *
    * @return the element, or null if the reference element is not physical (for example,
-   * exists in compiled code).
+   *         exists in compiled code).
    */
   @Nullable
   PsiElement getReferenceNameElement();
@@ -74,5 +75,4 @@ public interface PsiJavaCodeReferenceElement extends PsiJavaReference, PsiQualif
    * @return the qualified text of the reference.
    */
   String getQualifiedName();
-
 }

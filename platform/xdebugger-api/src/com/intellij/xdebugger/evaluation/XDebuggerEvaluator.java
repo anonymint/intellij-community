@@ -23,6 +23,7 @@ import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.frame.XSuspendContext;
 import com.intellij.xdebugger.frame.XValue;
+import com.intellij.xdebugger.frame.XValueCallback;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,7 +67,7 @@ public abstract class XDebuggerEvaluator {
    * @param expression expression to evaluate
    * @param callback   used to notify that the expression has been evaluated or an error occurs
    */
-  public void evaluate(@NotNull String expression, XEvaluationCallback callback, @Nullable XSourcePosition expressionPosition) {
+  public void evaluate(@NotNull String expression, @NotNull XEvaluationCallback callback, @Nullable XSourcePosition expressionPosition) {
     evaluate(expression, callback);
   }
 
@@ -78,7 +79,7 @@ public abstract class XDebuggerEvaluator {
      * @param callback   used to notify that the expression has been evaluated or an error occurs
      * @param mode       code fragment or expression
      */
-  public void evaluate(@NotNull String expression, XEvaluationCallback callback, @Nullable XSourcePosition expressionPosition, @Nullable EvaluationMode mode) {
+  public void evaluate(@NotNull String expression, @NotNull XEvaluationCallback callback, @Nullable XSourcePosition expressionPosition, @NotNull EvaluationMode mode) {
     evaluate(expression, callback, expressionPosition);
   }
 
@@ -139,10 +140,7 @@ public abstract class XDebuggerEvaluator {
     return 700;
   }
 
-  public interface XEvaluationCallback {
-
+  public interface XEvaluationCallback extends XValueCallback {
     void evaluated(@NotNull XValue result);
-
-    void errorOccurred(@NotNull String errorMessage);
   }
 }

@@ -3,6 +3,7 @@ package com.intellij.ide.projectWizard;
 import com.intellij.ide.actions.ImportModuleAction;
 import com.intellij.ide.impl.NewProjectUtil;
 import com.intellij.ide.util.newProjectWizard.AddModuleWizard;
+import com.intellij.ide.util.newProjectWizard.SelectTemplateSettings;
 import com.intellij.ide.util.newProjectWizard.SelectTemplateStep;
 import com.intellij.ide.util.projectWizard.ModuleWizardStep;
 import com.intellij.openapi.application.ApplicationManager;
@@ -30,6 +31,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -61,7 +63,7 @@ public abstract class ProjectWizardTestCase extends PlatformTestCase {
     UIUtil.dispatchAllInvocationEvents();
 
     Project[] projects = myProjectManager.getOpenProjects();
-    assertEquals(2, projects.length);
+    assertEquals(Arrays.asList(projects).toString(), 2, projects.length);
     return myCreatedProject;
   }
 
@@ -147,6 +149,7 @@ public abstract class ProjectWizardTestCase extends PlatformTestCase {
         }
       }
     });
+    SelectTemplateSettings.getInstance().setLastTemplate(null, null);
     super.tearDown();
   }
 

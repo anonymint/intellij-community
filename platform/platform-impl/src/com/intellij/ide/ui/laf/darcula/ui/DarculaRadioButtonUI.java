@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import com.intellij.ui.ColorUtil;
 import com.intellij.ui.Gray;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.GraphicsUtil;
+import com.intellij.util.ui.UIUtil;
 import sun.swing.SwingUtilities2;
 
 import javax.swing.*;
@@ -86,7 +87,8 @@ public class DarculaRadioButtonUI extends MetalRadioButtonUI {
 
     //setup AA for lines
     final GraphicsConfig config = GraphicsUtil.setupAAPainting(g);
-    g.setPaint(new GradientPaint(0, 0, ColorUtil.shift(c.getBackground(), 1.5), 0, c.getHeight(), ColorUtil.shift(c.getBackground(), 1.2)));
+    g.setPaint(
+      UIUtil.getGradientPaint(0, 0, ColorUtil.shift(c.getBackground(), 1.5), 0, c.getHeight(), ColorUtil.shift(c.getBackground(), 1.2)));
     g.fillOval(0, 1, w - 1, h - 1);
 
     if (b.hasFocus()) {
@@ -94,7 +96,7 @@ public class DarculaRadioButtonUI extends MetalRadioButtonUI {
       int sysOffY = SystemInfo.isMac ? 0 : -1;
       DarculaUIUtil.paintFocusOval(g, x-6  + sysOffX, y-3 + sysOffY, w-2, h-2);
     } else {
-      g.setPaint(new GradientPaint(w / 2, 1, Gray._160.withAlpha(90), w / 2, h, Gray._100.withAlpha(90)));
+      g.setPaint(UIUtil.getGradientPaint(w / 2, 1, Gray._160.withAlpha(90), w / 2, h, Gray._100.withAlpha(90)));
       g.drawOval(0, 2, w - 1, h - 1);
 
       g.setPaint(Gray._40.withAlpha(200));
@@ -102,9 +104,9 @@ public class DarculaRadioButtonUI extends MetalRadioButtonUI {
     }
 
     if (b.isSelected()) {
-      g.setColor(Gray._0.withAlpha(120));
+      g.setColor(b.isEnabled() ? Gray._30 : Gray._60);
       g.fillOval(w/2 - 3, h/2 - 1, 5, 5);
-      g.setColor(Gray._255.withAlpha(180));
+      g.setColor(b.isEnabled() ? Gray._170 : Gray._120);
       g.fillOval(w/2 - 3, h/2 - 2, 5, 5);
     }
     config.restore();

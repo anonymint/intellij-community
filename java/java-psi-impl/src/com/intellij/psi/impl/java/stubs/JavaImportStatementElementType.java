@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,40 +61,39 @@ public abstract class JavaImportStatementElementType extends JavaStubElementType
   }
 
   @Override
-  public PsiImportStatementStub createStub(final LighterAST tree,
-                                           final LighterASTNode node,
-                                           final StubElement parentStub) {
+  public PsiImportStatementStub createStub(LighterAST tree, LighterASTNode node, StubElement parentStub) {
     boolean isOnDemand = false;
     String refText = null;
 
-    for (final LighterASTNode child : tree.getChildren(node)) {
-      final IElementType type = child.getTokenType();
+    for (LighterASTNode child : tree.getChildren(node)) {
+      IElementType type = child.getTokenType();
       if (type == JavaElementType.JAVA_CODE_REFERENCE || type == JavaElementType.IMPORT_STATIC_REFERENCE) {
-        refText = SourceUtil.getTextSkipWhiteSpaceAndComments(tree, child);
+        refText = SourceUtil.getReferenceText(tree, child);
       }
       else if (type == JavaTokenType.ASTERISK) {
         isOnDemand = true;
       }
     }
 
-    final byte flags = PsiImportStatementStubImpl.packFlags(isOnDemand, node.getTokenType() == JavaElementType.IMPORT_STATIC_STATEMENT);
+    byte flags = PsiImportStatementStubImpl.packFlags(isOnDemand, node.getTokenType() == JavaElementType.IMPORT_STATIC_STATEMENT);
     return new PsiImportStatementStubImpl(parentStub, refText, flags);
   }
 
   @Override
-  public void serialize(final PsiImportStatementStub stub, final StubOutputStream dataStream) throws IOException {
+  public void serialize(@NotNull final PsiImportStatementStub stub, @NotNull final StubOutputStream dataStream) throws IOException {
     dataStream.writeByte(((PsiImportStatementStubImpl)stub).getFlags());
     dataStream.writeName(stub.getImportReferenceText());
   }
 
+  @NotNull
   @Override
-  public PsiImportStatementStub deserialize(final StubInputStream dataStream, final StubElement parentStub) throws IOException {
+  public PsiImportStatementStub deserialize(@NotNull final StubInputStream dataStream, final StubElement parentStub) throws IOException {
     final byte flags = dataStream.readByte();
     final StringRef refText = dataStream.readName();
     return new PsiImportStatementStubImpl(parentStub, refText, flags);
   }
 
   @Override
-  public void indexStub(final PsiImportStatementStub stub, final IndexSink sink) {
+  public void indexStub(@NotNull final PsiImportStatementStub stub, @NotNull final IndexSink sink) {
   }
 }

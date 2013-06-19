@@ -21,6 +21,7 @@ import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ModalityStateListener;
+import com.intellij.openapi.diagnostic.FrequentEventDetector;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -50,6 +51,7 @@ public class LaterInvocator {
 
   public static final Object LOCK = new Object(); //public for tests
   private static final IdeEventQueue ourEventQueue = IdeEventQueue.getInstance();
+  private static final FrequentEventDetector ourFrequentEventDetector = new FrequentEventDetector(1009, 100);
 
   private LaterInvocator() {
   }
@@ -76,7 +78,7 @@ public class LaterInvocator {
     }
   }
 
-  private static final List<Object> ourModalEntities = ContainerUtil.createEmptyCOWList();
+  private static final List<Object> ourModalEntities = ContainerUtil.createLockFreeCopyOnWriteList();
   private static final List<RunnableInfo> ourQueue = new ArrayList<RunnableInfo>(); //protected by LOCK
   private static volatile int ourQueueSkipCount = 0; // optimization
   private static final Runnable ourFlushQueueRunnable = new FlushQueue();
@@ -148,6 +150,8 @@ public class LaterInvocator {
   public static ActionCallback invokeLater(@NotNull Runnable runnable,
                                            @NotNull ModalityState modalityState,
                                            @NotNull Condition<Object> expired) {
+    ourFrequentEventDetector.eventHappened();
+
     final ActionCallback callback = new ActionCallback();
     synchronized (LOCK) {
       ourQueue.add(new RunnableInfo(runnable, modalityState, expired, callback));

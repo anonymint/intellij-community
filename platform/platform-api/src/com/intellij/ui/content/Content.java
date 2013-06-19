@@ -28,6 +28,8 @@ import javax.swing.*;
 import java.beans.PropertyChangeListener;
 
 /**
+ * Represents a tab or pane displayed in a toolwindow or in another content manager.
+ *
  * @see ContentFactory#createContent(javax.swing.JComponent, String, boolean)
  */
 public interface Content extends UserDataHolder, ComponentContainer {
@@ -93,6 +95,7 @@ public interface Content extends UserDataHolder, ComponentContainer {
 
   void setPinned(boolean locked);
   boolean isPinnable();
+  void setPinnable(boolean pinnable);
 
   boolean isCloseable();
   void setCloseable(boolean closeable);
@@ -119,4 +122,10 @@ public interface Content extends UserDataHolder, ComponentContainer {
 
   void setPopupIcon(Icon icon);
   Icon getPopupIcon();
+
+  /**
+   * @param executionId supposed to identify group of contents (for example "Before Launch" tasks and the main Run Configuration)
+   */
+  void setExecutionId(long executionId);
+  long getExecutionId();
 }

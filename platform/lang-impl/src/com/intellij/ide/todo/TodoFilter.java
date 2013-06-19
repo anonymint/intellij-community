@@ -20,6 +20,8 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.PsiTodoSearchHelper;
 import com.intellij.psi.search.TodoPattern;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -111,19 +113,6 @@ public class TodoFilter implements Cloneable{
   }
 
   /**
-   * @return index of specified <code>pattern</code> in the array of <code>patterns</code>.
-   * Returns <code>-1</code> if <code>pattern</code> not found.
-   */
-  private static int getPatterIndex(TodoPattern pattern,TodoPattern[] patterns){
-    for(int i=0;i<patterns.length;i++){
-      if(pattern.equals(patterns[i])){
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  /**
    * @param element with filter's data.
    * @param patterns all available patterns
    */
@@ -158,10 +147,10 @@ public class TodoFilter implements Cloneable{
    * @param element in which all data will be stored
    * @param patterns all available patterns
    */
-  public void writeExternal(Element element,TodoPattern[] patterns){
+  public void writeExternal(Element element, TodoPattern[] patterns){
     element.setAttribute(ATTRIBUTE_NAME,myName);
     for (TodoPattern pattern : myTodoPatterns) {
-      int index = getPatterIndex(pattern, patterns);
+      int index = ArrayUtilRt.find(patterns, pattern);
       LOG.assertTrue(index != -1);
       Element child = new Element(ELEMENT_PATTERN);
       child.setAttribute(ATTRIBUTE_INDEX, Integer.toString(index));
@@ -200,6 +189,7 @@ public class TodoFilter implements Cloneable{
     return true;
   }
 
+  @Override
   public TodoFilter clone(){
     try{
       TodoFilter filter = (TodoFilter)super.clone();

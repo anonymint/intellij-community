@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.impl.DirectoryIndex;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NotNullLazyValue;
@@ -55,7 +56,7 @@ public class FileStatusManagerImpl extends FileStatusManager implements ProjectC
   private final Map<VirtualFile, Boolean> myWhetherExactlyParentToChanged =
     Collections.synchronizedMap(new HashMap<VirtualFile, Boolean>());
   private final Project myProject;
-  private final List<FileStatusListener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<FileStatusListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private FileStatusProvider myFileStatusProvider;
   private final NotNullLazyValue<FileStatusProvider[]> myExtensions = new NotNullLazyValue<FileStatusProvider[]>() {
     @NotNull
@@ -89,9 +90,28 @@ public class FileStatusManagerImpl extends FileStatusManager implements ProjectC
     }
   }
 
-  public FileStatusManagerImpl(Project project, StartupManager startupManager) {
+  public FileStatusManagerImpl(Project project, StartupManager startupManager,
+                               @SuppressWarnings("UnusedParameters") DirectoryIndex makeSureIndexIsInitializedFirst) {
     myProject = project;
 
+    startupManager.registerPreStartupActivity(new Runnable() {
+      @Override
+      public void run() {
+        DocumentAdapter documentListener = new DocumentAdapter() {
+          public void documentChanged(DocumentEvent event) {
+            VirtualFile file = FileDocumentManager.getInstance().getFile(event.getDocument());
+            if (file != null) {
+              refreshFileStatusFromDocument(file, event.getDocument());
+            }
+          }
+        };
+
+        final EditorFactory factory = EditorFactory.getInstance();
+        if (factory != null) {
+          factory.getEventMulticaster().addDocumentListener(documentListener, myProject);
+        }
+      }
+    });
     startupManager.registerPostStartupActivity(new DumbAwareRunnable() {
       public void run() {
         fileStatusesChanged();
@@ -119,26 +139,13 @@ public class FileStatusManagerImpl extends FileStatusManager implements ProjectC
   }
 
   public static FileStatus getDefaultStatus(@NotNull final VirtualFile file) {
-    return file.isValid() && file.isSpecialFile() ? FileStatus.IGNORED : FileStatus.NOT_CHANGED;
+    return file.isValid() && file.is(VirtualFile.PROP_SPECIAL) ? FileStatus.IGNORED : FileStatus.NOT_CHANGED;
   }
 
   public void projectClosed() {
   }
 
   public void projectOpened() {
-    DocumentAdapter documentListener = new DocumentAdapter() {
-      public void documentChanged(DocumentEvent event) {
-        VirtualFile file = FileDocumentManager.getInstance().getFile(event.getDocument());
-        if (file != null) {
-          refreshFileStatusFromDocument(file, event.getDocument());
-        }
-      }
-    };
-
-    final EditorFactory factory = EditorFactory.getInstance();
-    if (factory != null) {
-      factory.getEventMulticaster().addDocumentListener(documentListener, myProject);
-    }
   }
 
   public void disposeComponent() {

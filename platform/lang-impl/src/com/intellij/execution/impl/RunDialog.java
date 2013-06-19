@@ -28,6 +28,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -56,22 +57,28 @@ public class RunDialog extends DialogWrapper implements RunConfigurable.RunDialo
     myConfigurable.reset();
   }
 
+  @Override
+  @NotNull
   protected Action[] createActions(){
     return new Action[]{getOKAction(),getCancelAction(),new ApplyAction(),getHelpAction()};
   }
 
+  @Override
   protected void doHelpAction() {
     HelpManager.getInstance().invokeHelp(HELP_ID);
   }
 
+  @Override
   protected String getDimensionServiceKey(){
     return "#com.intellij.execution.impl.RunDialog";
   }
 
+  @Override
   public JComponent getPreferredFocusedComponent() {
     return IdeFocusTraversalPolicy.getPreferredFocusedComponent(myCenterPanel);
   }
 
+  @Override
   protected void doOKAction(){
     try{
       myConfigurable.apply();
@@ -83,6 +90,7 @@ public class RunDialog extends DialogWrapper implements RunConfigurable.RunDialo
     super.doOKAction();
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     myCenterPanel = myConfigurable.createComponent();
     return myCenterPanel;
@@ -93,6 +101,7 @@ public class RunDialog extends DialogWrapper implements RunConfigurable.RunDialo
     super.setOKActionEnabled(isEnabled);
   }
 
+  @Override
   protected void dispose() {
     myConfigurable.disposeUIResources();
     super.dispose();
@@ -110,7 +119,7 @@ public class RunDialog extends DialogWrapper implements RunConfigurable.RunDialo
         if (executor != null) setOKButtonIcon(executor.getIcon());
       }
     };
-    
+
     dialog.setTitle(title);
     dialog.show();
     return dialog.isOK();
@@ -121,6 +130,7 @@ public class RunDialog extends DialogWrapper implements RunConfigurable.RunDialo
       super(ExecutionBundle.message("apply.action.name"));
     }
 
+    @Override
     public void actionPerformed(final ActionEvent event) {
       try{
         myConfigurable.apply();

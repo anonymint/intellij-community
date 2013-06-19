@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,6 +66,7 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
   public int ANIMATION_SPEED = 2000; // Pixels per second
   public boolean SHOW_TOOL_WINDOW_NUMBERS = true;
   public boolean HIDE_TOOL_STRIPES = false;
+  public boolean WIDESCREEN_SUPPORT = false;
   public boolean SHOW_MEMORY_INDICATOR = true;
   public boolean ALLOW_MERGE_BUTTONS = true;
   public boolean SHOW_MAIN_TOOLBAR = true;
@@ -91,11 +92,15 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
   public boolean SHOW_ICONS_IN_MENUS = true;
   public boolean DISABLE_MNEMONICS = SystemInfo.isMac; // IDEADEV-33409, should be disabled by default on MacOS
   public boolean DISABLE_MNEMONICS_IN_CONTROLS = false;
+  public boolean USE_SMALL_LABELS_ON_TABS = SystemInfo.isMac;
   public boolean SORT_LOOKUP_ELEMENTS_LEXICOGRAPHICALLY = false;
   public int MAX_LOOKUP_WIDTH2 = 500;
   public int MAX_LOOKUP_LIST_HEIGHT = 11;
   public boolean HIDE_NAVIGATION_ON_FOCUS_LOSS = true;
   public boolean FILE_COLORS_IN_PROJECT_VIEW = false;
+  public boolean DEFAULT_AUTOSCROLL_TO_SOURCE = false;
+  public boolean PRESENTATION_MODE = false;
+  public int PRESENTATION_MODE_FONT_SIZE = 24;
 
   /**
    * Defines whether asterisk is shown on modified editor tab or not
@@ -260,15 +265,18 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
     fireUISettingsChanged();
   }
 
-  private static final boolean DEFAULT_ALIASING = SystemProperties.getBooleanProperty("idea.use.default.antialiasing.in.editor", false);
+  private static final boolean DEFAULT_ALIASING             =
+    SystemProperties.getBooleanProperty("idea.use.default.antialiasing.in.editor", false);
+  private static final boolean FORCE_USE_FRACTIONAL_METRICS =
+    SystemProperties.getBooleanProperty("idea.force.use.fractional.metrics", false);
 
   public static void setupAntialiasing(final Graphics g) {
     if (DEFAULT_ALIASING) return;
 
-    Graphics2D g2d=(Graphics2D)g;
-    UISettings uiSettings=getInstance();
+    Graphics2D g2d = (Graphics2D)g;
+    UISettings uiSettings = getInstance();
 
-    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_OFF);
+    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
     if (!isRemoteDesktopConnected() && UIUtil.isRetina()) {
       g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
     }
@@ -288,6 +296,9 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
         else {
           g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         }
+        if (FORCE_USE_FRACTIONAL_METRICS) {
+          g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        }
       }
       else {
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
@@ -300,7 +311,7 @@ public class UISettings implements PersistentStateComponent<UISettings>, Exporta
    */
   // TODO[neuro]: move to UIUtil
   public static boolean isRemoteDesktopConnected() {
-    if(System.getProperty("os.name").contains("Windows")) {
+    if (System.getProperty("os.name").contains("Windows")) {
       final Map map = (Map)Toolkit.getDefaultToolkit().getDesktopProperty("awt.font.desktophints");
       return map != null && RenderingHints.VALUE_TEXT_ANTIALIAS_DEFAULT.equals(map.get(RenderingHints.KEY_TEXT_ANTIALIASING));
     }

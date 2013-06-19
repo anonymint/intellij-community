@@ -20,6 +20,7 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileWithId;
+import com.intellij.psi.impl.PsiFileEx;
 import com.intellij.psi.stubs.ObjectStubTree;
 import com.intellij.psi.stubs.StubTreeLoader;
 import com.intellij.psi.xml.XmlFile;
@@ -114,7 +115,7 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
 
     VirtualFile file = myXmlFile.getVirtualFile();
     FileStub stub = null;
-    if (description.hasStubs() && file instanceof VirtualFileWithId) {
+    if (description.hasStubs() && file instanceof VirtualFileWithId && !isFileParsed()) {
       ApplicationManager.getApplication().assertReadAccessAllowed();
       if (!XmlUtil.isStubBuilding(myXmlFile)) {
         ObjectStubTree stubTree = StubTreeLoader.getInstance().readOrBuild(myXmlFile.getProject(), file, myXmlFile);
@@ -135,6 +136,10 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
     return result;
   }
 
+  private boolean isFileParsed() {
+    return myXmlFile instanceof PsiFileEx && ((PsiFileEx)myXmlFile).isContentsLoaded();
+  }
+
   @Nullable
   private DomFileDescription<T> findFileDescription(final XmlFileHeader rootTagName, @Nullable StringBuilder sb) {
     final DomFileDescription<T> mockDescription = myXmlFile.getUserData(DomManagerImpl.MOCK_DESCRIPTION);
@@ -148,7 +153,7 @@ class FileDescriptionCachedValueProvider<T extends DomElement> implements SemEle
     if (sb != null) {
       sb.append("original: " + originalFile + "\n");
     }
-    if (originalFile != myXmlFile) {
+    if (!originalFile.equals(myXmlFile)) {
       final FileDescriptionCachedValueProvider<T> provider = myDomManager.getOrCreateCachedValueProvider(originalFile);
       final DomFileElementImpl<T> element = provider.getFileElement();
       if (sb != null) {

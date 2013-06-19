@@ -26,10 +26,10 @@ import java.util.Iterator;
 /**
  * @author dyoma
  */
-class FilterInfo implements JDOMExternalizable {
-  @NonNls private static final String FILTER_NAME="NAME";
-  @NonNls private static final String FILTER_DESCRIPTION="DESCRIPTION";
-  @NonNls private static final String FILTER_REGEXP="REGEXP";
+public class FilterInfo implements JDOMExternalizable {
+  @NonNls private static final String FILTER_NAME = "NAME";
+  @NonNls private static final String FILTER_DESCRIPTION = "DESCRIPTION";
+  @NonNls private static final String FILTER_REGEXP = "REGEXP";
 
   private String myName = ToolsBundle.message("tools.filters.name.default");
   private String myDescription;
@@ -38,7 +38,8 @@ class FilterInfo implements JDOMExternalizable {
   @NonNls private static final String ATTRIBUTE_VALUE = "value";
   @NonNls private static final String ATTRIBUTE_NAME = "name";
 
-  public FilterInfo() {}
+  public FilterInfo() {
+  }
 
   public FilterInfo(String regExp, String name, String description) {
     myRegExp = regExp;
@@ -88,6 +89,7 @@ class FilterInfo implements JDOMExternalizable {
     return new FilterInfo(myRegExp, myName, myDescription);
   }
 
+  @Override
   public void readExternal(Element element) {
     for (Iterator i2 = element.getChildren(ELEMENT_OPTION).iterator(); i2.hasNext(); ) {
       Element optionElement = (Element)i2.next();
@@ -108,25 +110,26 @@ class FilterInfo implements JDOMExternalizable {
     }
   }
 
+  @Override
   public void writeExternal(Element filterElement) {
     Element option = new Element(ELEMENT_OPTION);
     filterElement.addContent(option);
     option.setAttribute(ATTRIBUTE_NAME, FILTER_NAME);
-    if (myName != null ) {
+    if (myName != null) {
       option.setAttribute(ATTRIBUTE_VALUE, myName);
     }
 
     option = new Element(ELEMENT_OPTION);
     filterElement.addContent(option);
     option.setAttribute(ATTRIBUTE_NAME, FILTER_DESCRIPTION);
-    if (myDescription != null ) {
+    if (myDescription != null) {
       option.setAttribute(ATTRIBUTE_VALUE, myDescription);
     }
 
     option = new Element(ELEMENT_OPTION);
     filterElement.addContent(option);
     option.setAttribute(ATTRIBUTE_NAME, FILTER_REGEXP);
-    if (myRegExp != null ) {
+    if (myRegExp != null) {
       option.setAttribute(ATTRIBUTE_VALUE, myRegExp);
     }
   }

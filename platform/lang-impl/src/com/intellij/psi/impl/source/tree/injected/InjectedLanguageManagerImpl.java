@@ -120,6 +120,7 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
   public void dispose() {
   }
 
+  @Override
   public void startRunInjectors(@NotNull final Document hostDocument, final boolean synchronously) {
     if (myProject.isDisposed()) return;
     if (!synchronously && ApplicationManager.getApplication().isWriteAccessAllowed()) return;
@@ -299,21 +300,17 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
   }
 
 
-  static final Key<String> UNESCAPED_TEXT = Key.create("INJECTED_UNESCAPED_TEXT");
   @Override
-  public String getUnescapedText(@NotNull final PsiElement injectedNode) {
+  public String
+  getUnescapedText(@NotNull final PsiElement injectedNode) {
     final StringBuilder text = new StringBuilder(injectedNode.getTextLength());
     // gather text from (patched) leaves
     injectedNode.accept(new PsiRecursiveElementWalkingVisitor() {
       @Override
       public void visitElement(PsiElement element) {
-        String unescaped = element.getCopyableUserData(UNESCAPED_TEXT);
-        if (unescaped != null) {
-          text.append(unescaped);
-          return;
-        }
-        if (element.getFirstChild() == null) {
-          text.append(element.getText());
+        String leafText = InjectedLanguageUtil.getUnescapedLeafText(element, false);
+        if (leafText != null) {
+          text.append(leafText);
           return;
         }
         super.visitElement(element);
@@ -387,6 +384,17 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
     InjectedLanguageUtil.clearCachedInjectedFragmentsForFile(file);
   }
 
+  @Override
+  public PsiFile getTopLevelFile(@NotNull PsiElement element) {
+    return InjectedLanguageUtil.getTopLevelFile(element);
+  }
+
+  @NotNull
+  @Override
+  public List<DocumentWindow> getCachedInjectedDocuments(@NotNull PsiFile hostPsiFile) {
+    return InjectedLanguageUtil.getCachedInjectedDocuments(hostPsiFile);
+  }
+
   private final Map<Class,MultiHostInjector[]> myInjectorsClone = new HashMap<Class, MultiHostInjector[]>();
   @TestOnly
   public static void pushInjectors(@NotNull Project project) {
@@ -403,7 +411,9 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
   @TestOnly
   public static void checkInjectorsAreDisposed(@NotNull Project project) {
     InjectedLanguageManagerImpl cachedManager = (InjectedLanguageManagerImpl)project.getUserData(INSTANCE_CACHE);
-    if (cachedManager == null) return;
+    if (cachedManager == null) {
+      return;
+    }
     try {
       for (Map.Entry<Class, MultiHostInjector[]> entry : cachedManager.injectors.entrySet()) {
         Class key = entry.getKey();

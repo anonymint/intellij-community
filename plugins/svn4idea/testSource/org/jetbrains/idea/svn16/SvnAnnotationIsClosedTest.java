@@ -15,10 +15,6 @@
  */
 package org.jetbrains.idea.svn16;
 
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
-import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.VcsException;
@@ -27,14 +23,10 @@ import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.VcsAnnotationLocalChangesListener;
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
-import com.intellij.openapi.vcs.ex.ProjectLevelVcsManagerEx;
 import com.intellij.openapi.vcs.history.VcsRevisionDescription;
-import com.intellij.openapi.vcs.update.CommonUpdateProjectAction;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import junit.framework.Assert;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.Svn17TestCase;
 import org.jetbrains.idea.svn.SvnDiffProvider;
 import org.jetbrains.idea.svn.SvnRevisionNumber;
@@ -118,7 +110,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     checkin();  //#2
     editFileInCommand(myProject, tree.myS1File, "1\n2\n3**\n4\n");
     checkin();  //#3
-    verify(runSvn("up", "-r", "2"));
+    runInAndVerifyIgnoreOutput("up", "-r", "2");
 
     final VcsAnnotationLocalChangesListener listener = ProjectLevelVcsManager.getInstance(myProject).getAnnotationLocalChangesListener();
     final FileAnnotation annotation = myVcs.getAnnotationProvider().annotate(tree.myS1File);
@@ -134,24 +126,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     myDirtyScopeManager.markEverythingDirty();
     myChangeListManager.ensureUpToDate(false);
 
-    ProjectLevelVcsManagerEx.getInstanceEx(myProject).getOptions(VcsConfiguration.StandardOption.UPDATE).setValue(false);
-    final CommonUpdateProjectAction action = new CommonUpdateProjectAction();
-    action.getTemplatePresentation().setText("1");
-    action.actionPerformed(new AnActionEvent(null,
-                                             new DataContext() {
-                                               @Nullable
-                                               @Override
-                                               public Object getData(@NonNls String dataId) {
-                                                 if (PlatformDataKeys.PROJECT.is(dataId)) {
-                                                   return myProject;
-                                                 }
-                                                 return null;
-                                               }
-                                             }, "test", new Presentation(), null, 0));
-
-    myChangeListManager.ensureUpToDate(false);
-    myChangeListManager.ensureUpToDate(false);  // wait for after-events like annotations recalculation
-    sleep(100); // zipper updater
+    imitUpdate(myProject);
     Assert.assertTrue(myIsClosed);
   }
 
@@ -163,7 +138,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     checkin();  //#2
     editFileInCommand(myProject, tree.myS1File, "1\n2\n3**\n4\n");
     checkin();  //#3
-    verify(runSvn("up", "-r", "2"));  // take #2
+    runInAndVerifyIgnoreOutput("up", "-r", "2");  // take #2
 
     final VcsAnnotationLocalChangesListener listener = ProjectLevelVcsManager.getInstance(myProject).getAnnotationLocalChangesListener();
     final FileAnnotation annotation = myVcs.getAnnotationProvider().annotate(tree.myS1File);
@@ -181,24 +156,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     myChangeListManager.ensureUpToDate(false);
     Assert.assertFalse(myIsClosed);
 
-    ProjectLevelVcsManagerEx.getInstanceEx(myProject).getOptions(VcsConfiguration.StandardOption.UPDATE).setValue(false);
-    final CommonUpdateProjectAction action = new CommonUpdateProjectAction();
-    action.getTemplatePresentation().setText("1");
-    action.actionPerformed(new AnActionEvent(null,
-                                             new DataContext() {
-                                               @Nullable
-                                               @Override
-                                               public Object getData(@NonNls String dataId) {
-                                                 if (PlatformDataKeys.PROJECT.is(dataId)) {
-                                                   return myProject;
-                                                 }
-                                                 return null;
-                                               }
-                                             }, "test", new Presentation(), null, 0));
-
-    myChangeListManager.ensureUpToDate(false);
-    myChangeListManager.ensureUpToDate(false);  // wait for after-events like annotations recalculation
-    sleep(100); // zipper updater
+    imitUpdate(myProject);
     Assert.assertTrue(myIsClosed);
   }
 
@@ -210,7 +168,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     checkin();  //#2
     editFileInCommand(myProject, tree.myS1File, "1\n2\n3**\n4\n");
     checkin();  //#3
-    verify(runSvn("up", "-r", "2"));  // take #2
+    runInAndVerifyIgnoreOutput("up", "-r", "2");  // take #2
 
     final VcsAnnotationLocalChangesListener listener = ProjectLevelVcsManager.getInstance(myProject).getAnnotationLocalChangesListener();
     final FileAnnotation annotation = myVcs.getAnnotationProvider().annotate(tree.myS1File);
@@ -360,19 +318,19 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
 
     final File sourceDir = new File(myWorkingCopyDir.getPath(), "source");
     final File externalDir = new File(myWorkingCopyDir.getPath(), "source/external");
-    verify(runSvn("ci", "-m", "test", sourceDir.getPath()));   // #3
-    verify(runSvn("ci", "-m", "test", externalDir.getPath())); // #4
+    runInAndVerifyIgnoreOutput("ci", "-m", "test", sourceDir.getPath());   // #3
+    runInAndVerifyIgnoreOutput("ci", "-m", "test", externalDir.getPath()); // #4
 
     editFileInCommand(myProject, vf2, "test externals 12344444" + System.currentTimeMillis());
-    verify(runSvn("ci", "-m", "test", externalDir.getPath())); // #5
+    runInAndVerifyIgnoreOutput("ci", "-m", "test", externalDir.getPath()); // #5
 
     final SvnDiffProvider diffProvider = (SvnDiffProvider) myVcs.getDiffProvider();
 
     assertRevision(vf1, diffProvider, 3);
     assertRevision(vf2, diffProvider, 5);
 
-    verify(runSvn("up", "-r", "4", sourceDir.getPath()));
-    verify(runSvn("up", "-r", "4", externalDir.getPath()));
+    runInAndVerifyIgnoreOutput("up", "-r", "4", sourceDir.getPath());
+    runInAndVerifyIgnoreOutput("up", "-r", "4", externalDir.getPath());
 
     assertRevision(vf1, diffProvider, 3);
     assertRevision(vf2, diffProvider, 4);
@@ -400,7 +358,7 @@ public class SvnAnnotationIsClosedTest extends Svn17TestCase {
     listener.registerAnnotation(vf1, annotation1);
 
     //up
-    verify(runSvn("up", sourceDir.getPath()));
+    runInAndVerifyIgnoreOutput("up", sourceDir.getPath());
     imitateEvent(lfs.refreshAndFindFileByIoFile(sourceDir));
     imitateEvent(lfs.refreshAndFindFileByIoFile(externalDir));
     myChangeListManager.ensureUpToDate(false);

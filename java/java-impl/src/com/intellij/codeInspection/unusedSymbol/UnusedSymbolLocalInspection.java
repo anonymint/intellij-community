@@ -21,8 +21,9 @@ import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.BaseJavaLocalInspectionTool;
+import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.codeInspection.ex.EntryPointsManagerImpl;
-import com.intellij.codeInspection.ex.UnfairLocalInspectionTool;
+import com.intellij.codeInspection.ex.PairedUnfairLocalInspectionTool;
 import com.intellij.codeInspection.util.SpecialAnnotationsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiModifierListOwner;
@@ -41,7 +42,7 @@ import java.awt.event.ActionListener;
  * User: anna
  * Date: 17-Feb-2006
  */
-public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool implements UnfairLocalInspectionTool {
+public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool implements PairedUnfairLocalInspectionTool {
 
   @NonNls public static final String SHORT_NAME = HighlightInfoType.UNUSED_SYMBOL_SHORT_NAME;
   @NonNls public static final String DISPLAY_NAME = HighlightInfoType.UNUSED_SYMBOL_DISPLAY_NAME;
@@ -54,22 +55,26 @@ public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool imp
   public boolean REPORT_PARAMETER_FOR_PUBLIC_METHODS = true;
 
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return GroupNames.DECLARATION_REDUNDANCY;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return DISPLAY_NAME;
   }
 
+  @Override
   @NotNull
   @NonNls
   public String getShortName() {
     return SHORT_NAME;
   }
 
+  @Override
   @Pattern(VALID_ID_PATTERN)
   @NotNull
   @NonNls
@@ -82,8 +87,14 @@ public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool imp
     return "unused";
   }
 
+  @Override
   public boolean isEnabledByDefault() {
     return true;
+  }
+
+  @Override
+  public String getInspectionForBatchShortName() {
+    return UnusedDeclarationInspection.SHORT_NAME;
   }
 
   public class OptionsPanel {
@@ -107,6 +118,7 @@ public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool imp
       myReportUnusedParametersInPublics.setEnabled(PARAMETER);
 
       final ActionListener listener = new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           LOCAL_VARIABLE = myCheckLocalVariablesCheckBox.isSelected();
           CLASS = myCheckClassesCheckBox.isSelected();
@@ -134,6 +146,7 @@ public class UnusedSymbolLocalInspection extends BaseJavaLocalInspectionTool imp
     }
   }
 
+  @Override
   @Nullable
   public JComponent createOptionsPanel() {
     return new OptionsPanel().getPanel();

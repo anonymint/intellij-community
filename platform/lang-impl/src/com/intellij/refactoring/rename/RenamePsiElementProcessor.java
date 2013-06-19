@@ -60,6 +60,11 @@ public abstract class RenamePsiElementProcessor {
   }
 
   @NotNull
+  public Collection<PsiReference> findReferences(final PsiElement element, boolean searchInCommentsAndStrings) {
+    return findReferences(element);
+  }
+
+  @NotNull
   public Collection<PsiReference> findReferences(final PsiElement element) {
     return ReferencesSearch.search(element).findAll();
   }
@@ -89,6 +94,10 @@ public abstract class RenamePsiElementProcessor {
   }
 
   public void findExistingNameConflicts(final PsiElement element, final String newName, final MultiMap<PsiElement,String> conflicts) {
+  }
+  
+  public void findExistingNameConflicts(final PsiElement element, final String newName, final MultiMap<PsiElement,String> conflicts, Map<PsiElement, String> allRenames) {
+    findExistingNameConflicts(element, newName, conflicts);
   }
 
   public boolean isInplaceRenameSupported() {
@@ -182,8 +191,9 @@ public abstract class RenamePsiElementProcessor {
   public void findCollisions(final PsiElement element, final String newName, final Map<? extends PsiElement, String> allRenames,
                              final List<UsageInfo> result) {
   }
-  
+
   public static final RenamePsiElementProcessor DEFAULT = new RenamePsiElementProcessor() {
+    @Override
     public boolean canProcessElement(@NotNull final PsiElement element) {
       return true;
     }

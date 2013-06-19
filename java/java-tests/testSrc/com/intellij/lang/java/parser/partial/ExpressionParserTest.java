@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,6 +76,7 @@ public class ExpressionParserTest extends JavaParsingTestCase {
   public void testNew14() { doParserTest("Q.new A()"); }
   public void testNew15() { doParserTest("new C<?>.B()"); }
   public void testNew16() { doParserTest("new C<>()"); }
+  public void testNew17() { doParserTest("new Map<String, >()"); }
 
   public void testExprList0() { doParserTest("f(1,2)"); }
   public void testExprList1() { doParserTest("f("); }
@@ -109,11 +110,14 @@ public class ExpressionParserTest extends JavaParsingTestCase {
 
   public void testQualifiedSuperMethodCall0() { doParserTest("new D().super(0)"); }
   public void testQualifiedSuperMethodCall1() { doParserTest("d.super(0)"); }
+  public void testQualifiedSuperMethodCall2() { doParserTest("(new O()).<T>super()"); }
   public void testSuperMethodCallTypeParameterList() { doParserTest("super()"); }
   public void testPrimitiveClassObjectAccess() { doParserTest("int.class"); }
   public void testPrimitiveFieldAccess() { doParserTest("int.x"); }
   public void testChainedClassObjectAccess() { doParserTest("A.class.B.class"); }
   public void testChainedThisObjectAccess() { doParserTest("A.this.B.this"); }
+  public void testAnnotatedRefExpr0() { doParserTest("@A C1.@B() C2"); }
+  public void testAnnotatedRefExpr1() { doParserTest("@A C1.@B() ()"); }
 
   public void testMethodRef0() { doParserTest("a.b.C::m"); }
   public void testMethodRef1() { doParserTest("a.b.C<T>::new"); }

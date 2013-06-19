@@ -29,11 +29,9 @@ import com.intellij.openapi.vcs.impl.CurrentRevisionProvider;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.wc.SVNRevision;
-import org.tmatesoft.svn.core.wc.SVNWCClient;
+import org.tmatesoft.svn.core.wc.SVNStatus;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 
@@ -57,7 +55,12 @@ public class SvnContentRevision implements ContentRevision, MarkerVcsContentRevi
     myFile = file;
   }
 
-  public static SvnContentRevision createBaseRevision(@NotNull SvnVcs vcs, @NotNull final FilePath file, final SVNRevision revision) {
+  public static SvnContentRevision createBaseRevision(@NotNull SvnVcs vcs, @NotNull final FilePath file, final SVNStatus status) {
+    SVNRevision revision = status.getRevision().isValid() ? status.getRevision() : status.getCommittedRevision();
+    return createBaseRevision(vcs, file, revision);
+  }
+
+  public static SvnContentRevision createBaseRevision(SvnVcs vcs, FilePath file, SVNRevision revision) {
     if (file.getFileType().isBinary()) {
       return new SvnBinaryContentRevision(vcs, file, revision, true);
     }
@@ -110,29 +113,7 @@ public class SvnContentRevision implements ContentRevision, MarkerVcsContentRevi
     if (lock.exists()) {
       throw new VcsException("Can not access file base revision contents: administrative area is locked");
     }
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-    SVNWCClient wcClient = myVcs.createWCClient();
-    try {
-      wcClient.doGetFileContents(file, SVNRevision.UNDEFINED, myUseBaseRevision ? SVNRevision.BASE : myRevision, true, buffer);
-      buffer.close();
-    }
-    catch (SVNException e) {
-      /*try {
-        final SVNInfo info = wcClient.doInfo(file, SVNRevision.UNDEFINED);
-        //todo
-      }
-      catch (SVNException e1) {
-        throw new VcsException(e);
-      }*/
-      throw new VcsException(e);
-    }
-    catch (IOException e) {
-      throw new VcsException(e);
-    }
-    final byte[] bytes = buffer.toByteArray();
-    /*final Charset charset = myFile.getCharset();
-    return charset == null ? bytes : SvnUtil.decode(charset, bytes);*/
-    return bytes;
+    return SvnUtil.getFileContents(myVcs, file.getPath(), false, myUseBaseRevision ? SVNRevision.BASE : myRevision, SVNRevision.UNDEFINED);
   }
 
   @NotNull

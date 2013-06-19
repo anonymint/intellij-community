@@ -123,7 +123,7 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
     }
   }
 
-  public void notifyStart(TestProxy root) {
+  public synchronized void notifyStart(TestProxy root) {
     myModel = new JUnitRunningModel(root, myConsoleProperties);
     Disposer.register(this, myModel);
   }
@@ -152,9 +152,9 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
     final String parentClass = currentTest.getInfo().getComment();
     TestProxy dynamicParent = myKnownDynamicParents.get(parentClass);
     if (dynamicParent == null) {
-      if (Comparing
-        .strEqual(parentClass, StringUtil.getQualifiedName(model.getRoot().getInfo().getComment(), model.getRoot().getName()))) {
-        dynamicParent = model.getRoot();
+      final TestProxy root = model.getRoot();
+      if (Comparing.strEqual(parentClass, StringUtil.getQualifiedName(root.getInfo().getComment(), root.getName()))) {
+        dynamicParent = root;
       }
       else {
         dynamicParent = new TestProxy(new ClassBasedInfo(DisplayTestInfoExtractor.FOR_CLASS) {
@@ -165,7 +165,7 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
           public void readFrom(ObjectReader reader) {
           }
         });
-        model.getRoot().addChild(dynamicParent);
+        root.addChild(dynamicParent);
       }
       myKnownDynamicParents.put(parentClass, dynamicParent);
     }
@@ -204,11 +204,11 @@ public class TestsPacketsReceiver implements OutputPacketProcessor, Disposable {
     }
   }
 
-  public boolean isRunning() {
+  public synchronized boolean isRunning() {
     return !myIsTerminated;
   }
 
-  public void setTerminated(boolean terminated) {
+  public synchronized void setTerminated(boolean terminated) {
     myIsTerminated = terminated;
   }
 

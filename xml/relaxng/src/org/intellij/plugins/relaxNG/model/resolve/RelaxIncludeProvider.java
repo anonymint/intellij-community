@@ -5,6 +5,7 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.impl.include.FileIncludeInfo;
 import com.intellij.psi.impl.include.FileIncludeProvider;
+import com.intellij.util.Consumer;
 import com.intellij.util.indexing.FileContent;
 import com.intellij.util.text.CharArrayUtil;
 import com.intellij.util.xml.NanoXmlUtil;
@@ -33,6 +34,12 @@ public class RelaxIncludeProvider extends FileIncludeProvider {
   public boolean acceptFile(VirtualFile file) {
     final FileType type = file.getFileType();
     return type == XmlFileType.INSTANCE || type == RncFileType.getInstance();
+  }
+
+  @Override
+  public void registerFileTypesUsedForIndexing(@NotNull Consumer<FileType> fileTypeSink) {
+    fileTypeSink.consume(XmlFileType.INSTANCE);
+    fileTypeSink.consume(RncFileType.getInstance());
   }
 
   @NotNull
@@ -81,7 +88,7 @@ public class RelaxIncludeProvider extends FileIncludeProvider {
       boolean isRngTag = ApplicationLoader.RNG_NAMESPACE.equals(nsURI);
       if (!isRNG) { // analyzing start tag
         if (!isRngTag) {
-          throw new NanoXmlUtil.ParserStoppedException();
+          stop();
         } else {
           isRNG = true;
         }

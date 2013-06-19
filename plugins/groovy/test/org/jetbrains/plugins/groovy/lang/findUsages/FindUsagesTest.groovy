@@ -1,5 +1,6 @@
 /*
- * Copyright 2000-2007 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -13,8 +14,7 @@
  * limitations under the License.
  */
 
-package org.jetbrains.plugins.groovy.lang.findUsages;
-
+package org.jetbrains.plugins.groovy.lang.findUsages
 
 import com.intellij.codeInsight.TargetElementUtilBase
 import com.intellij.find.FindManager
@@ -22,6 +22,7 @@ import com.intellij.find.findUsages.FindUsagesHandler
 import com.intellij.find.findUsages.FindUsagesManager
 import com.intellij.find.findUsages.FindUsagesOptions
 import com.intellij.find.impl.FindManagerImpl
+import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.DirectClassInheritorsSearch
 import com.intellij.psi.search.searches.MethodReferencesSearch
@@ -37,7 +38,6 @@ import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod
 import org.jetbrains.plugins.groovy.util.TestUtils
-import com.intellij.psi.*
 
 /**
  * @author ven
@@ -275,6 +275,157 @@ class A {
     def c = { it.startsWith("aaa") }
 }
 ''')
+  }
+
+  void 'test literal names'() {
+    doTest(1, '''\
+def 'f<caret>oo'() {}
+
+'foo'()
+''')
+  }
+
+  void 'test literal name with escaping'() {
+    doTest(1, '''\
+def 'f<caret>oo \\''() {}
+
+'foo \\''()
+''')
+  }
+
+  void 'test literal name with escaping and other quotes'() {
+    doTest(1, '''\
+def 'f<caret>oo \\''() {}
+
+"foo '"()
+''')
+  }
+
+  //todo
+  void '_test literal name with escaping and other quotes 2'() {
+    doTest(1, '''\
+def '<caret>\\''() {}
+
+"'"()
+''')
+  }
+
+
+  void testResolveBinding1() {
+    doTest(2, '''\
+abc = 4
+
+print ab<caret>c
+''')
+  }
+
+  void testResolveBinding2() {
+    doTest(2, '''\
+print ab<caret>c
+
+abc = 4
+''', )
+  }
+
+  void testResolveBinding3() {
+    doTest(2, '''\
+a<caret>bc = 4
+
+print abc
+''', )
+  }
+
+  void testResolveBinding4() {
+    doTest(2, '''\
+print abc
+
+a<caret>bc = 4
+''', )
+  }
+
+
+  void testResolveBinding5() {
+    doTest(2, '''\
+def foo() {
+  abc = 4
+}
+
+def bar() {
+  print ab<caret>c
+}
+''', )
+  }
+
+  void testResolveBinding6() {
+    doTest(2, '''\
+def foo() {
+  print ab<caret>c
+}
+
+def bar() {
+  abc = 4
+}
+''', )
+  }
+
+  void testResolveBinding7() {
+    doTest(2, '''\
+def foo() {
+  a<caret>bc = 4
+}
+
+def bar() {
+  print abc
+}
+''', )
+  }
+
+  void testResolveBinding8() {
+    doTest(2, '''\
+def foo() {
+  print abc
+}
+
+def bar() {
+  a<caret>bc = 4
+}
+''', )
+  }
+
+  void testBinding9() {
+    doTest(4, '''\
+a<caret>a = 5
+print aa
+aa = 6
+print aa
+''', )
+  }
+
+  void testBinding10() {
+    doTest(4, '''\
+aa = 5
+print a<caret>a
+aa = 6
+print aa
+''', )
+  }
+
+  void testBinding11() {
+    doTest(4, '''\
+aa = 5
+print aa
+a<caret>a = 6
+print aa
+''', )
+  }
+
+  void testBinding12() {
+    doTest(4, '''\
+aa = 5
+print aa
+aa = 6
+print a<caret>a
+''', )
   }
 
   private void doSuperMethodTest(String... firstParameterTypes) {

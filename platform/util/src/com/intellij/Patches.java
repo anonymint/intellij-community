@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,11 +75,6 @@ public class Patches {
   public static final boolean APPLE_BUG_ID_3716835 = SystemInfo.isMac && !SystemInfo.isJavaVersionAtLeast("1.4.2.5");
 
   /**
-   * Lion eAWT FullScreen mode leads to visual artifacts.
-   */
-  public static final boolean APPLE_BUG_ID_10207064 = SystemInfo.isMac && (!SystemInfo.isMacOSLeopard || !SystemInfo.isJavaVersionAtLeast("1.6.0_30"));
-
-  /**
    * Minimizing and restoring application via View | Minimize leads to visual artifacts.
    */
   public static final boolean APPLE_BUG_ID_10514018 = SystemInfo.isMac && !SystemInfo.isJavaVersionAtLeast("1.6.0_31");
@@ -103,4 +98,35 @@ public class Patches {
    * monitors exists
    */
   public static final boolean SUN_BUG_ID_6209673 = true;
+
+  /**
+   * Desktop API support on X Window is limited to GNOME (and even there it may work incorrectly).
+   * See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6486393.
+   */
+  public static final boolean SUN_BUG_ID_6486393 = SystemInfo.isXWindow;
+
+  /**
+   * Desktop API calls may crash on Windows.
+   * See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6457572.
+   */
+  public static final boolean SUN_BUG_ID_6457572 = SystemInfo.isWindows && !SystemInfo.isJavaVersionAtLeast("1.7");
+
+  /**
+   * Java 7 incorrectly calculates screen insets on multi-monitor X Window configurations.
+   * See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=9000030.
+   */
+  public static final boolean SUN_BUG_ID_9000030 = SystemInfo.isXWindow && SystemInfo.isJavaVersionAtLeast("1.7");
+
+  /**
+   * On some WMs modal dialogs may show behind full screen window.
+   * See http://bugs.sun.com/view_bug.do?bug_id=8013359.
+   */
+  public static final boolean SUN_BUG_ID_8013359 =
+    SystemInfo.isXWindow && SystemInfo.isJavaVersionAtLeast("1.7") && !SystemInfo.isJavaVersionAtLeast("1.7.0.40");
+
+  /**
+   * No BindException when another program is using the port.
+   * See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=7179799
+   */
+  public static final boolean SUN_BUG_ID_7179799 = true;
 }

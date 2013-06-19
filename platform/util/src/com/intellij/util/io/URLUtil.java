@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,26 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intellij.util.io;
 
+import com.google.common.base.Splitter;
+import com.google.common.collect.Lists;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class URLUtil {
-  private URLUtil() {
-  }
+  public static final String SCHEME_SEPARATOR = "://";
+  public static final String JAR_PROTOCOL = "jar";
+  public static final String FILE_PROTOCOL = "file";
+  public static final String JAR_SEPARATOR = "!/";
+
+  private URLUtil() { }
 
   /**
    * Opens a url stream. The semantics is the sames as {@link java.net.URL#openStream()}. The
@@ -40,13 +50,9 @@ public class URLUtil {
    * mapped into memory.
    */
   @NotNull
-  public static InputStream openStream(final URL url) throws IOException {
-    @NonNls final String protocol = url.getProtocol();
-    if (protocol.equals("jar")) {
-      return openJarStream(url);
-    }
-
-    return url.openStream();
+  public static InputStream openStream(@NotNull URL url) throws IOException {
+    @NonNls String protocol = url.getProtocol();
+    return protocol.equals(JAR_PROTOCOL) ? openJarStream(url) : url.openStream();
   }
 
   @NotNull
@@ -57,10 +63,10 @@ public class URLUtil {
     catch(FileNotFoundException ex) {
       @NonNls final String protocol = url.getProtocol();
       String file = null;
-      if (protocol.equals("file")) {
+      if (protocol.equals(FILE_PROTOCOL)) {
         file = url.getFile();
       }
-      else if (protocol.equals("jar")) {
+      else if (protocol.equals(JAR_PROTOCOL)) {
         int pos = url.getFile().indexOf("!");
         if (pos >= 0) {
           file = url.getFile().substring(pos+1);
@@ -75,23 +81,39 @@ public class URLUtil {
   }
 
   @NotNull
-  private static InputStream openJarStream(final URL url) throws IOException {
-    String file = url.getFile();
-    assert file.startsWith("file:");
-    file = file.substring("file:".length());
-    assert file.indexOf("!/") > 0;
+  private static InputStream openJarStream(@NotNull URL url) throws IOException {
+    Pair<String, String> paths = splitJarUrl(url.getFile());
+    if (paths == null) {
+      throw new MalformedURLException(url.getFile());
+    }
 
-    String resource = file.substring(file.indexOf("!/") + 2);
-    file = file.substring(0, file.indexOf("!"));
-    final ZipFile zipFile = new ZipFile(FileUtil.unquote(file));
-    final ZipEntry zipEntry = zipFile.getEntry(resource);
-    if (zipEntry == null) throw new FileNotFoundException("Entry " + resource + " not found in " + file);
+    @SuppressWarnings("IOResourceOpenedButNotSafelyClosed") final ZipFile zipFile = new ZipFile(FileUtil.unquote(paths.first));
+    ZipEntry zipEntry = zipFile.getEntry(paths.second);
+    if (zipEntry == null) {
+      throw new FileNotFoundException("Entry " + paths.second + " not found in " + paths.first);
+    }
+
     return new FilterInputStream(zipFile.getInputStream(zipEntry)) {
+        @Override
         public void close() throws IOException {
           super.close();
           zipFile.close();
         }
       };
+  }
+
+  @Nullable
+  public static Pair<String, String> splitJarUrl(@NotNull String fullPath) {
+    int delimiter = fullPath.indexOf(JAR_SEPARATOR);
+    if (delimiter >= 0) {
+      String resourcePath = fullPath.substring(delimiter + 2);
+      String jarPath = fullPath.substring(0, delimiter);
+      if (StringUtil.startsWithConcatenationOf(jarPath, FILE_PROTOCOL, ":")) {
+        jarPath = jarPath.substring(FILE_PROTOCOL.length() + 1);
+        return Pair.create(jarPath, resourcePath);
+      }
+    }
+    return null;
   }
 
   @NotNull
@@ -142,5 +164,23 @@ public class URLUtil {
       if ((c >= 'A') && (c <= 'F'))
           return c - 'A' + 10;
       return -1;
+  }
+
+  public static boolean containsScheme(@NotNull String url) {
+    return url.contains(SCHEME_SEPARATOR);
+  }
+
+  /**
+   * Splits the url into 2 parts: the scheme ("http", for instance) and the rest of the URL. <br/>
+   * Scheme separator is not included neither to the scheme part, nor to the url part. <br/>
+   * The scheme can be absent, in which case empty string is written to the first item of the Pair.
+   */
+  @NotNull
+  public static Pair<String, String> splitScheme(@NotNull String url) {
+    ArrayList<String> list = Lists.newArrayList(Splitter.on(SCHEME_SEPARATOR).limit(2).split(url));
+    if (list.size() == 1) {
+      return Pair.create("", list.get(0));
+    }
+    return Pair.create(list.get(0), list.get(1));
   }
 }

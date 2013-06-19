@@ -20,6 +20,9 @@ import com.intellij.openapi.extensions.ExtensionPointName;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * @author nik
  */
@@ -30,11 +33,20 @@ public abstract class FrameworkTypeEx extends FrameworkType {
     super(id);
   }
 
+  @Nullable
+  public FrameworkGroup<?> getParentGroup() {
+    return null;
+  }
+
   @NotNull
   public abstract FrameworkSupportInModuleProvider createProvider();
 
   @Nullable
   public String getUnderlyingFrameworkTypeId() {
     return null;
+  }
+
+  public <V extends FrameworkVersion> List<V> getVersions() {
+    return Collections.emptyList();
   }
 }

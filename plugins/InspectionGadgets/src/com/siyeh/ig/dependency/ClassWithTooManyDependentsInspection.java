@@ -44,12 +44,13 @@ public class ClassWithTooManyDependentsInspection extends BaseGlobalInspection {
       "class.with.too.many.dependents.display.name");
   }
 
+  @Override
   @Nullable
   public CommonProblemDescriptor[] checkElement(
-    RefEntity refEntity,
-    AnalysisScope analysisScope,
-    InspectionManager inspectionManager,
-    GlobalInspectionContext globalInspectionContext) {
+    @NotNull RefEntity refEntity,
+    @NotNull AnalysisScope analysisScope,
+    @NotNull InspectionManager inspectionManager,
+    @NotNull GlobalInspectionContext globalInspectionContext) {
     if (!(refEntity instanceof RefClass)) {
       return null;
     }
@@ -73,6 +74,7 @@ public class ClassWithTooManyDependentsInspection extends BaseGlobalInspection {
     };
   }
 
+  @Override
   public JComponent createOptionsPanel() {
     return new SingleIntegerFieldOptionsPanel(
       InspectionGadgetsBundle.message(

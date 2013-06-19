@@ -10,13 +10,17 @@
                     beanClass="com.intellij.util.xml.impl.DomImplementationClassEP"/>
 
     <extensionPoint name="dom.extender"
-                    beanClass="com.intellij.util.xml.reflect.DomExtenderEP"/>
+                    beanClass="com.intellij.util.xml.reflect.DomExtenderEP">
+      <with attribute="myDomClass" implements="com.intellij.util.xml.reflect.DomExtender"/>
+    </extensionPoint>
 
     <extensionPoint name="dom.customAnnotationChecker"
                     interface="com.intellij.util.xml.highlighting.DomCustomAnnotationChecker"/>
 
     <extensionPoint name="dom.uiControlsProvider"
                     interface="com.intellij.util.Consumer"/>
+
+    <extensionPoint name="moduleContextProvider" interface="com.intellij.util.xml.ModuleContextProvider"/>
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -59,7 +63,7 @@
     <semContributor implementation="com.intellij.util.xml.impl.DomSemContributor"/>
 
     <annotator language="XML" implementationClass="com.intellij.util.xml.impl.DefaultDomAnnotator"/>
-    <lang.documentationProvider language="XML" implementationClass="com.intellij.util.xml.DomDocumentationProvider"/>
+    <lang.documentationProvider language="XML" implementationClass="com.intellij.util.xml.DomDocumentationProvider" id="dom"/>
 
     <usageTypeProvider implementation="com.intellij.util.xml.DomUsageTypeProvider"/>
 

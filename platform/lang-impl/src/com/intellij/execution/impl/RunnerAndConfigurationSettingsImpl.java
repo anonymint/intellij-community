@@ -19,11 +19,9 @@ package com.intellij.execution.impl;
 import com.intellij.execution.*;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Factory;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.JDOMExternalizable;
-import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.*;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -92,29 +90,36 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     myIsTemplate = isTemplate;
   }
 
+  @Override
   @Nullable
   public ConfigurationFactory getFactory() {
     return myConfiguration == null ? null : myConfiguration.getFactory();
   }
 
+  @Override
   public boolean isTemplate() {
     return myIsTemplate;
   }
 
+  @Override
   public boolean isTemporary() {
     return myTemporary;
   }
 
+  @Override
   public void setTemporary(boolean temporary) {
     myTemporary = temporary;
   }
 
+  @Override
   public RunConfiguration getConfiguration() {
     return myConfiguration;
   }
 
+  @Override
   public Factory<RunnerAndConfigurationSettings> createFactory() {
     return new Factory<RunnerAndConfigurationSettings>() {
+      @Override
       public RunnerAndConfigurationSettings create() {
         RunConfiguration configuration = myConfiguration.getFactory().createConfiguration(ExecutionBundle.message("default.run.configuration.name"), myConfiguration);
         return new RunnerAndConfigurationSettingsImpl(myManager, configuration, false);
@@ -122,10 +127,12 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     };
   }
 
+  @Override
   public void setName(String name) {
     myConfiguration.setName(name);
   }
 
+  @Override
   public String getName() {
     return myConfiguration.getName();
   }
@@ -168,6 +175,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     return myManager.getFactory(typeName, factoryName);
   }
 
+  @Override
   public void readExternal(Element element) throws InvalidDataException {
     myIsTemplate = Boolean.valueOf(element.getAttributeValue(TEMPLATE_FLAG_ATTRIBUTE)).booleanValue();
     myTemporary = Boolean.valueOf(element.getAttributeValue(TEMPORARY_ATTRIBUTE)).booleanValue() || TEMP_CONFIGURATION.equals(element.getName());
@@ -187,23 +195,24 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     } else {
       final String name = element.getAttributeValue(NAME_ATTR);
       // shouldn't call createConfiguration since it calls StepBeforeRunProviders that
-      // may not be loaded yet. This creates initialization order issue. 
+      // may not be loaded yet. This creates initialization order issue.
       myConfiguration = myManager.doCreateConfiguration(name, factory, false);
     }
 
     myConfiguration.readExternal(element);
-    List runners = element.getChildren(RUNNER_ELEMENT);
+    List<Element> runners = element.getChildren(RUNNER_ELEMENT);
     myUnloadedRunnerSettings = null;
-    for (final Object runner1 : runners) {
-      Element runnerElement = (Element) runner1;
+    for (final Element runnerElement : runners) {
       String id = runnerElement.getAttributeValue(RUNNER_ID);
       ProgramRunner runner = RunnerRegistry.getInstance().findRunnerById(id);
       if (runner != null) {
         RunnerSettings settings = createRunnerSettings(runner);
         settings.readExternal(runnerElement);
         myRunnerSettings.put(runner, settings);
-      } else {
+      }
+      else {
         if (myUnloadedRunnerSettings == null) myUnloadedRunnerSettings = new ArrayList<Element>(1);
+        IdeaPluginDescriptorImpl.internJDOMElement(runnerElement);
         myUnloadedRunnerSettings.add(runnerElement);
       }
     }
@@ -227,6 +236,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     }
   }
 
+  @Override
   public void writeExternal(final Element element) throws WriteExternalException {
     final ConfigurationFactory factory = myConfiguration.getFactory();
 
@@ -298,10 +308,12 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     }
   }
 
+  @Override
   public void checkSettings() throws RuntimeConfigurationException {
     checkSettings(null);
   }
 
+  @Override
   public void checkSettings(@Nullable Executor executor) throws RuntimeConfigurationException {
     myConfiguration.checkConfiguration();
     if (myConfiguration instanceof RunConfigurationBase) {
@@ -330,6 +342,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
 
   private static Comparator<Element> createRunnerComparator() {
     return new Comparator<Element>() {
+      @Override
       public int compare(final Element o1, final Element o2) {
         final String attributeValue1 = o1.getAttributeValue(RUNNER_ID);
         if (attributeValue1 == null) {
@@ -345,6 +358,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     };
   }
 
+  @Override
   @NotNull
   public RunnerSettings getRunnerSettings(@NotNull ProgramRunner runner) {
     RunnerSettings settings = myRunnerSettings.get(runner);
@@ -355,6 +369,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     return settings;
   }
 
+  @Override
   @NotNull
   public ConfigurationPerRunnerSettings getConfigurationSettings(@NotNull ProgramRunner runner) {
     ConfigurationPerRunnerSettings settings = myConfigurationPerRunnerSettings.get(runner);
@@ -365,11 +380,13 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     return settings;
   }
 
+  @Override
   @Nullable
   public ConfigurationType getType() {
     return myConfiguration == null ? null : myConfiguration.getType();
   }
 
+  @Override
   public RunnerAndConfigurationSettings clone() {
     RunnerAndConfigurationSettingsImpl copy = new RunnerAndConfigurationSettingsImpl(myManager, myConfiguration.clone(), false);
     copy.importRunnerAndConfigurationSettings(this);
@@ -409,6 +426,7 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
     return new RunnerSettings<JDOMExternalizable>(runner.createConfigurationData(new InfoProvider(runner)), myConfiguration);
   }
 
+  @Override
   public int compareTo(final Object o) {
     if (o instanceof RunnerAndConfigurationSettings) {
       return getName().compareTo(((RunnerAndConfigurationSettings) o).getName());
@@ -429,18 +447,22 @@ public class RunnerAndConfigurationSettingsImpl implements JDOMExternalizable, C
       myRunner = runner;
     }
 
+    @Override
     public ProgramRunner getRunner() {
       return myRunner;
     }
 
+    @Override
     public RunConfiguration getConfiguration() {
       return myConfiguration;
     }
 
+    @Override
     public RunnerSettings getRunnerSettings() {
       return RunnerAndConfigurationSettingsImpl.this.getRunnerSettings(myRunner);
     }
 
+    @Override
     public ConfigurationPerRunnerSettings getConfigurationSettings() {
       return RunnerAndConfigurationSettingsImpl.this.getConfigurationSettings(myRunner);
     }

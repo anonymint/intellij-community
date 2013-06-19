@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 package com.intellij.testFramework.fixtures
-import com.intellij.codeInsight.AutoPopupController
+
 import com.intellij.codeInsight.completion.CompletionPhase
 import com.intellij.codeInsight.completion.impl.CompletionServiceImpl
 import com.intellij.codeInsight.editorActions.CompletionAutoPopupHandler
@@ -25,7 +25,6 @@ import com.intellij.openapi.editor.ex.DocumentEx
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.testFramework.UsefulTestCase
 import com.intellij.util.ui.UIUtil
-import junit.framework.Assert
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -52,29 +51,19 @@ class CompletionAutoPopupTester {
   }
 
   void joinCompletion() {
-    for (i in 0.1000) {
-      if (i==999) {
-        UsefulTestCase.printThreadDump()
-        Assert.fail("Could not wait for committed doc")
-      }
-      CompletionPhase phase = CompletionServiceImpl.getCompletionPhase()
-      if (phase != com.intellij.codeInsight.completion.CompletionPhase.NoCompletion) break;
-      Thread.sleep(10)
-    }
+    waitPhase { !(it instanceof CompletionPhase.CommittingDocuments || it instanceof CompletionPhase.Synchronous || it instanceof CompletionPhase.BgCalculation) }
+  }
 
-    for (j in 1..4000) {
-      LookupImpl l = null
-      UsefulTestCase.edt {
-        l = lookup
-      }
-      if (!l || !l.calculating) {
-        UsefulTestCase.edt {} // for invokeLater in CompletionProgressIndicator.stop()
+  private void waitPhase(Closure condition) {
+    for (j in 1..1000) {
+      if (condition(CompletionServiceImpl.phaseRaw)) {
+        UsefulTestCase.edt { } // ensure the current EDT activity passes and brings completion into a consistent state
         return
       }
       Thread.sleep(10)
     }
     UsefulTestCase.printThreadDump()
-    UsefulTestCase.fail("Too long completion")
+    UsefulTestCase.fail("Too long completion: " + CompletionServiceImpl.phaseRaw)
   }
 
   final static AtomicInteger cnt = new AtomicInteger()
@@ -115,13 +104,7 @@ class CompletionAutoPopupTester {
   }
 
   void joinAutopopup() {
-    joinAlarm();
-    joinCommit() // physical document commit
-    joinCommit() // file copy commit in background
-  }
-
-  def joinAlarm() {
-    AutoPopupController.getInstance(myFixture.getProject()).executePendingRequests()
+    waitPhase { !(it instanceof CompletionPhase.CommittingDocuments) }
   }
 
   LookupImpl getLookup() {

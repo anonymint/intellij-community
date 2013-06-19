@@ -16,31 +16,11 @@
 package com.intellij.ide.util.scopeChooser;
 
 import javax.swing.*;
-import java.awt.event.KeyEvent;
 
 /**
 * User: anna
 */
 public abstract class IgnoringComboBox extends JComboBox {
-  private int myDirection = 0;
-
-  @Override
-  public void processKeyEvent(KeyEvent e) {
-    if (e.getID() == KeyEvent.KEY_PRESSED && e.getModifiers() == 0) {
-      if (e.getKeyCode() == KeyEvent.VK_UP) {
-        myDirection = -1;
-      }
-      else if (e.getKeyCode() == KeyEvent.VK_DOWN) {
-        myDirection = 1;
-      }
-    }
-    try {
-      super.processKeyEvent(e);
-    }
-    finally {
-      myDirection = 0;
-    }
-  }
 
   @Override
   public void setSelectedItem(final Object item) {
@@ -51,15 +31,9 @@ public abstract class IgnoringComboBox extends JComboBox {
 
   @Override
   public void setSelectedIndex(final int anIndex) {
-    Object item = getItemAt(anIndex);
-    if (!(isIgnored(item))) {
+    final Object item = getItemAt(anIndex);
+    if (!isIgnored(item)) {
       super.setSelectedIndex(anIndex);
-    }
-    else if (myDirection != 0) {
-      item = getItemAt(anIndex + myDirection);
-      if (!isIgnored(item)) {
-        super.setSelectedIndex(anIndex + myDirection);
-      }
     }
   }
 

@@ -15,11 +15,14 @@
  */
 package org.jetbrains.idea.maven.utils;
 
+import com.intellij.codeInsight.lookup.LookupElement;
+import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.codeInsight.template.impl.TemplateImpl;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.ide.fileTemplates.FileTemplate;
 import com.intellij.ide.fileTemplates.FileTemplateManager;
+import com.intellij.lexer.XmlLexer;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
@@ -46,15 +49,21 @@ import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.xml.XmlTokenType;
+import com.intellij.util.DisposeAwareRunnable;
 import com.intellij.util.Function;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
+import icons.MavenIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.model.MavenConstants;
 import org.jetbrains.idea.maven.model.MavenId;
+import org.jetbrains.idea.maven.model.MavenPlugin;
 import org.jetbrains.idea.maven.project.MavenProject;
+import org.jetbrains.idea.maven.project.MavenProjectsManager;
 import org.jetbrains.idea.maven.server.MavenServerManager;
 import org.jetbrains.idea.maven.server.MavenServerUtil;
 
@@ -67,6 +76,7 @@ import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.zip.CRC32;
 
 public class MavenUtil {
   public static final String MAVEN_NOTIFICATION_GROUP = "Maven";
@@ -118,12 +128,7 @@ public class MavenUtil {
       r.run();
     }
     else {
-      ApplicationManager.getApplication().invokeLater(new Runnable() {
-          public void run() {
-            if (p.isDisposed()) return;
-            r.run();
-          }
-        }, state);
+      ApplicationManager.getApplication().invokeLater(DisposeAwareRunnable.create(r, p), state);
     }
   }
 
@@ -140,12 +145,7 @@ public class MavenUtil {
         r.run();
       }
       else {
-        ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-            public void run() {
-              if (p.isDisposed()) return;
-              r.run();
-            }
-          }, state);
+        ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(r, p), state);
       }
     }
   }
@@ -163,12 +163,7 @@ public class MavenUtil {
       r.run();
     }
     else {
-      DumbService.getInstance(project).runWhenSmart(new Runnable() {
-        public void run() {
-          if (project.isDisposed()) return;
-          r.run();
-        }
-      });
+      DumbService.getInstance(project).runWhenSmart(DisposeAwareRunnable.create(r, project));
     }
   }
 
@@ -181,7 +176,7 @@ public class MavenUtil {
     }
 
     if (!project.isInitialized()) {
-      StartupManager.getInstance(project).registerPostStartupActivity(r);
+      StartupManager.getInstance(project).registerPostStartupActivity(DisposeAwareRunnable.create(r, project));
       return;
     }
 
@@ -596,6 +591,26 @@ public class MavenUtil {
   }
 
   @Nullable
+  public static String getMavenVersion(String mavenHome) {
+    String[] libs = new File(mavenHome, "lib").list();
+
+    if (libs != null) {
+      for (String lib : libs) {
+        if (lib.startsWith("maven-core-") && lib.endsWith(".jar")) {
+          return lib.substring("maven-core-".length(), lib.length() - ".jar".length());
+        }
+      }
+    }
+
+    return null;
+  }
+
+  public static boolean isMaven3(String mavenHome) {
+    String version = getMavenVersion(mavenHome);
+    return version != null && version.compareTo("3.0.0") >= 0;
+  }
+
+  @Nullable
   public static File resolveGlobalSettingsFile(@Nullable String overriddenMavenHome) {
     File directory = resolveMavenHomeDirectory(overriddenMavenHome);
     if (directory == null) return null;
@@ -710,7 +725,66 @@ public class MavenUtil {
     return null;
   }
 
+  public static List<LookupElement> getPhaseVariants(MavenProjectsManager manager) {
+    Set<String> goals = new HashSet<String>();
+    goals.addAll(MavenConstants.PHASES);
+
+    for (MavenProject mavenProject : manager.getProjects()) {
+      for (MavenPlugin plugin : mavenProject.getPlugins()) {
+        MavenPluginInfo pluginInfo = MavenArtifactUtil.readPluginInfo(manager.getLocalRepository(), plugin.getMavenId());
+        if (pluginInfo != null) {
+          for (MavenPluginInfo.Mojo mojo : pluginInfo.getMojos()) {
+            goals.add(mojo.getDisplayName());
+          }
+        }
+      }
+    }
+
+    List<LookupElement> res = new ArrayList<LookupElement>(goals.size());
+    for (String goal : goals) {
+      res.add(LookupElementBuilder.create(goal).withIcon(MavenIcons.Phase));
+    }
+
+    return res;
+  }
+
   public interface MavenTaskHandler {
     void waitFor();
+  }
+
+  public static int crcWithoutSpaces(@NotNull VirtualFile xmlFile) throws IOException {
+    String text = VfsUtil.loadText(xmlFile);
+
+    XmlLexer lexer = new XmlLexer();
+    lexer.start(text);
+
+    CRC32 crc = new CRC32();
+
+    boolean isCommentOrSpace = false;
+
+    while (true) {
+      IElementType tokenType = lexer.getTokenType();
+      if (tokenType == null) break;
+
+      if (XmlTokenType.WHITESPACES.contains(tokenType) || XmlTokenType.COMMENTS.contains(tokenType) || tokenType == XmlTokenType.XML_REAL_WHITE_SPACE) {
+        if (!isCommentOrSpace) {
+          crc.update(1);
+          isCommentOrSpace = true;
+        }
+      }
+      else {
+        isCommentOrSpace = false;
+
+        for (int start = lexer.getTokenStart(), end = lexer.getTokenEnd(); start < end; start++) {
+          char a = text.charAt(start);
+          crc.update(a);
+          crc.update(a >>> 8);
+        }
+      }
+
+      lexer.advance();
+    }
+
+    return (int)crc.getValue();
   }
 }

@@ -27,16 +27,22 @@ import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.CalledInAwt;
 import com.intellij.openapi.vcs.changes.committed.AbstractCalledLater;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.util.EventDispatcher;
+import com.intellij.util.messages.Topic;
 import com.intellij.util.net.HttpConfigurable;
+import com.intellij.util.proxy.CommonProxy;
 import com.intellij.util.ui.UIUtil;
+import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.auth.ProviderType;
 import org.jetbrains.idea.svn.auth.SvnAuthenticationInteraction;
 import org.jetbrains.idea.svn.auth.SvnAuthenticationListener;
+import org.jetbrains.idea.svn.config.ProxyGroup;
+import org.jetbrains.idea.svn.config.SvnServerFileKeys;
 import org.tmatesoft.svn.core.SVNErrorMessage;
 import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.SVNProperties;
@@ -47,17 +53,22 @@ import org.tmatesoft.svn.core.io.SVNRepository;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.*;
 import java.util.*;
 
 /**
  * @author alex
  */
-public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager implements SvnAuthenticationListener {
+public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager implements SvnAuthenticationListener, ISVNAuthenticationManagerExt {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.idea.svn.SvnAuthenticationManager");
   // while Mac storage not working for IDEA, we use this key to check whether to prompt abt plaintext or just store
   public static final String SVN_SSH = "svn+ssh";
   public static final String HTTP = "http";
   public static final String HTTPS = "https";
+  public static final String HTTP_PROXY_HOST = "http-proxy-host";
+  public static final String HTTP_PROXY_PORT = "http-proxy-port";
+  public static final String HTTP_PROXY_USERNAME = "http-proxy-username";
+  public static final String HTTP_PROXY_PASSWORD = "http-proxy-password";
   private Project myProject;
   private File myConfigDirectory;
   private PersistentAuthenticationProviderProxy myPersistentAuthenticationProviderProxy;
@@ -69,6 +80,10 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
   private final ThreadLocalSavePermissions mySavePermissions;
   private final Map<Thread, String> myKeyAlgorithm;
   private boolean myArtificialSaving;
+  private ISVNAuthenticationProvider myProvider;
+  public static final Topic<ISVNAuthenticationProviderListener> AUTHENTICATION_PROVIDER_LISTENER =
+    new Topic<ISVNAuthenticationProviderListener>("AUTHENTICATION_PROVIDER_LISTENER", ISVNAuthenticationProviderListener.class);
+  private final static ThreadLocal<ISVNAuthenticationProvider> ourThreadLocalProvider = new ThreadLocal<ISVNAuthenticationProvider>();
 
   public SvnAuthenticationManager(final Project project, final File configDirectory) {
     super(configDirectory, true, null, null);
@@ -102,6 +117,69 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
 
       }
     });
+  }
+
+  private class AuthenticationProviderProxy implements ISVNAuthenticationProvider {
+    private final ISVNAuthenticationProvider myDelegate;
+
+    private AuthenticationProviderProxy(ISVNAuthenticationProvider delegate) {
+      myDelegate = delegate;
+    }
+
+    @Override
+    public SVNAuthentication requestClientAuthentication(String kind,
+                                                         SVNURL url,
+                                                         String realm,
+                                                         SVNErrorMessage errorMessage,
+                                                         SVNAuthentication previousAuth, boolean authMayBeStored) {
+      final SVNAuthentication authentication =
+        myDelegate.requestClientAuthentication(kind, url, realm, errorMessage, previousAuth, authMayBeStored);
+      if (myProject != null && ! myProject.isDisposed()) {
+        myProject.getMessageBus().syncPublisher(AUTHENTICATION_PROVIDER_LISTENER)
+          .requestClientAuthentication(kind, url, realm, errorMessage, previousAuth, authMayBeStored, authentication);
+      }
+      return authentication;
+    }
+
+    @Override
+    public int acceptServerAuthentication(SVNURL url,
+                                          String realm,
+                                          Object certificate,
+                                          boolean resultMayBeStored) {
+      final int result = myDelegate.acceptServerAuthentication(url, realm, certificate, resultMayBeStored);
+      if (myProject != null && ! myProject.isDisposed()) {
+        myProject.getMessageBus().syncPublisher(AUTHENTICATION_PROVIDER_LISTENER)
+          .acceptServerAuthentication(url, realm, certificate, resultMayBeStored, result);
+      }
+      return result;
+    }
+  }
+
+  public interface ISVNAuthenticationProviderListener {
+    void requestClientAuthentication(String kind, SVNURL url, String realm, SVNErrorMessage errorMessage,
+      SVNAuthentication previousAuth, boolean authMayBeStored, SVNAuthentication authentication);
+    void acceptServerAuthentication(SVNURL url, String realm, Object certificate, boolean resultMayBeStored, @MagicConstant int acceptResult);
+  }
+
+  @Override
+  public void setAuthenticationProvider(ISVNAuthenticationProvider provider) {
+    ISVNAuthenticationProvider useProvider = provider;
+    if (! (provider instanceof AuthenticationProviderProxy)) {
+      useProvider = new AuthenticationProviderProxy(provider);
+    }
+    myProvider = useProvider;
+    super.setAuthenticationProvider(myProvider);
+  }
+
+  public ISVNAuthenticationProvider getProvider() {
+    final ISVNAuthenticationProvider threadProvider = ourThreadLocalProvider.get();
+    if (threadProvider != null) return threadProvider;
+    return myProvider;
+  }
+
+  @Override
+  public ISVNAuthenticationStorage getRuntimeAuthStorage() {
+    return super.getRuntimeAuthStorage();
   }
 
   // since set to null during dispose and we have background processes
@@ -166,27 +244,6 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
     myConfigDirectory = new File(authDir.getParent());
     myPersistentAuthenticationProviderProxy = new PersistentAuthenticationProviderProxy(authDir, userName);
     return myPersistentAuthenticationProviderProxy;
-  }
-
-  @Override
-  public void acknowledgeAuthentication(boolean accepted,
-                                        String kind,
-                                        String realm,
-                                        SVNErrorMessage errorMessage,
-                                        SVNAuthentication authentication) throws SVNException {
-    boolean successSaving = false;
-    myListener.getMulticaster().acknowledge(accepted, kind, realm, errorMessage, authentication);
-    try {
-      final boolean authStorageEnabled = getHostOptionsProvider().getHostOptions(authentication.getURL()).isAuthStorageEnabled();
-      final SVNAuthentication proxy = ProxySvnAuthentication.proxy(authentication, authStorageEnabled, myArtificialSaving);
-      super.acknowledgeAuthentication(accepted, kind, realm, errorMessage, proxy);
-      successSaving = true;
-    } finally {
-      mySavePermissions.remove();
-      if (myArtificialSaving) {
-        throw new CredentialsSavedException(successSaving);
-      }
-    }
   }
 
   private class PersistentAuthenticationProviderProxy implements ISVNAuthenticationProvider, ISVNPersistentAuthenticationProvider {
@@ -376,53 +433,135 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
     return myKeyAlgorithm.get(Thread.currentThread());
   }
 
-  public ISVNProxyManager getProxyManager(SVNURL url) throws SVNException {
-    // this code taken from default manager (changed for system properties reading)
-      String host = url.getHost();
+  @Override
+  public void acknowledgeConnectionSuccessful(SVNURL url) {
+    CommonProxy.getInstance().removeNoProxy(url.getProtocol(), url.getHost(), url.getPort());
+    SSLExceptionsHelper.removeInfo();
+    ourThreadLocalProvider.remove();
+  }
 
-    String proxyHost = getServersPropertyIdea(host, "http-proxy-host");
+  @Override
+  public void acknowledgeAuthentication(boolean accepted,
+                                        String kind,
+                                        String realm,
+                                        SVNErrorMessage errorMessage,
+                                        SVNAuthentication authentication) throws SVNException {
+    acknowledgeAuthentication(accepted, kind, realm, errorMessage, authentication, null);
+  }
+
+  @Override
+  public void acknowledgeAuthentication(boolean accepted,
+                                        String kind,
+                                        String realm,
+                                        SVNErrorMessage errorMessage,
+                                        SVNAuthentication authentication,
+                                        SVNURL url) throws SVNException {
+    SSLExceptionsHelper.removeInfo();
+    ourThreadLocalProvider.remove();
+    if (url != null) {
+      CommonProxy.getInstance().removeNoProxy(url.getProtocol(), url.getHost(), url.getPort());
+    }
+    boolean successSaving = false;
+    myListener.getMulticaster().acknowledge(accepted, kind, realm, errorMessage, authentication);
+    try {
+      final boolean authStorageEnabled = getHostOptionsProvider().getHostOptions(authentication.getURL()).isAuthStorageEnabled();
+      final SVNAuthentication proxy = ProxySvnAuthentication.proxy(authentication, authStorageEnabled, myArtificialSaving);
+      super.acknowledgeAuthentication(accepted, kind, realm, errorMessage, proxy);
+      successSaving = true;
+    } finally {
+      mySavePermissions.remove();
+      if (myArtificialSaving) {
+        myArtificialSaving = false;
+        throw new CredentialsSavedException(successSaving);
+      }
+    }
+  }
+
+  public void acknowledgeForSSL(boolean accepted, String kind, String realm, SVNErrorMessage message, SVNAuthentication proxy) {
+    if (accepted && proxy instanceof SVNSSLAuthentication && (((SVNSSLAuthentication) proxy).getCertificateFile() != null)) {
+      final SVNSSLAuthentication svnsslAuthentication = (SVNSSLAuthentication)proxy;
+      final SVNURL url = svnsslAuthentication.getURL();
+
+      final IdeaSVNHostOptionsProvider provider = getHostOptionsProvider();
+      final SVNCompositeConfigFile serversFile = provider.getServersFile();
+      String groupName = getGroupName(serversFile.getProperties("groups"), url.getHost());
+
+      if (StringUtil.isEmptyOrSpaces(groupName)) {
+        serversFile.setPropertyValue("global", SvnServerFileKeys.SSL_CLIENT_CERT_FILE, svnsslAuthentication.getCertificateFile().getPath(), true);
+        //serversFile.setPropertyValue("global", SvnServerFileKeys.SSL_CLIENT_CERT_PASSWORD, null, true);
+      } else {
+        serversFile.setPropertyValue(groupName, SvnServerFileKeys.SSL_CLIENT_CERT_FILE, svnsslAuthentication.getCertificateFile().getPath(), true);
+        //serversFile.setPropertyValue(groupName, SvnServerFileKeys.SSL_CLIENT_CERT_PASSWORD, null, true);
+      }
+      serversFile.save();
+    }
+  }
+
+  public ISVNProxyManager getProxyManager(SVNURL url) throws SVNException {
+    SSLExceptionsHelper.addInfo("Accessing URL: " + url.toString());
+    ourThreadLocalProvider.set(myProvider);
+    // in proxy creation, we need proxy information from common proxy. but then we should forbid common proxy to intercept
+    final ISVNProxyManager proxy = createProxy(url);
+    CommonProxy.getInstance().noProxy(url.getProtocol(), url.getHost(), url.getPort());
+    return proxy;
+  }
+
+  private ISVNProxyManager createProxy(SVNURL url) {
+    // this code taken from default manager (changed for system properties reading)
+    String host = url.getHost();
+
+    String proxyHost = getServersPropertyIdea(host, HTTP_PROXY_HOST);
     if ((proxyHost == null) || "".equals(proxyHost.trim())) {
       if (getConfig().isIsUseDefaultProxy()) {
         // ! use common proxy if it is set
-        final HttpConfigurable httpConfigurable = HttpConfigurable.getInstance();
-        final String ideaWideProxyHost = httpConfigurable.PROXY_HOST;
-        String ideaWideProxyPort = String.valueOf(httpConfigurable.PROXY_PORT);
-
-        if (ideaWideProxyPort == null) {
-          ideaWideProxyPort = "3128";
+        try {
+          final List<Proxy> proxies = HttpConfigurable.getInstance().getOnlyBySettingsSelector().select(new URI(url.toString()));
+          if (proxies != null && ! proxies.isEmpty()) {
+            for (Proxy proxy : proxies) {
+              if (HttpConfigurable.isRealProxy(proxy) && Proxy.Type.HTTP.equals(proxy.type())) {
+                final SocketAddress address = proxy.address();
+                if (address instanceof InetSocketAddress) {
+                  return new MyPromptingProxyManager(((InetSocketAddress)address).getHostName(), "" + ((InetSocketAddress)address).getPort(),
+                                                     url.getProtocol());
+                }
+              }
+            }
+          }
         }
-
-        if ((ideaWideProxyHost != null) && (! "".equals(ideaWideProxyHost.trim()))) {
-          return new MyPromptingProxyManager(ideaWideProxyHost, ideaWideProxyPort);
+        catch (URISyntaxException e) {
+          LOG.info(e);
         }
       }
       return null;
     }
-      String proxyExceptions = getServersPropertyIdea(host, "http-proxy-exceptions");
-      String proxyExceptionsSeparator = ",";
-      if (proxyExceptions == null) {
-          proxyExceptions = System.getProperty("http.nonProxyHosts");
-          proxyExceptionsSeparator = "|";
+    String proxyExceptions = getServersPropertyIdea(host, "http-proxy-exceptions");
+    String proxyExceptionsSeparator = ",";
+    if (proxyExceptions == null) {
+        proxyExceptions = System.getProperty("http.nonProxyHosts");
+        proxyExceptionsSeparator = "|";
+    }
+    if (proxyExceptions != null) {
+      for(StringTokenizer exceptions = new StringTokenizer(proxyExceptions, proxyExceptionsSeparator); exceptions.hasMoreTokens();) {
+          String exception = exceptions.nextToken().trim();
+          if (DefaultSVNOptions.matches(exception, host)) {
+              return null;
+          }
       }
-      if (proxyExceptions != null) {
-        for(StringTokenizer exceptions = new StringTokenizer(proxyExceptions, proxyExceptionsSeparator); exceptions.hasMoreTokens();) {
-            String exception = exceptions.nextToken().trim();
-            if (DefaultSVNOptions.matches(exception, host)) {
-                return null;
-            }
-        }
-      }
-      String proxyPort = getServersPropertyIdea(host, "http-proxy-port");
-      String proxyUser = getServersPropertyIdea(host, "http-proxy-username");
-      String proxyPassword = getServersPropertyIdea(host, "http-proxy-password");
-      return new MySimpleProxyManager(proxyHost, proxyPort, proxyUser, proxyPassword);
+    }
+    String proxyPort = getServersPropertyIdea(host, HTTP_PROXY_PORT);
+    String proxyUser = getServersPropertyIdea(host, HTTP_PROXY_USERNAME);
+    String proxyPassword = getServersPropertyIdea(host, HTTP_PROXY_PASSWORD);
+    return new MySimpleProxyManager(proxyHost, proxyPort, proxyUser, proxyPassword);
   }
+
 
   private static class MyPromptingProxyManager extends MySimpleProxyManager {
     private static final String ourPrompt = "Proxy authentication";
+    private final String myProtocol;
 
-    private MyPromptingProxyManager(final String host, final String port) {
+    private MyPromptingProxyManager(final String host, final String port, String protocol) {
       super(host, port, null, null);
+      myProtocol = protocol;
     }
 
     @Override
@@ -430,12 +569,24 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
       if (myProxyUser != null) {
         return myProxyUser;
       }
-      final HttpConfigurable httpConfigurable = HttpConfigurable.getInstance();
-      if (httpConfigurable.PROXY_AUTHENTICATION && (! httpConfigurable.KEEP_PROXY_PASSWORD)) {
-        httpConfigurable.getPromptedAuthentication(myProxyHost, ourPrompt);
-      }
-      myProxyUser = httpConfigurable.PROXY_LOGIN;
+      tryGetCredentials();
       return myProxyUser;
+    }
+
+    private void tryGetCredentials() {
+      try {
+        final InetAddress ia = InetAddress.getByName(getProxyHost());
+        final PasswordAuthentication authentication =
+          Authenticator.requestPasswordAuthentication(getProxyHost(), ia, getProxyPort(), myProtocol, getProxyHost(), myProtocol,
+                                                      null, Authenticator.RequestorType.PROXY);
+        if (authentication != null) {
+          myProxyUser = authentication.getUserName();
+          myProxyPassword = String.valueOf(authentication.getPassword());
+        }
+      }
+      catch (UnknownHostException e) {
+        //
+      }
     }
 
     @Override
@@ -443,11 +594,7 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
       if (myProxyPassword != null) {
         return myProxyPassword;
       }
-      final HttpConfigurable httpConfigurable = HttpConfigurable.getInstance();
-      if (httpConfigurable.PROXY_AUTHENTICATION && (! httpConfigurable.KEEP_PROXY_PASSWORD)) {
-        httpConfigurable.getPromptedAuthentication(myProxyUser, ourPrompt);
-      }
-      myProxyPassword = httpConfigurable.getPlainProxyPassword();
+      tryGetCredentials();
       return myProxyPassword;
     }
   }
@@ -570,19 +717,33 @@ public class SvnAuthenticationManager extends DefaultSVNAuthenticationManager im
     return false;
   }
 
+  @Nullable
+  public static String getGroupForHost(final String host, final IdeaSVNConfigFile serversFile) {
+    final Map<String,ProxyGroup> groups = serversFile.getAllGroups();
+    for (Map.Entry<String, ProxyGroup> entry : groups.entrySet()) {
+      if (matchesGroupPattern(host, entry.getValue().getPatterns())) return entry.getKey();
+    }
+    return null;
+  }
+
   // taken from default manager as is
   private static String getGroupName(Map groups, String host) {
-      for (Iterator names = groups.keySet().iterator(); names.hasNext();) {
-          String name = (String) names.next();
-          String pattern = (String) groups.get(name);
-          for(StringTokenizer tokens = new StringTokenizer(pattern, ","); tokens.hasMoreTokens();) {
-              String token = tokens.nextToken();
-              if (DefaultSVNOptions.matches(token, host)) {
-                  return name;
-              }
-          }
-      }
+    for (Object o : groups.keySet()) {
+      final String name = (String) o;
+      final String pattern = (String) groups.get(name);
+      if (matchesGroupPattern(host, pattern)) return name;
+    }
       return null;
+  }
+
+  private static boolean matchesGroupPattern(String host, String pattern) {
+    for(StringTokenizer tokens = new StringTokenizer(pattern, ","); tokens.hasMoreTokens();) {
+        String token = tokens.nextToken();
+        if (DefaultSVNOptions.matches(token, host)) {
+          return true;
+        }
+    }
+    return false;
   }
 
   // default = yes

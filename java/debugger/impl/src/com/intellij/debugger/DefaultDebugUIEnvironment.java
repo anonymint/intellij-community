@@ -114,11 +114,8 @@ public class DefaultDebugUIEnvironment implements DebugUIEnvironment {
 
   @Override
   public void initActions(RunContentDescriptor content, DefaultActionGroup actionGroup) {
-    ProcessHandler processHandler = content.getProcessHandler();
     RestartAction restartAction = new RestartAction(myExecutor,
                                                     myRunner,
-                                                    processHandler,
-                                                    RestartAction.RERUN_DEBUGGER_ICON,
                                                     content,
                                                     myExecutionEnvironment);
     actionGroup.add(restartAction, Constraints.FIRST);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -166,7 +166,12 @@ public class ContainerUtil extends ContainerUtilRt {
   }
 
   @NotNull
-  public static <T> List<T> newSmartList(T... elements) {
+  public static <T> List<T> newSmartList(T element) {
+    return new SmartList<T>(element);
+  }
+
+  @NotNull
+  public static <T> List<T> newSmartList(@NotNull T... elements) {
     return new SmartList<T>(elements);
   }
 
@@ -211,7 +216,7 @@ public class ContainerUtil extends ContainerUtilRt {
   }
 
   @NotNull
-  public static <T> THashSet<T> newTroveSet(TObjectHashingStrategy<T> strategy) {
+  public static <T> THashSet<T> newTroveSet(@NotNull TObjectHashingStrategy<T> strategy) {
     return new THashSet<T>(strategy);
   }
 
@@ -221,7 +226,7 @@ public class ContainerUtil extends ContainerUtilRt {
   }
 
   @NotNull
-  public static <T> THashSet<T> newTroveSet(TObjectHashingStrategy<T> strategy, T... elements) {
+  public static <T> THashSet<T> newTroveSet(@NotNull TObjectHashingStrategy<T> strategy, @NotNull T... elements) {
     return new THashSet<T>(Arrays.asList(elements), strategy);
   }
 
@@ -532,7 +537,7 @@ public class ContainerUtil extends ContainerUtilRt {
    * Adds all not-null elements from the {@code elements}, ignoring nulls
    */
   public static <T> void addAllNotNull(@NotNull Collection<T> collection, @NotNull Iterable<? extends T> elements) {
-    addAll(collection, elements.iterator());
+    addAllNotNull(collection, elements.iterator());
   }
 
   /**
@@ -549,7 +554,7 @@ public class ContainerUtil extends ContainerUtilRt {
 
   @NotNull
   public static <T> List<T> collect(@NotNull Iterator<T> iterator) {
-    if (!iterator.hasNext()) return Collections.emptyList();
+    if (!iterator.hasNext()) return emptyList();
     List<T> list = new ArrayList<T>();
     addAll(list, iterator);
     return list;
@@ -708,6 +713,15 @@ public class ContainerUtil extends ContainerUtilRt {
   }
 
   @NotNull
+  public static <KEY, VALUE> Map<KEY, VALUE> map2Map(@NotNull Collection<Pair<KEY, VALUE>> collection) {
+    final Map<KEY, VALUE> result = new THashMap<KEY, VALUE>(collection.size());
+    for (Pair<KEY, VALUE> pair : collection) {
+      result.put(pair.first, pair.second);
+    }
+    return result;
+  }
+
+  @NotNull
   public static <T> Object[] map2Array(@NotNull T[] array, @NotNull Function<T, Object> mapper) {
     return map2Array(array, Object.class, mapper);
   }
@@ -756,7 +770,13 @@ public class ContainerUtil extends ContainerUtilRt {
 
   @NotNull
   public static <T> List<T> findAll(@NotNull T[] collection, @NotNull Condition<? super T> condition) {
-    return findAll(Arrays.asList(collection), condition);
+    final List<T> result = new SmartList<T>();
+    for (T t : collection) {
+      if (condition.value(t)) {
+        result.add(t);
+      }
+    }
+    return result;
   }
 
   @NotNull
@@ -983,9 +1003,7 @@ public class ContainerUtil extends ContainerUtilRt {
   }
 
   public static <T, U extends T> U findInstance(@NotNull Iterator<T> iterator, @NotNull Class<U> aClass) {
-    // uncomment for 1.5
-    //return (U)find(iterator, new FilteringIterator.InstanceOf<U>(aClass));
-    return (U)find(iterator, new FilteringIterator.InstanceOf<T>((Class<T>)aClass));
+    return (U)find(iterator, new FilteringIterator.InstanceOf<U>(aClass));
   }
 
   @Nullable
@@ -998,15 +1016,21 @@ public class ContainerUtil extends ContainerUtilRt {
     return concat(Arrays.asList(array), fun);
   }
 
+  /**
+   * @return read-only list consisting of the elements from the collections stored in list added together
+   */
   @NotNull
   public static <T> List<T> concat(@NotNull Iterable<? extends Collection<T>> list) {
     List<T> result = new ArrayList<T>();
     for (final Collection<T> ts : list) {
       result.addAll(ts);
     }
-    return result;
+    return result.isEmpty() ? Collections.<T>emptyList() : result;
   }
 
+  /**
+   * @return read-only list consisting of the two lists added together
+   */
   @NotNull
   public static <T> List<T> concat(@NotNull final List<? extends T> list1, @NotNull final List<? extends T> list2) {
     final int size1 = list1.size();
@@ -1039,10 +1063,21 @@ public class ContainerUtil extends ContainerUtilRt {
           Iterable<? extends T> iterable = iterables[i];
           iterators[i] = iterable.iterator();
         }
-        return new SequenceIterator<T>(iterators);
+        return concatIterators(iterators);
       }
     };
   }
+
+  @NotNull
+  public static <T> Iterator<T> concatIterators(@NotNull Iterator<T>... iterators) {
+    return new SequenceIterator<T>(iterators);
+  }
+
+  @NotNull
+  public static <T> Iterator<T> concatIterators(@NotNull Collection<Iterator<T>> iterators) {
+    return new SequenceIterator<T>(iterators);
+  }
+
   @NotNull
   public static <T> Iterable<T> concat(@NotNull final T[]... iterables) {
     return new Iterable<T>() {
@@ -1053,17 +1088,21 @@ public class ContainerUtil extends ContainerUtilRt {
           T[] iterable = iterables[i];
           iterators[i] = Arrays.asList(iterable).iterator();
         }
-        return new SequenceIterator<T>(iterators);
+        return concatIterators(iterators);
       }
     };
   }
 
+  /**
+   * @return read-only list consisting of the lists added together
+   */
   @NotNull
   public static <T> List<T> concat(@NotNull final List<? extends T>... lists) {
     int size = 0;
     for (List<? extends T> each : lists) {
       size += each.size();
     }
+    if (size == 0) return emptyList();
     final int finalSize = size;
     return new AbstractList<T>() {
       @Override
@@ -1085,19 +1124,25 @@ public class ContainerUtil extends ContainerUtilRt {
     };
   }
 
+  /**
+   * @return read-only list consisting of the lists added together
+   */
   @NotNull
   public static <T> List<T> concat(@NotNull final List<List<? extends T>> lists) {
     List<? extends T>[] array = lists.toArray(new List[lists.size()]);
     return concat(array);
   }
 
+  /**
+   * @return read-only list consisting of the lists (made by listGenerator) added together
+   */
   @NotNull
-  public static <T, V> List<T> concat(@NotNull Iterable<? extends V> list, @NotNull Function<V, Collection<? extends T>> fun) {
-    final ArrayList<T> result = new ArrayList<T>();
+  public static <T, V> List<T> concat(@NotNull Iterable<? extends V> list, @NotNull Function<V, Collection<? extends T>> listGenerator) {
+    List<T> result = new ArrayList<T>();
     for (final V v : list) {
-      result.addAll(fun.fun(v));
+      result.addAll(listGenerator.fun(v));
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<T>emptyList() : result;
   }
 
   public static <T> boolean intersects(@NotNull Collection<? extends T> collection1, @NotNull Collection<? extends T> collection2) {
@@ -1110,15 +1155,18 @@ public class ContainerUtil extends ContainerUtilRt {
     return false;
   }
 
+  /**
+   * @return read-only collection consisting of elements from both collections
+   */
   @NotNull
   public static <T> Collection<T> intersection(@NotNull Collection<? extends T> collection1, @NotNull Collection<? extends T> collection2) {
-    ArrayList<T> result = new ArrayList<T>();
+    List<T> result = new ArrayList<T>();
     for (T t : collection1) {
       if (collection2.contains(t)) {
         result.add(t);
       }
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<T>emptyList() : result;
   }
 
   @Nullable
@@ -1141,11 +1189,14 @@ public class ContainerUtil extends ContainerUtilRt {
     return res;
   }
 
+  /**
+   * @return read-only collection consisting of elements from the 'from' collection which are absent from the 'what' collection
+   */
   @NotNull
   public static <T> Collection<T> subtract(@NotNull Collection<T> from, @NotNull Collection<T> what) {
     final Set<T> set = newHashSet(from);
     set.removeAll(what);
-    return set;
+    return set.isEmpty() ? ContainerUtil.<T>emptyList() : set;
   }
 
   @NotNull
@@ -1287,16 +1338,24 @@ public class ContainerUtil extends ContainerUtilRt {
     }
   }
 
+  /**
+   * @return read-only list consisting of the elements from the iterable converted by mapping
+   */
   @NotNull
   public static <T,V> List<V> map(@NotNull Iterable<? extends T> iterable, @NotNull Function<T, V> mapping) {
     List<V> result = new ArrayList<V>();
     for (T t : iterable) {
       result.add(mapping.fun(t));
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<V>emptyList() : result;
   }
+
+  /**
+   * @return read-only list consisting of the elements from the iterable converted by mapping
+   */
   @NotNull
   public static <T,V> List<V> map(@NotNull Collection<? extends T> iterable, @NotNull Function<T, V> mapping) {
+    if (iterable.isEmpty()) return emptyList();
     List<V> result = new ArrayList<V>(iterable.size());
     for (T t : iterable) {
       result.add(mapping.fun(t));
@@ -1304,23 +1363,36 @@ public class ContainerUtil extends ContainerUtilRt {
     return result;
   }
 
+  /**
+   * @return read-only list consisting of the elements from the array converted by mapping with nulls filtered out
+   */
   @NotNull
   public static <T, V> List<V> mapNotNull(@NotNull T[] array, @NotNull Function<T, V> mapping) {
     return mapNotNull(Arrays.asList(array), mapping);
   }
 
+  /**
+   * @return read-only list consisting of the elements from the array converted by mapping with nulls filtered out
+   */
   @NotNull
-  public static <T, V> V[] mapNotNull(@NotNull T[] arr, @NotNull Function<T, V> mapping, @NotNull V[] emptyArray) {
-    List<V> result = new ArrayList<V>(arr.length);
-    for (T t : arr) {
+  public static <T, V> V[] mapNotNull(@NotNull T[] array, @NotNull Function<T, V> mapping, @NotNull V[] emptyArray) {
+    List<V> result = new ArrayList<V>(array.length);
+    for (T t : array) {
       V v = mapping.fun(t);
       if (v != null) {
         result.add(v);
       }
     }
+    if (result.isEmpty()) {
+      assert emptyArray.length == 0 : "You must pass an empty array";
+      return emptyArray;
+    }
     return result.toArray(emptyArray);
   }
 
+  /**
+   * @return read-only list consisting of the elements from the iterable converted by mapping with nulls filtered out
+   */
   @NotNull
   public static <T, V> List<V> mapNotNull(@NotNull Iterable<? extends T> iterable, @NotNull Function<T, V> mapping) {
     List<V> result = new ArrayList<V>();
@@ -1330,9 +1402,12 @@ public class ContainerUtil extends ContainerUtilRt {
         result.add(o);
       }
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<V>emptyList() : result;
   }
 
+  /**
+   * @return read-only list consisting of the elements from the array converted by mapping with nulls filtered out
+   */
   @NotNull
   public static <T, V> List<V> mapNotNull(@NotNull Collection<? extends T> iterable, @NotNull Function<T, V> mapping) {
     List<V> result = new ArrayList<V>(iterable.size());
@@ -1342,29 +1417,40 @@ public class ContainerUtil extends ContainerUtilRt {
         result.add(o);
       }
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<V>emptyList() : result;
   }
 
+  /**
+   * @return read-only list consisting of the elements with nulls filtered out
+   */
   @NotNull
   public static <T> List<T> packNullables(@NotNull T... elements) {
-    ArrayList<T> list = new ArrayList<T>();
+    List<T> list = new ArrayList<T>();
     for (T element : elements) {
       addIfNotNull(element, list);
     }
-    return list;
+    return list.isEmpty() ? ContainerUtil.<T>emptyList() : list;
   }
 
+  /**
+   * @return read-only list consisting of the elements from the array converted by mapping
+   */
   @NotNull
-  public static <T, V> List<V> map(@NotNull T[] arr, @NotNull Function<T, V> mapping) {
-    List<V> result = new ArrayList<V>(arr.length);
-    for (T t : arr) {
+  public static <T, V> List<V> map(@NotNull T[] array, @NotNull Function<T, V> mapping) {
+    List<V> result = new ArrayList<V>(array.length);
+    for (T t : array) {
       result.add(mapping.fun(t));
     }
-    return result;
+    return result.isEmpty() ? ContainerUtil.<V>emptyList() : result;
   }
 
   @NotNull
   public static <T, V> V[] map(@NotNull T[] arr, @NotNull Function<T, V> mapping, @NotNull V[] emptyArray) {
+    if (arr.length==0) {
+      assert emptyArray.length == 0 : "You must pass an empty array";
+      return emptyArray;
+    }
+
     List<V> result = new ArrayList<V>(arr.length);
     for (T t : arr) {
       result.add(mapping.fun(t));
@@ -1376,7 +1462,7 @@ public class ContainerUtil extends ContainerUtilRt {
   public static <T> Set<T> set(@NotNull T ... items) {
     return addAll(newHashSet(items));
   }
-  
+
   public static <K, V> void putIfNotNull(final K key, @Nullable V value, @NotNull final Map<K, V> result) {
     if (value != null) {
       result.put(key, value);
@@ -1396,10 +1482,11 @@ public class ContainerUtil extends ContainerUtilRt {
 
   @NotNull
   public static <T> List<T> createMaybeSingletonList(@Nullable T element) {
-    return element == null ? Collections.<T>emptyList() : Collections.singletonList(element);
+    return element == null ? ContainerUtil.<T>emptyList() : Collections.singletonList(element);
   }
 
-  public static <T, V> V getOrCreate(@NotNull Map<T, V> result, final T key, final V defaultValue) {
+  @NotNull
+  public static <T, V> V getOrCreate(@NotNull Map<T, V> result, final T key, @NotNull V defaultValue) {
     V value = result.get(key);
     if (value == null) {
       result.put(key, value = defaultValue);
@@ -1407,7 +1494,7 @@ public class ContainerUtil extends ContainerUtilRt {
     return value;
   }
 
-  public static <T, V> V getOrCreate(@NotNull Map<T, V> result, final T key, @NotNull  Factory<V> factory) {
+  public static <T, V> V getOrCreate(@NotNull Map<T, V> result, final T key, @NotNull Factory<V> factory) {
     V value = result.get(key);
     if (value == null) {
       result.put(key, value = factory.create());
@@ -1453,7 +1540,7 @@ public class ContainerUtil extends ContainerUtilRt {
 
   @NotNull
   public static <T> List<T> unfold(@Nullable T t, @NotNull NullableFunction<T, T> next) {
-    if (t == null) return Collections.emptyList();
+    if (t == null) return emptyList();
 
     final ArrayList<T> list = new ArrayList<T>();
     while (t != null) {
@@ -1611,6 +1698,10 @@ public class ContainerUtil extends ContainerUtilRt {
     y1.add(newY.toNativeArray());
   }
 
+
+  /**
+   * @return read-only set consisting of the only element o
+   */
   @NotNull
   public static <T> Set<T> singleton(final T o, @NotNull final TObjectHashingStrategy<T> strategy) {
     return new Set<T>() {
@@ -1705,11 +1796,17 @@ public class ContainerUtil extends ContainerUtilRt {
     };
   }
 
+  /**
+   * @return read-only list consisting of the elements from all of the collections
+   */
   @NotNull
   public static <E> List<E> flatten(@NotNull Collection<E>[] collections) {
     return flatten(Arrays.asList(collections));
   }
 
+  /**
+   * @return read-only list consisting of the elements from all of the collections
+   */
   @NotNull
   public static <E> List<E> flatten(@NotNull Iterable<? extends Collection<E>> collections) {
     List<E> result = new ArrayList<E>();
@@ -1717,7 +1814,21 @@ public class ContainerUtil extends ContainerUtilRt {
       result.addAll(list);
     }
 
-    return result;
+    return result.isEmpty() ? ContainerUtil.<E>emptyList() : result;
+  }
+
+  /**
+   * @return read-only list consisting of the elements from all of the collections
+   */
+  @NotNull
+  public static <E> List<E> flattenIterables(@NotNull Iterable<? extends Iterable<E>> collections) {
+    List<E> result = new ArrayList<E>();
+    for (Iterable<E> list : collections) {
+      for (E e : list) {
+        result.add(e);
+      }
+    }
+    return result.isEmpty() ? ContainerUtil.<E>emptyList() : result;
   }
 
   @NotNull
@@ -1797,7 +1908,7 @@ public class ContainerUtil extends ContainerUtilRt {
   @Nullable
   public static <T> List<T> trimToSize(@Nullable List<T> list) {
     if (list == null) return null;
-    if (list.isEmpty()) return Collections.emptyList();
+    if (list.isEmpty()) return emptyList();
 
     if (list instanceof ArrayList) {
       ((ArrayList)list).trimToSize();
@@ -1831,8 +1942,21 @@ public class ContainerUtil extends ContainerUtilRt {
     return ContainerUtilRt.createEmptyCOWList();
   }
 
+  /**
+   * Creates List which is thread-safe to modify and iterate.
+   * It differs from the java.util.concurrent.CopyOnWriteArrayList in the following:
+   * - faster modification in the uncontended case
+   * - less memory
+   * - slower modification in highly contented case (which is the kind of situation you shouldn't use COWAL anyway)
+   */
+  @NotNull
+  public static <T> List<T> createLockFreeCopyOnWriteList() {
+    return new LockFreeCopyOnWriteArrayList<T>();
+  }
+
+  @NotNull
   public static <T> List<T> createLockFreeCopyOnWriteList(@NotNull Collection<? extends T> c) {
-    return new CopyOnWriteArrayList<T>(c);
+    return new LockFreeCopyOnWriteArrayList<T>(c);
   }
 
   public static <T> void addIfNotNull(@Nullable T element, @NotNull Collection<T> result) {
@@ -1871,6 +1995,17 @@ public class ContainerUtil extends ContainerUtilRt {
   @NotNull
   public static <T> T[] toArray(@NotNull Collection<T> c, @NotNull T[] sample) {
     return ContainerUtilRt.toArray(c, sample);
+  }
+
+  @NotNull
+  public static <T> T[] copyAndClear(@NotNull Collection<T> collection, @NotNull ArrayFactory<T> factory, boolean clear) {
+    int size = collection.size();
+    T[] a = factory.create(size);
+    if (size > 0) {
+      a = collection.toArray(a);
+      if (clear) collection.clear();
+    }
+    return a;
   }
 
   @NotNull

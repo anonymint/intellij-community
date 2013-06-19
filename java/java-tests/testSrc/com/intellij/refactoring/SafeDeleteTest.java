@@ -11,6 +11,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.safeDelete.SafeDeleteHandler;
 import com.intellij.testFramework.IdeaTestUtil;
+import com.intellij.testFramework.PlatformTestUtil;
 import org.jetbrains.annotations.NonNls;
 
 import java.io.File;
@@ -65,9 +66,19 @@ public class SafeDeleteTest extends MultiFileTestCase {
     doTest("IFoo");
   }
 
+  public void testUsageInExtendsList() throws Exception {
+    doSingleFileTest();
+  }
+
   public void testParameterInHierarchy() throws Exception {
     myDoCompare = false;
     doTest("C2");
+  }
+
+
+  public void testTopLevelDocComment() throws Exception {
+    myDoCompare = false;
+    doTest("foo.C1");
   }
 
   public void testTopParameterInHierarchy() throws Exception {
@@ -116,6 +127,10 @@ public class SafeDeleteTest extends MultiFileTestCase {
     doTest("Super");
   }
 
+  public void testInterfaceAsTypeParameterBound() throws Exception {
+    doSingleFileTest();   
+  }
+
   public void testLocalVariableSideEffect() throws Exception {
     myDoCompare = false;
     try {
@@ -153,7 +168,7 @@ public class SafeDeleteTest extends MultiFileTestCase {
       @Override
       public void performAction(VirtualFile rootDir, VirtualFile rootAfter) throws Exception {
         SafeDeleteTest.this.performAction(qClassName);
-        IdeaTestUtil.assertDirectoriesEqual(rootAfter, myRootBefore, IdeaTestUtil.CVS_FILE_FILTER);
+        PlatformTestUtil.assertDirectoriesEqual(rootAfter, myRootBefore);
       }
     });
   }

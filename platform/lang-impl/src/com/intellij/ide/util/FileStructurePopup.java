@@ -29,11 +29,13 @@ import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.NodeRenderer;
 import com.intellij.ide.util.treeView.smartTree.*;
 import com.intellij.navigation.ItemPresentation;
+import com.intellij.navigation.LocationPresentation;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.MnemonicHelper;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.ex.IdeDocumentHistory;
 import com.intellij.openapi.keymap.KeymapUtil;
@@ -85,6 +87,7 @@ import java.util.List;
  * @author Konstantin Bulenkov
  */
 public class FileStructurePopup implements Disposable {
+  private static final Logger LOG = Logger.getInstance("#com.intellij.ide.util.FileStructurePopup");
   private final Editor myEditor;
   private final Project myProject;
   private final StructureViewModel myTreeModel;
@@ -595,12 +598,20 @@ public class FileStructurePopup implements Disposable {
   }
 
   public boolean navigateSelectedElement() {
+    final AbstractTreeNode selectedNode = getSelectedNode();
+    if (ApplicationManager.getApplication().isInternal()) {
+      String enteredPrefix = getSpeedSearch().getEnteredPrefix();
+      String itemText = getSpeedSearchText(selectedNode);
+      if (StringUtil.isNotEmpty(enteredPrefix) && StringUtil.isNotEmpty(itemText)) {
+        LOG.info("Chosen in file structure popup by prefix '" + enteredPrefix + "': '" + itemText + "'");
+      }
+    }
+
     final Ref<Boolean> succeeded = new Ref<Boolean>();
     final CommandProcessor commandProcessor = CommandProcessor.getInstance();
     commandProcessor.executeCommand(myProject, new Runnable() {
       @Override
       public void run() {
-        final AbstractTreeNode selectedNode = getSelectedNode();
         if (selectedNode != null) {
           if (selectedNode.canNavigateToSource()) {
             myPopup.cancel();
@@ -771,27 +782,38 @@ public class FileStructurePopup implements Disposable {
   }
 
   @Nullable
-  private static String getText(final Object node) {
-    String text = String.valueOf(node);
+  public static String getSpeedSearchText(final Object userObject) {
+    String text = String.valueOf(userObject);
     if (text != null) {
-      if (node instanceof StructureViewComponent.StructureViewTreeElementWrapper) {
-        final TreeElement value = ((StructureViewComponent.StructureViewTreeElementWrapper)node).getValue();
+      if (userObject instanceof StructureViewComponent.StructureViewTreeElementWrapper) {
+        final TreeElement value = ((StructureViewComponent.StructureViewTreeElementWrapper)userObject).getValue();
         if (value instanceof PsiTreeElementBase && ((PsiTreeElementBase)value).isSearchInLocationString()) {
-          final String string = ((PsiTreeElementBase)value).getLocationString();
-          if (!StringUtil.isEmpty(string)) {
-            return text + " (" + string + ")";
+          final String locationString = ((PsiTreeElementBase)value).getLocationString();
+          if (!StringUtil.isEmpty(locationString)) {
+            String locationPrefix = null;
+            String locationSuffix = null;
+            if (value instanceof LocationPresentation) {
+              locationPrefix = ((LocationPresentation)value).getLocationPrefix();
+              locationSuffix = ((LocationPresentation)value).getLocationSuffix();
+            }
+
+            return text +
+                   StringUtil.notNullize(locationPrefix, LocationPresentation.DEFAULT_LOCATION_PREFIX) +
+                   locationString +
+                   StringUtil.notNullize(locationSuffix, LocationPresentation.DEFAULT_LOCATION_SUFFIX);
           }
         }
       }
       return text;
     }
 
-    if (node instanceof StructureViewComponent.StructureViewTreeElementWrapper) {
+    if (userObject instanceof StructureViewComponent.StructureViewTreeElementWrapper) {
       return ApplicationManager.getApplication().runReadAction(new Computable<String>() {
         @Nullable
         @Override
         public String compute() {
-          final ItemPresentation presentation = ((StructureViewComponent.StructureViewTreeElementWrapper)node).getValue().getPresentation();
+          final ItemPresentation presentation =
+            ((StructureViewComponent.StructureViewTreeElementWrapper)userObject).getValue().getPresentation();
           return presentation.getPresentableText();
         }
       });
@@ -819,7 +841,7 @@ public class FileStructurePopup implements Disposable {
           return true;
         }
 
-        final String text = getText(value);
+        final String text = getSpeedSearchText(value);
         if (text == null) return false;
 
         if (matches(text)) {
@@ -863,7 +885,7 @@ public class FileStructurePopup implements Disposable {
           final DefaultMutableTreeNode node = (DefaultMutableTreeNode)path.getLastPathComponent();
           final Object userObject = node.getUserObject();
           if (userObject instanceof FilteringTreeStructure.FilteringNode) {
-            return getText(((FilteringTreeStructure.FilteringNode)userObject).getDelegate());
+            return getSpeedSearchText(((FilteringTreeStructure.FilteringNode)userObject).getDelegate());
           }
           return "";
         }

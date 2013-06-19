@@ -20,6 +20,7 @@ import com.intellij.ide.highlighter.XmlFileType;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.Language;
 import com.intellij.lang.xml.XMLLanguage;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.project.Project;
@@ -41,8 +42,9 @@ public class XmlElementFactoryImpl extends XmlElementFactory {
     myProject = project;
   }
 
+  @Override
   @NotNull
-  public XmlTag createTagFromText(@NotNull @NonNls String text, @NotNull Language language) throws IncorrectOperationException {
+  public XmlTag createTagFromText(@NotNull @NonNls CharSequence text, @NotNull Language language) throws IncorrectOperationException {
     assert language instanceof XMLLanguage:"Tag can be created only for xml language";
     FileType type = language.getAssociatedFileType();
     if (type == null) type = StdFileTypes.XML;
@@ -52,11 +54,13 @@ public class XmlElementFactoryImpl extends XmlElementFactory {
     return tag;
   }
 
+  @Override
   @NotNull
-  public XmlTag createTagFromText(@NotNull String text) throws IncorrectOperationException {
+  public XmlTag createTagFromText(@NotNull CharSequence text) throws IncorrectOperationException {
     return createTagFromText(text, StdFileTypes.XML.getLanguage());
   }
 
+  @Override
   @NotNull
   public XmlAttribute createXmlAttribute(@NotNull String name, @NotNull String value) throws IncorrectOperationException {
     final char quoteChar;
@@ -72,9 +76,12 @@ public class XmlElementFactoryImpl extends XmlElementFactory {
                                                    XmlFileType.INSTANCE);
     XmlTag tag = document.getRootTag();
     assert tag != null;
-    return tag.getAttributes()[0];
+    XmlAttribute[] attributes = tag.getAttributes();
+    LOG.assertTrue(attributes.length == 1, document.getText());
+    return attributes[0];
   }
 
+  @Override
   @NotNull
   public XmlText createDisplayText(@NotNull String s) throws IncorrectOperationException {
     final XmlTag tagFromText = createTagFromText("<a>" + XmlTagUtil.getCDATAQuote(s) + "</a>");
@@ -83,6 +90,7 @@ public class XmlElementFactoryImpl extends XmlElementFactory {
     return textElements[0];
   }
 
+  @Override
   @NotNull
   public XmlTag createXHTMLTagFromText(@NotNull String text) throws IncorrectOperationException {
     final XmlDocument document = createXmlDocument(text, "dummy.xhtml", XHtmlFileType.INSTANCE);
@@ -91,9 +99,11 @@ public class XmlElementFactoryImpl extends XmlElementFactory {
     return tag;
   }
 
-  private XmlDocument createXmlDocument(@NonNls final String text, @NonNls final String fileName, FileType fileType) {
+  private XmlDocument createXmlDocument(@NonNls final CharSequence text, @NonNls final String fileName, FileType fileType) {
     final XmlDocument document = ((XmlFile)PsiFileFactory.getInstance(myProject).createFileFromText(fileName, fileType, text)).getDocument();
     assert document != null;
     return document;
   }
+
+  private final static Logger LOG = Logger.getInstance(XmlElementFactoryImpl.class);
 }

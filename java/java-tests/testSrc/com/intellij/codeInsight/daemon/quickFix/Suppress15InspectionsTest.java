@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2000-2012 JetBrains s.r.o.
  *
@@ -19,22 +18,23 @@ package com.intellij.codeInsight.daemon.quickFix;
 import com.intellij.codeInspection.LocalInspectionTool;
 import com.intellij.codeInspection.accessStaticViaInstance.AccessStaticViaInstance;
 import com.intellij.codeInspection.deprecation.DeprecationInspection;
-import com.intellij.codeInspection.ex.GlobalInspectionToolWrapper;
 import com.intellij.codeInspection.javaDoc.JavaDocReferenceInspection;
 import com.intellij.codeInspection.sillyAssignment.SillyAssignmentInspection;
 import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
 import com.intellij.codeInspection.unneededThrows.RedundantThrowsDeclaration;
 import com.intellij.codeInspection.unusedParameters.UnusedParametersInspection;
 import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
+import org.jetbrains.annotations.NotNull;
 
 
 public class Suppress15InspectionsTest extends LightQuickFixTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    enableInspectionTool(new GlobalInspectionToolWrapper(new UnusedParametersInspection()));
+    enableInspectionTool(new UnusedParametersInspection());
   }
 
+  @NotNull
   @Override
   protected LocalInspectionTool[] configureLocalInspectionTools() {
     return new LocalInspectionTool[]{

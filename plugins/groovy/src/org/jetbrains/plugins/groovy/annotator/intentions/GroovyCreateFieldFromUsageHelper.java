@@ -15,7 +15,7 @@
  */
 package org.jetbrains.plugins.groovy.annotator.intentions;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.daemon.impl.quickfix.CreateFieldFromUsageHelper;
 import com.intellij.codeInsight.daemon.impl.quickfix.EmptyExpression;
@@ -26,6 +26,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrField;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariableDeclaration;
@@ -70,7 +71,7 @@ public class GroovyCreateFieldFromUsageHelper extends CreateFieldFromUsageHelper
       builder.replaceElement(field.getInitializerGroovy(), new EmptyExpression());
     }
 
-    fieldDecl = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(fieldDecl);
+    fieldDecl = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(fieldDecl);
     Template template = builder.buildTemplate();
 
     TextRange range = fieldDecl.getTextRange();
@@ -83,7 +84,7 @@ public class GroovyCreateFieldFromUsageHelper extends CreateFieldFromUsageHelper
   }
 
   @Override
-  public PsiField insertFieldImpl(PsiClass targetClass, PsiField field, PsiElement place) {
+  public PsiField insertFieldImpl(@NotNull PsiClass targetClass, @NotNull PsiField field, @NotNull PsiElement place) {
     if (targetClass instanceof GroovyScriptClass) {
       PsiElement added = targetClass.getContainingFile().add(field.getParent());
       return (PsiField)((GrVariableDeclaration)added).getVariables()[0];

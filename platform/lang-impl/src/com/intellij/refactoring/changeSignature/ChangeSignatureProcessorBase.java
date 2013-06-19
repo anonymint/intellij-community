@@ -16,6 +16,7 @@
 package com.intellij.refactoring.changeSignature;
 
 import com.intellij.ide.actions.CopyReferenceAction;
+import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.openapi.command.undo.BasicUndoableAction;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.command.undo.UndoableAction;
@@ -28,9 +29,10 @@ import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
 import com.intellij.refactoring.listeners.UndoRefactoringElementListener;
 import com.intellij.refactoring.listeners.impl.RefactoringTransaction;
+import com.intellij.refactoring.rename.ResolveSnapshotProvider;
+import com.intellij.refactoring.rename.inplace.VariableInplaceRenamer;
 import com.intellij.refactoring.util.MoveRenameUsageInfo;
 import com.intellij.usageView.UsageInfo;
-import com.intellij.usageView.UsageViewUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.hash.HashMap;
@@ -65,6 +67,7 @@ public abstract class ChangeSignatureProcessorBase extends BaseRefactoringProces
     myManager = PsiManager.getInstance(project);
   }
 
+  @Override
   @NotNull
   protected UsageInfo[] findUsages() {
     List<UsageInfo> infos = new ArrayList<UsageInfo>();
@@ -110,12 +113,14 @@ public abstract class ChangeSignatureProcessorBase extends BaseRefactoringProces
     return super.isPreviewUsages(usages);
   }
 
+  @Override
   protected void performRefactoring(UsageInfo[] usages) {
     RefactoringTransaction transaction = getTransaction();
     final RefactoringElementListener elementListener = transaction == null ? null : transaction.getElementListener(myChangeInfo.getMethod());
     final String fqn = CopyReferenceAction.elementToFqn(myChangeInfo.getMethod());
     if (fqn != null) {
       UndoableAction action = new BasicUndoableAction() {
+        @Override
         public void undo() {
           if (elementListener instanceof UndoRefactoringElementListener) {
             ((UndoRefactoringElementListener)elementListener).undoElementMovedOrRenamed(myChangeInfo.getMethod(), fqn);
@@ -130,6 +135,15 @@ public abstract class ChangeSignatureProcessorBase extends BaseRefactoringProces
     }
     try {
       final ChangeSignatureUsageProcessor[] processors = ChangeSignatureUsageProcessor.EP_NAME.getExtensions();
+
+      final ResolveSnapshotProvider resolveSnapshotProvider = myChangeInfo.isParameterNamesChanged() ?
+                                                              VariableInplaceRenamer.INSTANCE.forLanguage(myChangeInfo.getMethod().getLanguage()) : null;
+      final List<ResolveSnapshotProvider.ResolveSnapshot> snapshots = new ArrayList<ResolveSnapshotProvider.ResolveSnapshot>();
+      for (ChangeSignatureUsageProcessor processor : processors) {
+        if (resolveSnapshotProvider != null) {
+          processor.registerConflictResolvers(snapshots, resolveSnapshotProvider, usages, myChangeInfo);
+        }
+      }
 
       for (UsageInfo usage : usages) {
         for (ChangeSignatureUsageProcessor processor : processors) {
@@ -148,6 +162,13 @@ public abstract class ChangeSignatureProcessorBase extends BaseRefactoringProces
         }
       }
 
+      if (!snapshots.isEmpty()) {
+        for (ParameterInfo parameterInfo : myChangeInfo.getNewParameters()) {
+          for (ResolveSnapshotProvider.ResolveSnapshot snapshot : snapshots) {
+            snapshot.apply(parameterInfo.getName());
+          }
+        }
+      }
       final PsiElement method = myChangeInfo.getMethod();
       LOG.assertTrue(method.isValid());
       if (elementListener != null && myChangeInfo.isNameChanged()) {
@@ -159,8 +180,9 @@ public abstract class ChangeSignatureProcessorBase extends BaseRefactoringProces
     }
   }
 
+  @Override
   protected String getCommandName() {
-    return RefactoringBundle.message("changing.signature.of.0", UsageViewUtil.getDescriptiveName(myChangeInfo.getMethod()));
+    return RefactoringBundle.message("changing.signature.of.0", DescriptiveNameUtil.getDescriptiveName(myChangeInfo.getMethod()));
   }
 
   public ChangeInfo getChangeInfo() {

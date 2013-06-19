@@ -33,7 +33,7 @@ import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
@@ -171,7 +171,7 @@ public class FilePathCompletionContributor extends CompletionContributor {
     if (prefixMatched && (suitableFileTypes.length == 0 || invocationCount > 2)) return true;
 
     if (prefixMatched) {
-      final String extension = FileUtil.getExtension(fileName);
+      final String extension = FileUtilRt.getExtension(fileName);
       if (extension.length() == 0) return false;
 
       for (final FileType fileType : suitableFileTypes) {
@@ -239,9 +239,9 @@ public class FilePathCompletionContributor extends CompletionContributor {
       }
     }
     else if (original instanceof FileReferenceOwner) {
-      final FileReference fileReference = ((FileReferenceOwner)original).getLastFileReference();
-      if (fileReference != null) {
-        return Pair.create(fileReference, true);
+      final PsiFileReference fileReference = ((FileReferenceOwner)original).getLastFileReference();
+      if (fileReference instanceof FileReference) {
+        return Pair.create((FileReference) fileReference, true);
       }
     }
 
@@ -296,7 +296,7 @@ public class FilePathCompletionContributor extends CompletionContributor {
 
         FileReference ref = fileReferencePair.getFirst();
         context.setTailOffset(ref.getRangeInElement().getEndOffset() + ref.getElement().getTextRange().getStartOffset());
-        ref.bindToElement(myFile, true);
+        ref.bindToElement(myFile);
       }
     }
 

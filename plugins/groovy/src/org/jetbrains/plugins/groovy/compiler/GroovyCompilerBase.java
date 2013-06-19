@@ -152,7 +152,7 @@ public abstract class GroovyCompilerBase implements TranslatingCompiler {
     if (profileGroovyc) {
       parameters.getVMParametersList().add("-XX:+HeapDumpOnOutOfMemoryError");
     }
-    parameters.getVMParametersList().addAll(HttpConfigurable.getProxyCmdLineProperties());
+    parameters.getVMParametersList().addAll(HttpConfigurable.convertArguments(HttpConfigurable.getJvmPropertiesList(false, null)));
 
     //debug
     //parameters.getVMParametersList().add("-Xdebug"); parameters.getVMParametersList().add("-Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=5239");
@@ -224,7 +224,7 @@ public abstract class GroovyCompilerBase implements TranslatingCompiler {
         toRecompile.add(vFile);
       }
 
-      for (CompilerMessage compilerMessage : processHandler.getCompilerMessages()) {
+      for (CompilerMessage compilerMessage : processHandler.getCompilerMessages(module.getName())) {
         final String url = compilerMessage.getSourcePath();
         compileContext.addMessage(getMessageCategory(compilerMessage), compilerMessage.getMessageText(),
                                   url == null ? null : VfsUtil.pathToUrl(FileUtil.toSystemIndependentName(url)),

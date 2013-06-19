@@ -66,7 +66,7 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 
-public abstract class BaseRefactoringProcessor {
+public abstract class BaseRefactoringProcessor implements Runnable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.refactoring.BaseRefactoringProcessor");
 
   protected final Project myProject;
@@ -233,7 +233,7 @@ public abstract class BaseRefactoringProcessor {
       public UsageSearcher create() {
         return new UsageSearcher() {
           @Override
-          public void generate(final Processor<Usage> processor) {
+          public void generate(@NotNull final Processor<Usage> processor) {
             ApplicationManager.getApplication().runReadAction(new Runnable() {
               @Override
               public void run() {
@@ -269,6 +269,7 @@ public abstract class BaseRefactoringProcessor {
 
             for (final Usage usage : usages) {
               ApplicationManager.getApplication().runReadAction(new Runnable() {
+                @Override
                 public void run() {
                   processor.process(usage);
                 }
@@ -285,7 +286,7 @@ public abstract class BaseRefactoringProcessor {
   protected boolean skipNonCodeUsages() {
     return false;
   }
-  
+
   private boolean ensureElementsWritable(@NotNull final UsageInfo[] usages, final UsageViewDescriptor descriptor) {
     Set<PsiElement> elements = new THashSet<PsiElement>();
     for (UsageInfo usage : usages) {
@@ -340,7 +341,9 @@ public abstract class BaseRefactoringProcessor {
     for (Usage usage : usages) {
       if (usage instanceof PsiElementUsage) {
         final PsiElementUsage elementUsage = (PsiElementUsage)usage;
-        final PsiFile containingFile = elementUsage.getElement().getContainingFile();
+        final PsiElement element = elementUsage.getElement();
+        if (element == null) continue;
+        final PsiFile containingFile = element.getContainingFile();
         if (elementUsage.isNonCodeUsage()) {
           nonCodeUsageCount++;
           nonCodeFiles.add(containingFile);
@@ -378,6 +381,7 @@ public abstract class BaseRefactoringProcessor {
       @Override
       public void run() {
         ApplicationManager.getApplication().runReadAction(new Runnable() {
+          @Override
           public void run() {
             convertUsagesRef.set(UsageInfo2UsageAdapter.convert(usageInfos));
           }
@@ -517,6 +521,7 @@ public abstract class BaseRefactoringProcessor {
     }
   }
 
+  @Override
   public final void run() {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       ApplicationManager.getApplication().assertIsDispatchThread();
@@ -592,15 +597,21 @@ public abstract class BaseRefactoringProcessor {
     return true;
   }
 
+  @NotNull
   protected ConflictsDialog prepareConflictsDialog(MultiMap<PsiElement, String> conflicts, @Nullable final UsageInfo[] usages) {
-    final ConflictsDialog conflictsDialog = new ConflictsDialog(myProject, conflicts, usages == null ? null : new Runnable() {
-      @Override
-      public void run() {
-        execute(usages);
-      }
-    }, false);
+    final ConflictsDialog conflictsDialog = createConflictsDialog(conflicts, usages);
     conflictsDialog.setCommandName(getCommandName());
     return conflictsDialog;
+  }
+
+  @NotNull
+  protected ConflictsDialog createConflictsDialog(MultiMap<PsiElement, String> conflicts, @Nullable final UsageInfo[] usages) {
+    return new ConflictsDialog(myProject, conflicts, usages == null ? null : new Runnable() {
+        @Override
+        public void run() {
+          execute(usages);
+        }
+      }, false, true);
   }
 
   @NotNull

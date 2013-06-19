@@ -15,19 +15,12 @@
  */
 package com.intellij.xdebugger.impl.breakpoints.ui.tree;
 
+import com.intellij.openapi.project.Project;
 import com.intellij.ui.CheckboxTree;
 import com.intellij.ui.CheckedTreeNode;
 
 public class BreakpointsCheckboxTree extends CheckboxTree {
 
-
-  @Override
-  protected void onDoubleClick(CheckedTreeNode node) {
-    super.onDoubleClick(node);
-    if (myDelegate != null) {
-      myDelegate.didSelectNode(node);
-    }
-  }
 
   @Override
   protected void onNodeStateChanged(CheckedTreeNode node) {
@@ -38,8 +31,6 @@ public class BreakpointsCheckboxTree extends CheckboxTree {
   }
 
   interface Delegate {
-    void didSelectNode(CheckedTreeNode node);
-
     void nodeStateChanged(CheckedTreeNode node);
   }
 
@@ -49,8 +40,8 @@ public class BreakpointsCheckboxTree extends CheckboxTree {
 
   private Delegate myDelegate = null;
 
-  public BreakpointsCheckboxTree(BreakpointItemsTreeController model) {
-    super(new BreakpointsTreeCellRenderer.BreakpointsCheckboxTreeCellRenderer(), model.getRoot());
+  public BreakpointsCheckboxTree(Project project, BreakpointItemsTreeController model) {
+    super(new BreakpointsTreeCellRenderer.BreakpointsCheckboxTreeCellRenderer(project), model.getRoot());
     setHorizontalAutoScrollingEnabled(false);
   }
 }

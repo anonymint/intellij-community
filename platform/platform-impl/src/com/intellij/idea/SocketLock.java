@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,7 +88,7 @@ public class SocketLock {
     if (mySocket == null) {
       if (!myIsDialogShown) {
         final String productName = ApplicationNamesInfo.getInstance().getProductName();
-        if (StartupUtil.isHeadless()) { //team server inspections
+        if (Main.isHeadless()) { //team server inspections
           throw new RuntimeException("Only one instance of " + productName + " can be run at a time.");
         }
         @NonNls final String pathToLogFile = PathManager.getLogPath() + "/idea.log file".replace('/', File.separatorChar);
@@ -161,7 +161,7 @@ public class SocketLock {
       if (result.contains(path)) {
         try {
           DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-          out.writeUTF(ACTIVATE_COMMAND + StringUtil.join(args, "\0"));
+          out.writeUTF(ACTIVATE_COMMAND + new File(".").getAbsolutePath() + "\0" + StringUtil.join(args, "\0"));
           out.flush();
           String response = in.readUTF();
           if (response.equals("ok")) {

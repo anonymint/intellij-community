@@ -47,14 +47,14 @@ public class TrafficTooltipRendererImpl extends ComparableObject.Impl implements
   @Override
   public void repaintTooltipWindow() {
     if (myPanel != null) {
-      SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(myTrafficLightRenderer.getProject());
+      SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(myTrafficLightRenderer.getProject());
       TrafficLightRenderer.DaemonCodeAnalyzerStatus status = myTrafficLightRenderer.getDaemonCodeAnalyzerStatus(true, severityRegistrar);
       myPanel.updatePanel(status, false);
     }
   }
 
   @Override
-  public LightweightHint show(@NotNull Editor editor, @NotNull Point p, boolean alignToRight, TooltipGroup group, @NotNull HintHint hintHint) {
+  public LightweightHint show(@NotNull Editor editor, @NotNull Point p, boolean alignToRight, @NotNull TooltipGroup group, @NotNull HintHint hintHint) {
     myTrafficLightRenderer = (TrafficLightRenderer)((EditorMarkupModelImpl)editor.getMarkupModel()).getErrorStripeRenderer();
     myPanel = new TrafficProgressPanel(myTrafficLightRenderer, editor, hintHint);
     LineTooltipRenderer.correctLocation(editor, myPanel, p, alignToRight, false, -1);

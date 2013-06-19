@@ -23,12 +23,14 @@ import org.jetbrains.annotations.Nullable;
  * @author AKireyev
  */
 public interface ExtensionPoint<T> {
+  @NotNull
   String getName();
   AreaInstance getArea();
 
   /**
    * @deprecated use {@link #getClassName()} instead
    */
+  @NotNull
   String getBeanClassName();
 
   void registerExtension(@NotNull T extension);
@@ -50,10 +52,13 @@ public interface ExtensionPoint<T> {
 
   void reset();
 
+  @NotNull
   Class<T> getExtensionClass();
 
+  @NotNull
   Kind getKind();
 
+  @NotNull
   String getClassName();
 
   enum Kind {INTERFACE, BEAN_CLASS}

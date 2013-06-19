@@ -15,8 +15,7 @@
  */
 package com.intellij.codeInsight.intention.impl;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
-import com.intellij.codeInsight.daemon.impl.analysis.HighlightUtil;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.impl.quickfix.CreateFromUsageUtils;
 import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
@@ -30,6 +29,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.source.jsp.jspJava.JspClass;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.refactoring.util.RefactoringChangeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -70,7 +70,7 @@ public abstract class BaseMoveInitializerToMethodAction extends PsiElementBaseIn
 
   @Override
   public void invoke(@NotNull Project project, Editor editor, @NotNull PsiElement element) throws IncorrectOperationException {
-    if (!CodeInsightUtilBase.preparePsiElementForWrite(element)) return;
+    if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
 
     final PsiField field = PsiTreeUtil.getParentOfType(element, PsiField.class);
     assert field != null;
@@ -79,6 +79,7 @@ public abstract class BaseMoveInitializerToMethodAction extends PsiElementBaseIn
 
     final Collection<PsiMethod> methodsToAddInitialization = getOrCreateMethods(project, editor, element.getContainingFile(), aClass);
 
+    if (methodsToAddInitialization.isEmpty()) return;
 
     final List<PsiExpressionStatement> assignments = addFieldAssignments(field, methodsToAddInitialization);
     field.getInitializer().delete();
@@ -151,7 +152,7 @@ public abstract class BaseMoveInitializerToMethodAction extends PsiElementBaseIn
   private static boolean isSuperOrThisMethodCall(@NotNull PsiStatement statement) {
     if (statement instanceof PsiExpressionStatement) {
       final PsiElement expression = ((PsiExpressionStatement)statement).getExpression();
-      if (HighlightUtil.isSuperOrThisMethodCall(expression)) {
+      if (RefactoringChangeUtil.isSuperOrThisMethodCall(expression)) {
         return true;
       }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -214,8 +214,13 @@ ul li p {
 }
 
 a {
-    color: #5a7b88;
+    color: #589df6;
     text-decoration: underline
+}
+
+address {
+    color: #589df6;
+    font-style: italic
 }
 
 big {
@@ -323,11 +328,6 @@ th {
     padding-bottom: 3
 }
 
-address {
-    color: #5a7b88;
-    font-style: italic
-}
-
 blockquote {
     margin-top: 5;
     margin-bottom: 5;
@@ -352,6 +352,14 @@ pre p {
 caption {
     caption-side: top;
     text-align: center
+}
+
+table {
+    border: none;
+}
+
+td {
+    border: none;
 }
 
 nobr {

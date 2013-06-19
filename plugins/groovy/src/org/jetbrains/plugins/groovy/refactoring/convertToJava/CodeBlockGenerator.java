@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 package org.jetbrains.plugins.groovy.refactoring.convertToJava;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.containers.hash.HashSet;
@@ -23,6 +25,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.codeInspection.noReturnMethod.MissingReturnInspection;
 import org.jetbrains.plugins.groovy.codeInspection.utils.ControlFlowUtils;
+import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElement;
 import org.jetbrains.plugins.groovy.lang.psi.api.GroovyResolveResult;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.GrCondition;
@@ -64,6 +67,8 @@ import static org.jetbrains.plugins.groovy.refactoring.convertToJava.TypeWriter.
  */
 public class CodeBlockGenerator extends Generator {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.plugins.groovy.refactoring.convertToJava.CodeBlockGenerator");
+
+  private static final boolean IN_TEST = ApplicationManager.getApplication().isUnitTestMode();
 
   private final StringBuilder builder;
   private final ExpressionContext context;
@@ -122,7 +127,7 @@ public class CodeBlockGenerator extends Generator {
   }
 
   public void generateCodeBlock(GrCodeBlock block, boolean shouldInsertReturnNull) {
-    builder.append("{\n");
+    builder.append("{");
     GrParameter[] parameters;
     if (block.getParent() instanceof GrMethod) {
       GrMethod method = (GrMethod)block.getParent();
@@ -149,14 +154,36 @@ public class CodeBlockGenerator extends Generator {
   }
 
   public void visitStatementOwner(GrStatementOwner owner, boolean shouldInsertReturnNull) {
-    final GrStatement[] statements = owner.getStatements();
-    for (GrStatement statement : statements) {
-      statement.accept(this);
-      builder.append('\n');
+    boolean hasLineFeed = false;
+    for (PsiElement e = owner.getFirstChild(); e != null; e = e.getNextSibling()) {
+      if (e instanceof GrStatement) {
+        ((GrStatement)e).accept(this);
+        hasLineFeed = false;
+      }
+      else if (TokenSets.COMMENT_SET.contains(e.getNode().getElementType())) {
+        builder.append(e.getText());
+      }
+      else if (org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil.isLineFeed(e)) {
+        hasLineFeed = true;
+        if (IN_TEST) {
+          builder.append(genSameLineFeed(e.getText()));
+        }
+        else {
+          builder.append(e.getText());
+        }
+      }
     }
     if (shouldInsertReturnNull) {
+      if (!hasLineFeed) {
+        builder.append('\n');
+      }
       builder.append("return null;\n");
     }
+  }
+
+  private static String genSameLineFeed(String text) {
+    final int count = StringUtil.countChars(text, '\n');
+    return StringUtil.repeatSymbol('\n', count);
   }
 
   @Override
@@ -278,7 +305,7 @@ public class CodeBlockGenerator extends Generator {
     GenerationUtil.writeStatement(builder, context, labeledStatement, new StatementWriter() {
       @Override
       public void writeStatement(StringBuilder builder, ExpressionContext context) {
-        final String label = labeledStatement.getLabelName();
+        final String label = labeledStatement.getName();
         final GrStatement statement = labeledStatement.getStatement();
 
         builder.append(label).append(": ");
@@ -499,7 +526,10 @@ public class CodeBlockGenerator extends Generator {
   @Override
   public void visitFinallyClause(GrFinallyClause finallyClause) {
     builder.append("finally ");
-    finallyClause.getBody().accept(this);
+    final GrOpenBlock body = finallyClause.getBody();
+    if (body != null) {
+      body.accept(this);
+    }
   }
 
   @Override

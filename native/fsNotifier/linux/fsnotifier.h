@@ -21,10 +21,18 @@
 #include <stdio.h>
 
 
+// messaging
+typedef enum {
+  MSG_INSTANCE_LIMIT, MSG_WATCH_LIMIT
+} MSG;
+
+void message(MSG id);
+
+
 // logging
 void userlog(int priority, const char* format, ...);
 
-#define CHECK_NULL(p, r) if (p == NULL)  { userlog(LOG_ERR, "out of memory"); return r; }
+#define CHECK_NULL(p, r) if (p == NULL) { userlog(LOG_ERR, "out of memory"); return r; }
 
 
 // variable-length array
@@ -38,6 +46,7 @@ void array_put(array* a, int index, void* element);
 void* array_get(array* a, int index);
 void array_delete(array* a);
 void array_delete_vs_data(array* a);
+void array_delete_data(array* a);
 
 
 // poor man's hash table
@@ -53,14 +62,13 @@ void table_delete(table* t);
 enum {
   ERR_IGNORE = -1,
   ERR_CONTINUE = -2,
-  ERR_ABORT = -3
+  ERR_ABORT = -3,
+  ERR_MISSING = -4
 };
 
 bool init_inotify();
 void set_inotify_callback(void (* callback)(char*, int));
 int get_inotify_fd();
-int get_watch_count();
-bool watch_limit_reached();
 int watch(const char* root, array* mounts);
 void unwatch(int id);
 bool process_inotify_input();

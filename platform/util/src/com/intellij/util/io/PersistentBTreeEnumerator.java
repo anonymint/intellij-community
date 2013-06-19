@@ -62,22 +62,22 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
   private static final int DIRTY_MAGIC = 0xbabe1977;
   private static final int VERSION = 6 + IntToIntBtree.version();
   private static final int CORRECTLY_CLOSED_MAGIC = 0xebabafc + VERSION + PAGE_SIZE;
-  @NotNull private static Version ourVersion = new Version(CORRECTLY_CLOSED_MAGIC, DIRTY_MAGIC);
+  @NotNull private static final Version ourVersion = new Version(CORRECTLY_CLOSED_MAGIC, DIRTY_MAGIC);
   private static final int KEY_SHIFT = 1;
 
   public PersistentBTreeEnumerator(@NotNull File file, @NotNull KeyDescriptor<Data> dataDescriptor, int initialSize) throws IOException {
-    this(file, dataDescriptor, initialSize, ourLock.myDefaultStorageLockContext);
+    this(file, dataDescriptor, initialSize, null);
   }
 
   public PersistentBTreeEnumerator(@NotNull File file,
                                    @NotNull KeyDescriptor<Data> dataDescriptor,
                                    int initialSize,
-                                   PagedFileStorage.StorageLockContext lockContext) throws IOException {
+                                   @Nullable PagedFileStorage.StorageLockContext lockContext) throws IOException {
     super(file,
           new ResizeableMappedFile(
             file,
             initialSize,
-            lockContext != null ? lockContext:ourLock.myDefaultStorageLockContext,
+            lockContext,
             VALUE_PAGE_SIZE,
             true
           ),
@@ -226,13 +226,18 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
     }
   }
 
+  protected int addrToIndex(int addr) {
+    assert myExternalKeysNoMapping;
+    return addr + KEY_SHIFT;
+  }
+
   @Override
   protected int indexToAddr(int idx) {
     if (myExternalKeysNoMapping) {
       IntToIntBtree.myAssert(idx > 0);
       return idx - KEY_SHIFT;
     }
-    
+
     int anInt = myStorage.getInt(idx);
     if (IntToIntBtree.doSanityCheck) {
       IntToIntBtree.myAssert(anInt >= 0 || myDataDescriptor instanceof InlineKeyDescriptor);
@@ -242,7 +247,7 @@ public class PersistentBTreeEnumerator<Data> extends PersistentEnumeratorBase<Da
 
   @Override
   protected int setupValueId(int hashCode, int dataOff) {
-    if (myExternalKeysNoMapping) return dataOff + KEY_SHIFT;
+    if (myExternalKeysNoMapping) return addrToIndex(dataOff);
     final PersistentEnumeratorBase.RecordBufferHandler<PersistentEnumeratorBase> recordHandler = getRecordHandler();
     final byte[] buf = recordHandler.getRecordBuffer(this);
 

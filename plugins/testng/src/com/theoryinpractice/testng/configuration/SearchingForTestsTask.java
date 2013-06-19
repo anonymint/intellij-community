@@ -29,11 +29,13 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.project.DumbModeAction;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PackageScope;
@@ -56,6 +58,8 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class SearchingForTestsTask extends Task.Backgroundable {
   private static final Logger LOG = Logger.getInstance("#" + SearchingForTestsTask.class.getName());
@@ -86,7 +90,20 @@ public class SearchingForTestsTask extends Task.Backgroundable {
     try {
       mySocket = myServerSocket.accept();
       try {
-        fillTestObjects(myClasses);
+        final CantRunException[] ex = new CantRunException[1];
+        DumbService.getInstance(myProject).repeatUntilPassesInSmartMode(new Runnable() {
+          @Override
+          public void run() {
+            myClasses.clear();
+            try {
+              fillTestObjects(myClasses);
+            }
+            catch (CantRunException e) {
+              ex[0] = e;
+            }
+          }
+        });
+        if (ex[0] != null) throw ex[0];
       }
       catch (CantRunException e) {
         logCantRunException(e);
@@ -105,17 +122,12 @@ public class SearchingForTestsTask extends Task.Backgroundable {
     writeTempFile();
     finish();
 
-    myClient.startListening(myConfig);
+    if (!Registry.is("testng_sm_runner", false)) myClient.startListening(myConfig);
   }
 
   @Override
   public void onCancel() {
     finish();
-  }
-
-  @Override
-  public DumbModeAction getDumbModeAction() {
-    return DumbModeAction.WAIT;
   }
 
   public void finish() {
@@ -224,7 +236,7 @@ public class SearchingForTestsTask extends Task.Backgroundable {
     File xmlFile = suite.save(new File(PathManager.getSystemPath()));
     String path = xmlFile.getAbsolutePath() + "\n";
     try {
-      FileUtil.writeToFile(myTempFile, path.getBytes(), true);
+      FileUtil.writeToFile(myTempFile, path.getBytes(CharsetToolkit.UTF8_CHARSET), true);
     }
     catch (IOException e) {
       LOG.error(e);
@@ -236,7 +248,7 @@ public class SearchingForTestsTask extends Task.Backgroundable {
     try {
       if (buildTestParams.isEmpty()) {
         String path = new File(myData.getSuiteName()).getAbsolutePath() + "\n";
-        FileUtil.writeToFile(myTempFile, path.getBytes(), true);
+        FileUtil.writeToFile(myTempFile, path.getBytes(CharsetToolkit.UTF8_CHARSET), true);
         return;
       }
       final Parser parser = new Parser(myData.getSuiteName());
@@ -258,7 +270,7 @@ public class SearchingForTestsTask extends Task.Backgroundable {
           fileWriter.close();
         }
         String path = suiteFile.getAbsolutePath() + "\n";
-        FileUtil.writeToFile(myTempFile, path.getBytes(), true);
+        FileUtil.writeToFile(myTempFile, path.getBytes(CharsetToolkit.UTF8_CHARSET), true);
       }
     }
     catch (Exception e) {
@@ -372,23 +384,57 @@ public class SearchingForTestsTask extends Task.Backgroundable {
             return ClassUtil.findPsiClass(psiManager, className.replace('/', '.'), null, true, getSearchScope());
           }
         });
-        if (psiClass == null) {
-          throw new CantRunException("Class " + className + " not found");
+        if (psiClass != null) {
+          final Boolean hasTest = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+            @Override
+            public Boolean compute() {
+              return TestNGUtil.hasTest(psiClass);
+            }
+          });
+          if (hasTest) {
+            if (StringUtil.isEmpty(methodName)) {
+              calculateDependencies(null, classes, psiClass);
+            }
+            else {
+              collectTestMethods(classes, psiClass, methodName);
+            }
+          } else {
+            throw new CantRunException("No tests found in class " + className);
+          }
         }
-        if (ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
-          @Override
-          public Boolean compute() {
-            return TestNGUtil.hasTest(psiClass);
+      }
+      if (classes.size() != data.getPatterns().size()) {
+        TestSearchScope scope = myConfig.getPersistantData().getScope();
+        final List<Pattern> compilePatterns = new ArrayList<Pattern>();
+        for (String p : data.getPatterns()) {
+          final Pattern compilePattern;
+          try {
+            compilePattern = Pattern.compile(p);
           }
-        })) {
-          if (StringUtil.isEmpty(methodName)) {
-            calculateDependencies(null, classes, psiClass);
+          catch (PatternSyntaxException e) {
+            continue;
           }
-          else {
-            collectTestMethods(classes, psiClass, methodName);
+          if (compilePattern != null) {
+            compilePatterns.add(compilePattern);
           }
-        } else {
-          throw new CantRunException("No tests found in class " + className);
+        }
+        TestClassFilter projectFilter =
+          new TestClassFilter(scope.getSourceScope(myConfig).getGlobalSearchScope(), myProject, true, true){
+            @Override
+            public boolean isAccepted(PsiClass psiClass) {
+              if (super.isAccepted(psiClass)) {
+                final String qualifiedName = psiClass.getQualifiedName();
+                LOG.assertTrue(qualifiedName != null);
+                for (Pattern pattern : compilePatterns) {
+                  if (pattern.matcher(qualifiedName).matches()) return true;
+                }
+              }
+              return false;
+            }
+          };
+        calculateDependencies(null, classes, TestNGUtil.getAllTestClasses(projectFilter, false));
+        if (classes.size() == 0) {
+          throw new CantRunException("No tests found in for patterns \"" + StringUtil.join(data.getPatterns(), " || ") + '\"');
         }
       }
     }

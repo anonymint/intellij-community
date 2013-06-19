@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,14 +20,18 @@ import com.intellij.codeInsight.generation.PsiGenerationInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMember;
+import com.intellij.psi.codeStyle.CodeStyleManager;
+import com.intellij.psi.codeStyle.JavaCodeStyleManager;
+import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.groovy.lang.GrReferenceAdjuster;
+import org.jetbrains.plugins.groovy.lang.groovydoc.psi.api.GrDocComment;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElement;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
@@ -36,6 +40,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrOpenBlock;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod;
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GroovyScriptClass;
+import org.jetbrains.plugins.groovy.refactoring.GroovyChangeContextUtil;
 
 import static org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil.isWhiteSpace;
 
@@ -55,6 +60,13 @@ public class GroovyGenerationInfo<T extends PsiMember> extends PsiGenerationInfo
 
   @Override
   public void insert(@NotNull PsiClass aClass, @Nullable PsiElement anchor, boolean before) throws IncorrectOperationException {
+
+    final T proto = getPsiMember();
+    if (proto instanceof GrMethod) {
+      GroovyChangeContextUtil.encodeContextInfo(((GrMethod)proto).getParameterList());
+    }
+
+
     super.insert(aClass, anchor, before);
 
     final T member = getPsiMember();
@@ -64,21 +76,49 @@ public class GroovyGenerationInfo<T extends PsiMember> extends PsiGenerationInfo
     final GroovyPsiElementFactory factory = GroovyPsiElementFactory.getInstance(member.getProject());
 
     final PsiElement prev = member.getPrevSibling();
-    if (prev!=null && GroovyTokenTypes.mNLS == prev.getNode().getElementType()) {
+    if (prev != null && GroovyTokenTypes.mNLS == prev.getNode().getElementType()) {
       prev.replace(factory.createLineTerminator(1));
+    }
+    else if (prev instanceof PsiMember) {
+      member.getParent().getNode().addLeaf(GroovyTokenTypes.mNLS, "\n", member.getNode());
     }
 
     final PsiElement next = member.getNextSibling();
     if (next != null && GroovyTokenTypes.mNLS == next.getNode().getElementType()) {
       next.replace(factory.createLineTerminator(1));
     }
+    else if (next instanceof PsiMember) {
+      member.getParent().getNode().addLeaf(GroovyTokenTypes.mNLS, "\n", next.getNode());
+    }
 
-    GrReferenceAdjuster.shortenReferences(member);
+    if (member instanceof GrMethod) {
+      GroovyChangeContextUtil.decodeContextInfo(((GrMethod)member).getParameterList(), null, null);
+    }
+
+    JavaCodeStyleManager.getInstance(member.getProject()).shortenClassReferences(member);
+
+    adjustDocCommentIfExists(member);
+  }
+
+  private static void adjustDocCommentIfExists(PsiMember member) {
+    final PsiElement child = member.getFirstChild();
+    if (child instanceof PsiDocComment) {
+      final Project project = member.getProject();
+      final GrDocComment groovyDoc = GroovyPsiElementFactory.getInstance(project).createDocCommentFromText(child.getText());
+      child.delete();
+      CodeStyleManager.getInstance(project).reformat(member);
+      member.getParent().addBefore(groovyDoc, member);
+    }
   }
 
   @Override
   public PsiElement findInsertionAnchor(@NotNull PsiClass aClass, @NotNull PsiElement leaf) {
     PsiElement parent = aClass instanceof GroovyScriptClass ? aClass.getContainingFile() : ((GrTypeDefinition)aClass).getBody();
+    if (parent == null) return null;
+
+    if (!PsiTreeUtil.isAncestor(parent, leaf, true)) {
+      return null; // we are not in class body
+    }
 
     PsiElement element = PsiTreeUtil.findPrevParent(parent, leaf);
 

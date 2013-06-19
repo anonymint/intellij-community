@@ -115,8 +115,13 @@ public abstract class DebuggerUtils {
         if (toStringMethod == null) {
           throw EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.cannot.evaluate.tostring", objRef.referenceType().name()));
         }
-        final StringReference stringReference = (StringReference)debugProcess.invokeInstanceMethod(evaluationContext, objRef, toStringMethod, Collections.emptyList(), 0);
-        return  stringReference == null ? "null" : stringReference.value();
+        // while result must be of com.sun.jdi.StringReference type, it turns out that sometimes (jvm bugs?)
+        // it is a plain com.sun.tools.jdi.ObjectReferenceImpl
+        final Value result = debugProcess.invokeInstanceMethod(evaluationContext, objRef, toStringMethod, Collections.emptyList(), 0);
+        if (result == null) {
+          return "null";
+        }
+        return result instanceof StringReference ? ((StringReference)result).value() : result.toString();
       }
       throw EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.unsupported.expression.type"));
     }
@@ -125,7 +130,7 @@ public abstract class DebuggerUtils {
     }
   }
 
-  public static final int MAX_DISPLAY_LABEL_LENGTH = 1024/*kb*/ *1024 /*bytes*/ / 2; // 1 Mb string
+  public static final int MAX_DISPLAY_LABEL_LENGTH = 1024 * 5;
 
   public static String convertToPresentationString(String str) {
     if (str.length() > MAX_DISPLAY_LABEL_LENGTH) {

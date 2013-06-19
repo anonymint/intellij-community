@@ -33,15 +33,14 @@ import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.*;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.util.IJSwingUtilities;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.hash.LinkedHashMap;
 import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.event.HyperlinkEvent;
-import java.net.MalformedURLException;
-import java.net.URL;
+import javax.swing.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -85,7 +84,7 @@ public class EventLog {
     });
   }
 
-  public static void expire(@NotNull Notification notification) {
+  public static void expireNotification(@NotNull Notification notification) {
     getApplicationComponent().myModel.removeNotification(notification);
     for (Project p : ProjectManager.getInstance().getOpenProjects()) {
       getProjectComponent(p).myProjectModel.removeNotification(notification);
@@ -329,7 +328,7 @@ public class EventLog {
 
   public static class ProjectTracker extends AbstractProjectComponent {
     private volatile EventLogConsole myConsole;
-    private final List<Notification> myInitial = ContainerUtil.createEmptyCOWList();
+    private final List<Notification> myInitial = ContainerUtil.createLockFreeCopyOnWriteList();
     private final LogModel myProjectModel;
 
     public ProjectTracker(@NotNull final Project project) {
@@ -396,7 +395,11 @@ public class EventLog {
         @Override
         public void run() {
           if (!ShutDownTracker.isShutdownHookRunning() && !myProject.isDisposed()) {
-            console.doPrintNotification(notification);
+            ApplicationManager.getApplication().runReadAction(new Runnable() {
+              public void run() {
+                console.doPrintNotification(notification);
+              }
+            });
           }
         }
       });
@@ -420,14 +423,8 @@ public class EventLog {
     public void navigate(Project project) {
       NotificationListener listener = myNotification.getListener();
       if (listener != null) {
-        EventLogConsole console = EventLog.getProjectComponent(project).myConsole;
-        URL url = null;
-        try {
-          url = new URL(null, myHref);
-        }
-        catch (MalformedURLException ignored) {
-        }
-        listener.hyperlinkUpdate(myNotification, new HyperlinkEvent(console.getConsoleEditor().getContentComponent(), HyperlinkEvent.EventType.ACTIVATED, url, myHref));
+        JComponent component = getProjectComponent(project).myConsole.getConsoleEditor().getContentComponent();
+        listener.hyperlinkUpdate(myNotification, IJSwingUtilities.createHyperlinkEvent(myHref, component));
       }
     }
   }

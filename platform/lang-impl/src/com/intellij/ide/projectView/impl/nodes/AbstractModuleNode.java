@@ -24,7 +24,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ui.configuration.ProjectSettingsService;
 import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.NavigatableWithText;
 import com.intellij.ui.SimpleTextAttributes;
@@ -70,7 +70,7 @@ public abstract class AbstractModuleNode extends ProjectViewNode<Module> impleme
   @Override
   public boolean contains(@NotNull VirtualFile file) {
     Module module = getValue();
-    if (module == null) return false;
+    if (module == null || module.isDisposed()) return false;
 
     final VirtualFile testee;
     if (file.getFileSystem() instanceof JarFileSystem) {
@@ -81,7 +81,7 @@ public abstract class AbstractModuleNode extends ProjectViewNode<Module> impleme
       testee = file;
     }
     for (VirtualFile root : ModuleRootManager.getInstance(module).getContentRoots()) {
-      if (VfsUtil.isAncestor(root, testee, false)) return true;
+      if (VfsUtilCore.isAncestor(root, testee, false)) return true;
     }
     return false;
   }
@@ -94,7 +94,10 @@ public abstract class AbstractModuleNode extends ProjectViewNode<Module> impleme
 
   @Override
   public void navigate(final boolean requestFocus) {
-    ProjectSettingsService.getInstance(myProject).openModuleSettings(getValue());
+    Module module = getValue();
+    if (module != null) {
+      ProjectSettingsService.getInstance(myProject).openModuleSettings(module);
+    }
   }
 
   @Override
@@ -104,6 +107,6 @@ public abstract class AbstractModuleNode extends ProjectViewNode<Module> impleme
 
   @Override
   public boolean canNavigate() {
-    return ProjectSettingsService.getInstance(myProject).canOpenModuleSettings();
+    return ProjectSettingsService.getInstance(myProject).canOpenModuleSettings() && getValue() != null;
   }
 }

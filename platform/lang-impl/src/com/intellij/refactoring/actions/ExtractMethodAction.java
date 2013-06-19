@@ -28,11 +28,13 @@ public class ExtractMethodAction extends BasePlatformRefactoringAction {
     setInjectedContext(true);
   }
 
+  @Override
   public boolean isAvailableInEditorOnly() {
     return true;
   }
 
-  public boolean isEnabledOnElements(PsiElement[] elements) {
+  @Override
+  public boolean isEnabledOnElements(@NotNull PsiElement[] elements) {
     return false;
   }
 

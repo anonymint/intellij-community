@@ -15,11 +15,11 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
 import com.intellij.codeInsight.ExpectedTypeInfo;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
-import com.intellij.codeInspection.LocalQuickFix;
-import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.*;
@@ -35,22 +35,22 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
-public class CreateMethodQuickFix implements LocalQuickFix {
-  protected final PsiClass myTargetClass;
+public class CreateMethodQuickFix extends LocalQuickFixAndIntentionActionOnPsiElement {
   protected final String mySignature;
   protected final String myBody;
 
   private CreateMethodQuickFix(final PsiClass targetClass, @NonNls final String signature, @NonNls final String body) {
-    myTargetClass = targetClass;
+    super(targetClass);
     mySignature = signature;
     myBody = body;
   }
 
   @Override
   @NotNull
-  public String getName() {
-
-    String signature = PsiFormatUtil.formatMethod(createMethod(myTargetClass.getProject()), PsiSubstitutor.EMPTY,
+  public String getText() {
+    PsiClass myTargetClass = (PsiClass)getStartElement();
+    String signature = myTargetClass == null ? "" :
+                       PsiFormatUtil.formatMethod(createMethod(myTargetClass), PsiSubstitutor.EMPTY,
                                                   PsiFormatUtilBase.SHOW_NAME |
                                                   PsiFormatUtilBase.SHOW_TYPE |
                                                   PsiFormatUtilBase.SHOW_PARAMETERS |
@@ -66,10 +66,15 @@ public class CreateMethodQuickFix implements LocalQuickFix {
   }
 
   @Override
-  public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
-    if (!CodeInsightUtilBase.preparePsiElementForWrite(myTargetClass.getContainingFile())) return;
+  public void invoke(@NotNull Project project,
+                     @NotNull PsiFile file,
+                     @Nullable("is null when called from inspection") Editor editor,
+                     @NotNull PsiElement startElement,
+                     @NotNull PsiElement endElement) {
+    PsiClass myTargetClass = (PsiClass)startElement;
+    if (!FileModificationService.getInstance().preparePsiElementForWrite(myTargetClass.getContainingFile())) return;
 
-      PsiMethod method = createMethod(project);
+    PsiMethod method = createMethod(myTargetClass);
     List<Pair<PsiExpression, PsiType>> arguments =
       ContainerUtil.map2List(method.getParameterList().getParameters(), new Function<PsiParameter, Pair<PsiExpression, PsiType>>() {
         @Override
@@ -82,8 +87,12 @@ public class CreateMethodQuickFix implements LocalQuickFix {
     CreateMethodFromUsageFix.doCreate(myTargetClass, method, arguments, PsiSubstitutor.EMPTY, ExpectedTypeInfo.EMPTY_ARRAY, method);
   }
 
-  private PsiMethod createMethod(Project project) {
-    PsiElementFactory elementFactory = JavaPsiFacade.getInstance(project).getElementFactory();
+  private PsiMethod createMethod(@NotNull PsiClass myTargetClass) {
+    Project project = myTargetClass.getProject();
+    JVMElementFactory elementFactory = JVMElementFactories.getFactory(myTargetClass.getLanguage(), project);
+    if (elementFactory == null) {
+      elementFactory = JavaPsiFacade.getElementFactory(project);
+    }
     String methodText = mySignature + (myTargetClass.isInterface() ? ";" : "{" + myBody + "}");
     return elementFactory.createMethodFromText(methodText, null);
   }
@@ -92,7 +101,7 @@ public class CreateMethodQuickFix implements LocalQuickFix {
   public static CreateMethodQuickFix createFix(@NotNull PsiClass targetClass, @NonNls final String signature, @NonNls final String body) {
     CreateMethodQuickFix fix = new CreateMethodQuickFix(targetClass, signature, body);
     try {
-      fix.createMethod(targetClass.getProject());
+      fix.createMethod(targetClass);
       return fix;
     }
     catch (IncorrectOperationException e) {

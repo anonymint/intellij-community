@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,8 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrAc
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrGdkMethod
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrReflectedMethod
+import org.jetbrains.plugins.groovy.lang.psi.impl.statements.typedef.members.GrMethodImpl
+import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrBindingVariable
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrGdkMethodImpl
 import org.jetbrains.plugins.groovy.util.TestUtils
 /**
@@ -333,7 +335,7 @@ public class ResolveMethodTest extends GroovyResolveTestCase {
 
   public void testGrvy179() {
     PsiReference ref = configureByFile("grvy179/A.groovy");
-    assertNull(ref.resolve());
+    assertInstanceOf(ref.resolve(), GrBindingVariable);
   }
 
   public void testPrivateScriptMethod() {
@@ -1488,4 +1490,107 @@ new X().fo<caret>o('abc')''', PsiMethod)
     assertFalse(method.parameterList.parameters[0].type instanceof PsiEllipsisType)
   }
 
+  void testMethodWithLiteralName() {
+    resolveByText('''\
+def 'a\\'bc'(){}
+"a'b<caret>c"()
+''', GrMethod)
+  }
+
+  void testValueOf() {
+    final valueof = resolveByText('''\
+enum MyEnum {
+    FOO, BAR
+}
+
+
+MyEnum myEnum
+myEnum = MyEnum.va<caret>lueOf('FOO')
+''', PsiMethod)
+
+    assertEquals(valueof.parameterList.parametersCount, 1)
+  }
+
+  void testResolveOverloadedReturnType() {
+    myFixture.addClass('class PsiModifierList {}')
+    myFixture.addClass('class GrModifierList extends PsiModifierList {}')
+    myFixture.addClass('class GrMember {' +
+                       '  GrModifierList get();' +
+                       '}')
+    myFixture.addClass('class PsiClass {' +
+                       '  PsiModifierList get();' +
+                       '}')
+
+    myFixture.addClass('class GrTypeDefinition extends PsiClass, GrMember {}')
+
+    final PsiMethod method = resolveByText('new GrTypeDefinition().ge<caret>t()', PsiMethod)
+
+    assertTrue(method.getReturnType().getCanonicalText() == 'GrModifierList')
+
+
+  }
+
+  void testContradictingPropertyAccessor() {
+    def method = resolveByText('''\
+class A {
+    def setFoo(Object o) {
+        print 'method'
+    }
+
+    int foo = 5
+}
+
+new A().setF<caret>oo(2)
+''', PsiMethod)
+
+
+    assertInstanceOf(method, GrMethodImpl)
+  }
+
+  void testContradictingPropertyAccessor2() {
+    def method = resolveByText('''\
+class A {
+    def setFoo(Object o) {
+        print 'method'
+    }
+
+    int foo = 5
+}
+
+new A().f<caret>oo = 2
+''', PsiMethod)
+
+
+    assertInstanceOf(method, GrMethodImpl)
+  }
+
+  void testResoleAnonymousMethod() {
+    resolveByText('''\
+def anon = new Object() {
+  def foo() {
+    print 2
+  }
+}
+
+anon.fo<caret>o()
+''', GrMethod)
+  }
+
+  void testMapAccess() {
+    resolveByText('''
+      Map<String, List<String>> foo() {}
+
+      foo().bar.first().subs<caret>tring(1, 2)
+    ''', PsiMethod)
+  }
+
+  void testMixinClosure() {
+    resolveByText('''
+def foo() {
+    def x = { a -> print a}
+    Integer.metaClass.abc = { print 'something' }
+    1.a<caret>bc()
+}
+''', PsiMethod)
+  }
 }

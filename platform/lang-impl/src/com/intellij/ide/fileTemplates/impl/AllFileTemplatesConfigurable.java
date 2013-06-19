@@ -119,6 +119,12 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
   }
 
   private void onClone() {
+    try {
+      myEditor.apply();
+    }
+    catch (ConfigurationException ignore) {
+    }
+    
     final FileTemplate selected = myCurrentTab.getSelectedTemplate();
     if (selected == null) {
       return;
@@ -138,16 +144,19 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
     final FileTemplate newTemplate = new CustomFileTemplate(name, selected.getExtension());
     newTemplate.setText(selected.getText());
+    newTemplate.setReformatCode(selected.isReformatCode());
     myCurrentTab.addTemplate(newTemplate);
     myModified = true;
     myCurrentTab.selectTemplate(newTemplate);
     fireListChanged();
   }
 
+  @Override
   public String getDisplayName() {
     return IdeBundle.message("title.file.templates");
   }
 
+  @Override
   public String getHelpTopic() {
     int index = myTabbedPane.getSelectedIndex();
     switch (index) {
@@ -164,14 +173,17 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
   }
 
+  @Override
   public JComponent createComponent() {
     myUIDisposable = Disposer.newDisposable();
     myTemplatesList = new FileTemplateTabAsList(TEMPLATES_TITLE) {
+      @Override
       public void onTemplateSelected() {
         onListSelectionChanged();
       }
     };
     myIncludesList = new FileTemplateTabAsList(INCLUDES_TITLE) {
+      @Override
       public void onTemplateSelected() {
         onListSelectionChanged();
       }
@@ -181,6 +193,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     final List<FileTemplateTab> allTabs = new ArrayList<FileTemplateTab>(Arrays.asList(myTemplatesList, myIncludesList));
     if (FileTemplateManager.getInstance().getAllCodeTemplates().length > 0) {
       myCodeTemplatesList = new FileTemplateTabAsList(CODE_TITLE) {
+        @Override
         public void onTemplateSelected() {
           onListSelectionChanged();
         }
@@ -194,13 +207,16 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
 
     if (!factories.isEmpty()) {
       myJ2eeTemplatesList = new FileTemplateTabAsTree(J2EE_TITLE) {
+        @Override
         public void onTemplateSelected() {
           onListSelectionChanged();
         }
 
+        @Override
         protected FileTemplateNode initModel() {
           SortedSet<FileTemplateGroupDescriptor> categories =
             new TreeSet<FileTemplateGroupDescriptor>(new Comparator<FileTemplateGroupDescriptor>() {
+              @Override
               public int compare(FileTemplateGroupDescriptor o1, FileTemplateGroupDescriptor o2) {
                 return o1.getTitle().compareTo(o2.getTitle());
               }
@@ -214,6 +230,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
           //noinspection HardCodedStringLiteral
           return new FileTemplateNode("ROOT", null,
                                       ContainerUtil.map2List(categories, new Function<FileTemplateGroupDescriptor, FileTemplateNode>() {
+                                        @Override
                                         public FileTemplateNode fun(FileTemplateGroupDescriptor s) {
                                           return new FileTemplateNode(s);
                                         }
@@ -230,6 +247,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
 
     myTabbedPane.addChangeListener(new ChangeListener() {
+      @Override
       public void stateChanged(ChangeEvent e) {
         onTabChanged();
       }
@@ -237,10 +255,12 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
 
     DefaultActionGroup group = new DefaultActionGroup();
     AnAction removeAction = new AnAction(IdeBundle.message("action.remove.template"), null, AllIcons.General.Remove) {
+      @Override
       public void actionPerformed(AnActionEvent e) {
         onRemove();
       }
 
+      @Override
       public void update(AnActionEvent e) {
         super.update(e);
         FileTemplate selectedItem = myCurrentTab.getSelectedTemplate();
@@ -248,20 +268,24 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
       }
     };
     AnAction addAction = new AnAction(IdeBundle.message("action.create.template"), null, AllIcons.General.Add) {
+      @Override
       public void actionPerformed(AnActionEvent e) {
         onAdd();
       }
 
+      @Override
       public void update(AnActionEvent e) {
         super.update(e);
         e.getPresentation().setEnabled(!(myCurrentTab == myCodeTemplatesList || myCurrentTab == myJ2eeTemplatesList));
       }
     };
     AnAction cloneAction = new AnAction(IdeBundle.message("action.copy.template"), null, PlatformIcons.COPY_ICON) {
+      @Override
       public void actionPerformed(AnActionEvent e) {
         onClone();
       }
 
+      @Override
       public void update(AnActionEvent e) {
         super.update(e);
         e.getPresentation().setEnabled(myCurrentTab != myCodeTemplatesList
@@ -270,10 +294,12 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
       }
     };
     AnAction resetAction = new AnAction(IdeBundle.message("action.reset.to.default"), null, AllIcons.Actions.Reset) {
+      @Override
       public void actionPerformed(AnActionEvent e) {
         onReset();
       }
 
+      @Override
       public void update(AnActionEvent e) {
         super.update(e);
         final FileTemplate selectedItem = myCurrentTab.getSelectedTemplate();
@@ -293,6 +319,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     myEditor = new FileTemplateConfigurable();
 
     myEditor.addChangeListener(new ChangeListener() {
+      @Override
       public void stateChanged(ChangeEvent e) {
         onEditorChanged();
       }
@@ -411,13 +438,13 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
 
   private void initLists() {
     final FileTemplateManager templateManager = FileTemplateManager.getInstance();
-    
+
     final FileTemplate[] internalTemplates = templateManager.getInternalTemplates();
     myInternalTemplateNames.clear();
     for (FileTemplate internalTemplate : internalTemplates) {
       myInternalTemplateNames.add(((FileTemplateBase)internalTemplate).getQualifiedName());
     }
-    
+
     myTemplatesList.init(ArrayUtil.mergeArrays(internalTemplates, templateManager.getAllTemplates()));
     myIncludesList.init(templateManager.getAllPatterns());
     if (myCodeTemplatesList != null) {
@@ -428,6 +455,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
   }
 
+  @Override
   public boolean isModified() {
     return myModified || myEditor != null && myEditor.isModified();
   }
@@ -439,9 +467,6 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     boolean errorInName = true;
     String errorString = null;
     for (FileTemplate template : templates) {
-      if (isInternalTemplateName(template.getName())) {
-        continue;
-      }
       final String currName = template.getName();
       final String currExt = template.getExtension();
       if (currName.length() == 0) {
@@ -462,13 +487,14 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
       }
       allNames.add(currName);
     }
-    
+
     if (itemWithError != null) {
       final boolean _errorInName = errorInName;
       myTabbedPane.setSelectedIndex(Arrays.asList(myTabs).indexOf(list));
       selectTemplate(itemWithError);
       list.selectTemplate(itemWithError);
       ApplicationManager.getApplication().invokeLater(new Runnable() {
+        @Override
         public void run() {
           if (_errorInName) {
             myEditor.focusToNameField();
@@ -491,19 +517,20 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
   }
 
+  @Override
   public void apply() throws ConfigurationException {
     if (myEditor != null && myEditor.isModified()) {
       myModified = true;
       myEditor.apply();
     }
-    
+
     for (FileTemplateTab list : myTabs) {
       checkCanApply(list);
     }
 
     final FileTemplateManager templatesManager = FileTemplateManager.getInstance();
     // Apply templates
-    
+
     final List<FileTemplate> templates = new ArrayList<FileTemplate>();
     final List<FileTemplate> internalTemplates = new ArrayList<FileTemplate>();
     for (FileTemplate template : myTemplatesList.getTemplates()) {
@@ -514,7 +541,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
         templates.add(template);
       }
     }
-    
+
     templatesManager.setTemplates(FileTemplateManager.DEFAULT_TEMPLATES_CATEGORY, templates);
     templatesManager.setTemplates(FileTemplateManager.INTERNAL_TEMPLATES_CATEGORY, internalTemplates);
     templatesManager.setTemplates(FileTemplateManager.INCLUDES_TEMPLATES_CATEGORY, Arrays.asList(myIncludesList.getTemplates()));
@@ -531,6 +558,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     }
   }
 
+  @Override
   public void reset() {
     myEditor.reset();
     initLists();
@@ -556,6 +584,7 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     myModified = false;
   }
 
+  @Override
   public void disposeUIResources() {
     if (myCurrentTab != null) {
       final PropertiesComponent propertiesComponent = PropertiesComponent.getInstance();
@@ -590,11 +619,13 @@ public class AllFileTemplatesConfigurable implements SearchableConfigurable, Con
     createTemplate(preferredName, extension, text);
   }
 
+  @Override
   @NotNull
   public String getId() {
     return "fileTemplates";
   }
 
+  @Override
   @Nullable
   public Runnable enableSearch(String option) {
     return null;

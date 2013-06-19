@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -111,7 +111,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     CollectConsumer<PomTarget> consumer = new CollectConsumer<PomTarget>();
     for (PomDeclarationSearcher searcher : PomDeclarationSearcher.EP_NAME.getExtensions()) {
       searcher.findDeclarationsAt(referenceExpression, 0, consumer);
-      if (consumer.getResult().size() > 0) return false;
+      if (!consumer.getResult().isEmpty()) return false;
     }
 
     return true;
@@ -176,7 +176,8 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
 
     if (!(refElement.getParent() instanceof GrPackageDefinition) && resolved == null) {
       String message = GroovyBundle.message("cannot.resolve", refElement.getReferenceName());
-      HighlightInfo info = HighlightInfo.createHighlightInfo(HighlightInfoType.WRONG_REF, nameElement, message);
+      HighlightInfo info =
+        HighlightInfo.newHighlightInfo(HighlightInfoType.WRONG_REF).range(nameElement).descriptionAndTooltip(message).create();
 
       // todo implement for nested classes
       HighlightDisplayKey displayKey = HighlightDisplayKey.find(SHORT_NAME);
@@ -203,7 +204,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
       if (!isInspectionEnabled(ref.getContainingFile(), ref.getProject())) return null;
 
       if (isStaticOk(resolveResult)) return null;
-      String message = GroovyBundle.message("cannot.reference.nonstatic", ref.getReferenceName());
+      String message = GroovyBundle.message("cannot.reference.non.static", ref.getReferenceName());
       return createAnnotationForRef(ref, cannotBeDynamic, message);
     }
 
@@ -223,7 +224,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
 
     if (cannotBeDynamic || shouldHighlightAsUnresolved(ref)) {
       HighlightInfo info = createAnnotationForRef(ref, cannotBeDynamic, GroovyBundle.message("cannot.resolve", ref.getReferenceName()));
-      LOG.assertTrue(info != null);
+      if (info == null) return null;
 
       HighlightDisplayKey displayKey = HighlightDisplayKey.find(SHORT_NAME);
       if (ref.getParent() instanceof GrMethodCall) {
@@ -340,7 +341,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     LOG.assertTrue(resolved != null);
     LOG.assertTrue(resolved instanceof PsiModifierListOwner, resolved + " : " + resolved.getText());
 
-    return (((PsiModifierListOwner)resolved).hasModifierProperty(STATIC));
+    return ((PsiModifierListOwner)resolved).hasModifierProperty(STATIC);
   }
 
   private static GroovyResolveResult getBestResolveResult(GrReferenceExpression ref) {
@@ -359,7 +360,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     return results[0];
   }
 
-  private static boolean isPropertyAccessInStaticMethod(GrReferenceExpression referenceExpression) {
+  public static boolean isPropertyAccessInStaticMethod(GrReferenceExpression referenceExpression) {
     if (referenceExpression.getParent() instanceof GrMethodCall || referenceExpression.getQualifier() != null) return false;
     GrMember context = PsiTreeUtil.getParentOfType(referenceExpression, GrMember.class, true, GrClosableBlock.class);
     return (context instanceof GrMethod || context instanceof GrClassInitializer) && context.hasModifierProperty(STATIC);
@@ -368,25 +369,27 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
   @Nullable
   private static HighlightInfo createAnnotationForRef(@NotNull GrReferenceExpression ref,
                                                       boolean compileStatic,
-                                                      @Nullable final String message) {
+                                                      @NotNull String message) {
     PsiElement refNameElement = ref.getReferenceNameElement();
     assert refNameElement != null;
 
     HighlightDisplayLevel displayLevel = getHighlightDisplayLevel(ref.getProject(), ref);
 
     if (compileStatic || displayLevel == HighlightDisplayLevel.ERROR) {
-      return HighlightInfo.createHighlightInfo(HighlightInfoType.WRONG_REF, refNameElement, message);
+      return HighlightInfo.newHighlightInfo(HighlightInfoType.WRONG_REF).range(refNameElement).descriptionAndTooltip(message).create();
     }
 
-    if (displayLevel == HighlightDisplayLevel.WARNING) {
+    if (displayLevel == HighlightDisplayLevel.WEAK_WARNING) {
       boolean isTestMode = ApplicationManager.getApplication().isUnitTestMode();
       HighlightInfoType infotype = isTestMode ? HighlightInfoType.WARNING : HighlightInfoType.INFORMATION;
 
-      return HighlightInfo.createHighlightInfo(infotype, refNameElement, message, UNRESOLVED_ACCESS);
+      HighlightInfo.Builder builder = HighlightInfo.newHighlightInfo(infotype).range(refNameElement);
+      builder.descriptionAndTooltip(message);
+      return builder.needsUpdateOnTyping(false).textAttributes(UNRESOLVED_ACCESS).create();
     }
 
     HighlightInfoType highlightInfoType = HighlightInfo.convertSeverity(displayLevel.getSeverity());
-    return HighlightInfo.createHighlightInfo(highlightInfoType, refNameElement, message);
+    return HighlightInfo.newHighlightInfo(highlightInfoType).range(refNameElement).descriptionAndTooltip(message).create();
   }
 
   private static void registerStaticImportFix(@NotNull GrReferenceExpression referenceExpression,
@@ -409,12 +412,18 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     if (!compileStatic) {
       addDynamicAnnotation(info, refExpr, key);
     }
-    if (targetClass.isWritable()) {
-      QuickFixAction.registerQuickFixAction(info, new CreateFieldFromUsageFix(refExpr, targetClass), key);
 
-      if (refExpr.getParent() instanceof GrCall && refExpr.getParent() instanceof GrExpression) {
-        QuickFixAction.registerQuickFixAction(info, new CreateMethodFromUsageFix(refExpr, targetClass), key);
-      }
+    QuickFixAction.registerQuickFixAction(info, new CreateFieldFromUsageFix(refExpr), key);
+
+    if (PsiUtil.isAccessedForReading(refExpr)) {
+      QuickFixAction.registerQuickFixAction(info, new CreateGetterFromUsageFix(refExpr, targetClass), key);
+    }
+    if (PsiUtil.isLValue(refExpr)) {
+      QuickFixAction.registerQuickFixAction(info, new CreateSetterFromUsageFix(refExpr), key);
+    }
+
+    if (refExpr.getParent() instanceof GrCall && refExpr.getParent() instanceof GrExpression) {
+      QuickFixAction.registerQuickFixAction(info, new CreateMethodFromUsageFix(refExpr), key);
     }
 
     if (!refExpr.isQualified()) {
@@ -430,9 +439,8 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
 
   private static void addDynamicAnnotation(HighlightInfo info, GrReferenceExpression referenceExpression, HighlightDisplayKey key) {
     final PsiFile containingFile = referenceExpression.getContainingFile();
-    VirtualFile file;
     if (containingFile != null) {
-      file = containingFile.getVirtualFile();
+      VirtualFile file = containingFile.getVirtualFile();
       if (file == null) return;
     }
     else {
@@ -461,7 +469,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     QuickFixAction.registerQuickFixAction(info, new GroovyAddImportAction(refElement), key);
   }
 
-  private static void registerCreateClassByTypeFix(GrReferenceElement refElement,
+  private static void registerCreateClassByTypeFix(@NotNull GrReferenceElement refElement,
                                                    @Nullable HighlightInfo info,
                                                    final HighlightDisplayKey key) {
     GrPackageDefinition packageDefinition = PsiTreeUtil.getParentOfType(refElement, GrPackageDefinition.class);
@@ -472,7 +480,7 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
         refElement.getManager().areElementsEquivalent(((GrNewExpression)parent).getReferenceElement(), refElement)) {
       QuickFixAction.registerQuickFixAction(info, CreateClassFix.createClassFromNewAction((GrNewExpression)parent), key);
     }
-    else {
+    else if (canBeClassOrPackage(refElement)) {
       if (shouldBeInterface(refElement)) {
         QuickFixAction.registerQuickFixAction(info, CreateClassFix.createClassFixAction(refElement, CreateClassKind.INTERFACE), key);
       }
@@ -492,6 +500,10 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     }
   }
 
+  private static boolean canBeClassOrPackage(@NotNull GrReferenceElement refElement) {
+    return !(refElement instanceof GrReferenceExpression) || ResolveUtil.canBeClassOrPackage((GrReferenceExpression)refElement);
+  }
+
   private static boolean shouldBeAnnotation(GrReferenceElement element) {
     return element.getParent() instanceof GrAnnotation;
   }
@@ -506,12 +518,14 @@ public class GrUnresolvedAccessInspection extends GroovySuppressableInspectionTo
     return parent instanceof GrExtendsClause && !(parent.getParent() instanceof GrInterfaceDefinition);
   }
 
+  @Override
   @Nls
   @NotNull
   public String getGroupDisplayName() {
     return BaseInspection.PROBABLE_BUGS;
   }
 
+  @Override
   @Nls
   @NotNull
   public String getDisplayName() {

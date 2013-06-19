@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,17 +28,13 @@ import com.intellij.psi.impl.source.codeStyle.CodeEditUtil;
 import com.intellij.psi.impl.source.tree.CompositeElement;
 import com.intellij.psi.impl.source.tree.Factory;
 import com.intellij.psi.impl.source.tree.TreeElement;
-import com.intellij.psi.impl.source.tree.java.PsiAnnotationImpl;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -134,11 +130,8 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
           return false;
         }
         if (type == JavaTokenType.ABSTRACT_KEYWORD) {
-          return !(getNode().findChildByType(JavaTokenType.DEFAULT_KEYWORD) != null || findExtensionMethodMarker((PsiMethod)parent) != null);
+          return getNode().findChildByType(JavaTokenType.DEFAULT_KEYWORD) == null;
         }
-      }
-      if (type == JavaTokenType.DEFAULT_KEYWORD && findExtensionMethodMarker((PsiMethod)parent) != null) {
-        return true;
       }
     }
     else if (parent instanceof PsiField) {
@@ -179,16 +172,6 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
     return getNode().findChildByType(type) != null;
   }
 
-  @Nullable
-  public static PsiJavaToken findExtensionMethodMarker(@Nullable PsiMethod method) {
-    // todo[r.sh] drop this after transition period finished
-    if (method == null) return null;
-    final PsiCodeBlock body = method.getBody();
-    if (body == null) return null;
-    final PsiElement previous = PsiTreeUtil.skipSiblingsBackward(body, PsiComment.class, PsiWhiteSpace.class);
-    return previous instanceof PsiJavaToken && PsiUtil.isJavaToken(previous, JavaTokenType.DEFAULT_KEYWORD) ? (PsiJavaToken)previous : null;
-  }
-
   @Override
   public boolean hasExplicitModifier(@NotNull String name) {
     final CompositeElement tree = (CompositeElement)getNode();
@@ -213,20 +196,6 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
     }
 
     if (value) {
-      if (parent instanceof PsiField && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
-        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.STATIC_KEYWORD || type == JavaTokenType.FINAL_KEYWORD) return;
-      }
-      else if (parent instanceof PsiMethod && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
-        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.ABSTRACT_KEYWORD) return;
-        if (type == JavaTokenType.DEFAULT_KEYWORD && findExtensionMethodMarker((PsiMethod)parent) != null) return;
-      }
-      else if (parent instanceof PsiClass && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
-        if (type == JavaTokenType.PUBLIC_KEYWORD) return;
-      }
-      else if (parent instanceof PsiAnnotationMethod && grandParent instanceof PsiClass && ((PsiClass)grandParent).isAnnotationType()) {
-        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.ABSTRACT_KEYWORD) return;
-      }
-
       if (type == JavaTokenType.PUBLIC_KEYWORD ||
           type == JavaTokenType.PRIVATE_KEYWORD ||
           type == JavaTokenType.PROTECTED_KEYWORD ||
@@ -243,6 +212,19 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
         if (type == null) return;
       }
 
+      if (parent instanceof PsiField && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
+        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.STATIC_KEYWORD || type == JavaTokenType.FINAL_KEYWORD) return;
+      }
+      else if (parent instanceof PsiMethod && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
+        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.ABSTRACT_KEYWORD) return;
+      }
+      else if (parent instanceof PsiClass && grandParent instanceof PsiClass && ((PsiClass)grandParent).isInterface()) {
+        if (type == JavaTokenType.PUBLIC_KEYWORD) return;
+      }
+      else if (parent instanceof PsiAnnotationMethod && grandParent instanceof PsiClass && ((PsiClass)grandParent).isAnnotationType()) {
+        if (type == JavaTokenType.PUBLIC_KEYWORD || type == JavaTokenType.ABSTRACT_KEYWORD) return;
+      }
+
       if (treeElement.findChildByType(type) == null) {
         TreeElement keyword = Factory.createSingleLeafElement(type, name, null, getManager());
         treeElement.addInternal(keyword, keyword, null, null);
@@ -256,13 +238,6 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
       ASTNode child = treeElement.findChildByType(type);
       if (child != null) {
         SourceTreeToPsiMap.treeToPsiNotNull(child).delete();
-      }
-
-      if (type == JavaTokenType.DEFAULT_KEYWORD && parent instanceof PsiMethod) {
-        final PsiJavaToken marker = findExtensionMethodMarker((PsiMethod)parent);
-        if (marker != null) {
-          marker.delete();
-        }
       }
     }
   }
@@ -283,11 +258,12 @@ public class PsiModifierListImpl extends JavaStubPsiElement<PsiModifierListStub>
   @Override
   @NotNull
   public PsiAnnotation[] getApplicableAnnotations() {
-    final String[] fields = PsiAnnotationImpl.getApplicableElementTypeFields(this);
+    final PsiAnnotation.TargetType[] targets = PsiImplUtil.getTargetsForLocation(this);
     List<PsiAnnotation> filtered = ContainerUtil.findAll(getAnnotations(), new Condition<PsiAnnotation>() {
       @Override
       public boolean value(PsiAnnotation annotation) {
-        return PsiAnnotationImpl.isAnnotationApplicableTo(annotation, true, fields);
+        PsiAnnotation.TargetType target = PsiImplUtil.findApplicableTarget(annotation, targets);
+        return target != null && target != PsiAnnotation.TargetType.UNKNOWN;
       }
     });
 

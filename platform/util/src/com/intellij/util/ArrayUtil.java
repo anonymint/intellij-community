@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,12 +47,14 @@ public class ArrayUtil extends ArrayUtilRt {
   public static final CharSequence EMPTY_CHAR_SEQUENCE = new CharArrayCharSequence(EMPTY_CHAR_ARRAY);
 
   public static final ArrayFactory<String> STRING_ARRAY_FACTORY = new ArrayFactory<String>() {
+    @NotNull
     @Override
     public String[] create(int count) {
       return newStringArray(count);
     }
   };
   public static final ArrayFactory<Object> OBJECT_ARRAY_FACTORY = new ArrayFactory<Object>() {
+    @NotNull
     @Override
     public Object[] create(int count) {
       return newObjectArray(count);
@@ -114,6 +116,14 @@ public class ArrayUtil extends ArrayUtilRt {
     array[array.length - 1] = value;
     return array;
   }
+  @NotNull
+  public static int[] insert(@NotNull int[] array, int index, int value) {
+    int[] result = new int[array.length + 1];
+    System.arraycopy(array, 0, result, 0, index);
+    result[index] = value;
+    System.arraycopy(array, index, result, index+1, array.length - index);
+    return result;
+  }
 
   @NotNull
   public static byte[] append(@NotNull byte[] array, byte value) {
@@ -145,7 +155,7 @@ public class ArrayUtil extends ArrayUtilRt {
   }
 
   @NotNull
-  public static <T> T[] toObjectArray(@NotNull Class<T> aClass, Object... source) {
+  public static <T> T[] toObjectArray(@NotNull Class<T> aClass, @NotNull Object... source) {
     @SuppressWarnings("unchecked") T[] array = (T[])Array.newInstance(aClass, source.length);
     System.arraycopy(source, 0, array, 0, array.length);
     return array;
@@ -496,7 +506,7 @@ public class ArrayUtil extends ArrayUtilRt {
     return true;
   }
 
-  public static <T> boolean equals(T[] a1, T[] a2, Equality<? super T> comparator) {
+  public static <T> boolean equals(T[] a1, T[] a2, @NotNull Equality<? super T> comparator) {
     if (a1 == a2) {
       return true;
     }
@@ -517,7 +527,7 @@ public class ArrayUtil extends ArrayUtilRt {
     return true;
   }
 
-  public static <T> boolean equals(T[] a1, T[] a2, Comparator<? super T> comparator) {
+  public static <T> boolean equals(T[] a1, T[] a2, @NotNull Comparator<? super T> comparator) {
     if (a1 == a2) {
       return true;
     }
@@ -624,15 +634,19 @@ public class ArrayUtil extends ArrayUtilRt {
   }
 
   public static int indexOf(@NotNull Object[] objects, @Nullable Object object) {
-    for (int i = 0; i < objects.length; i++) {
-      if (Comparing.equal(objects[i], object)) return i;
-    }
-    return -1;
+    return indexOf(objects, object, 0, objects.length);
   }
 
   public static int indexOf(@NotNull Object[] objects, Object object, int start, int end) {
-    for (int i = start; i < end; i++) {
-      if (Comparing.equal(objects[i], object)) return i;
+    if (object == null) {
+      for (int i = start; i < end; i++) {
+        if (objects[i] == null) return i;
+      }
+    }
+    else {
+      for (int i = start; i < end; i++) {
+        if (object.equals(objects[i])) return i;
+      }
     }
     return -1;
   }
@@ -677,9 +691,29 @@ public class ArrayUtil extends ArrayUtilRt {
     return indexOf(objects, o) >= 0;
   }
 
+  public static boolean contains(@Nullable final String s, final String... strings) {
+    if (s == null) {
+      for (String str : strings) {
+        if (str == null) return true;
+      }
+    }
+    else {
+      for (String str : strings) {
+        if (s.equals(str)) return true;
+      }
+    }
+
+    return false;
+  }
+
   @NotNull
   public static int[] newIntArray(int count) {
     return count == 0 ? EMPTY_INT_ARRAY : new int[count];
+  }
+
+  @NotNull
+  public static long[] newLongArray(int count) {
+    return count == 0 ? EMPTY_LONG_ARRAY : new long[count];
   }
 
   @NotNull

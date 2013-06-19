@@ -22,11 +22,16 @@ import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.ProjectPaths;
-import org.jetbrains.jps.builders.*;
+import org.jetbrains.jps.api.GlobalOptions;
+import org.jetbrains.jps.builders.BuildTarget;
+import org.jetbrains.jps.builders.BuildTargetRegistry;
+import org.jetbrains.jps.builders.ModuleBasedTarget;
+import org.jetbrains.jps.builders.TargetOutputIndex;
 import org.jetbrains.jps.builders.java.ExcludedJavaSourceRootProvider;
 import org.jetbrains.jps.builders.java.JavaModuleBuildTargetType;
 import org.jetbrains.jps.builders.java.JavaSourceRootDescriptor;
 import org.jetbrains.jps.builders.storage.BuildDataPaths;
+import org.jetbrains.jps.cmdline.ProjectDescriptor;
 import org.jetbrains.jps.indices.IgnoredFileIndex;
 import org.jetbrains.jps.indices.ModuleExcludeIndex;
 import org.jetbrains.jps.model.JpsModel;
@@ -50,6 +55,9 @@ import java.util.Set;
  * @author nik
  */
 public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRootDescriptor> {
+  public static final Boolean REBUILD_ON_DEPENDENCY_CHANGE = Boolean.valueOf(
+    System.getProperty(GlobalOptions.REBUILD_ON_DEPENDENCY_CHANGE_OPTION, "true")
+  );
   private final JavaModuleBuildTargetType myTargetType;
 
   public ModuleBuildTarget(@NotNull JpsModule module, JavaModuleBuildTargetType targetType) {
@@ -131,13 +139,17 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
 
     roots_loop:
     for (JpsTypedModuleSourceRoot<JpsSimpleElement<JavaSourceRootProperties>> sourceRoot : myModule.getSourceRoots(type)) {
+      if (JpsPathUtil.isUnder(moduleExcludes, sourceRoot.getFile())) {
+        continue;
+      }
       for (ExcludedJavaSourceRootProvider provider : excludedRootProviders) {
-        if (provider.isExcludedFromCompilation(myModule, sourceRoot) || JpsPathUtil.isUnder(moduleExcludes, sourceRoot.getFile())) {
+        if (provider.isExcludedFromCompilation(myModule, sourceRoot)) {
           continue roots_loop;
         }
       }
       final String packagePrefix = sourceRoot.getProperties().getData().getPackagePrefix();
-      roots.add(new JavaSourceRootDescriptor(sourceRoot.getFile(), this, false, false, packagePrefix, computeRootExcludes(sourceRoot.getFile(), index)));
+      roots.add(new JavaSourceRootDescriptor(sourceRoot.getFile(), this, false, false, packagePrefix,
+                                             computeRootExcludes(sourceRoot.getFile(), index)));
     }
     return roots;
   }
@@ -149,7 +161,7 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
   }
 
   @Override
-  public void writeConfiguration(PrintWriter out, BuildDataPaths dataPaths, BuildRootIndex buildRootIndex) {
+  public void writeConfiguration(ProjectDescriptor pd, PrintWriter out) {
     final JpsModule module = getModule();
 
     int fingerprint = getDependenciesFingerprint();
@@ -165,14 +177,23 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
       fingerprint += bytecodeTarget.hashCode();
     }
 
+    final CompilerEncodingConfiguration encodingConfig = pd.getEncodingConfiguration();
+    final String encoding = encodingConfig.getPreferredModuleEncoding(module);
+    if (encoding != null) {
+      fingerprint += encoding.hashCode();
+    }
+
     out.write(Integer.toHexString(fingerprint));
   }
 
   private int getDependenciesFingerprint() {
-    final JpsModule module = getModule();
-
     int fingerprint = 0;
 
+    if (!REBUILD_ON_DEPENDENCY_CHANGE) {
+      return fingerprint;
+    }
+
+    final JpsModule module = getModule();
     JpsJavaDependenciesEnumerator enumerator = JpsJavaExtensionService.dependencies(module).compileOnly();
     if (!isTests()) {
       enumerator = enumerator.productionOnly();

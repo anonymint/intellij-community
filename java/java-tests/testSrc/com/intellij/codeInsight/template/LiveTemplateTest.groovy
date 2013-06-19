@@ -11,6 +11,7 @@ import com.intellij.codeInsight.lookup.impl.LookupImpl
 import com.intellij.codeInsight.lookup.impl.LookupManagerImpl
 import com.intellij.codeInsight.template.macro.ClassNameCompleteMacro
 import com.intellij.codeInsight.template.macro.CompleteMacro
+import com.intellij.codeInsight.template.macro.MethodReturnTypeMacro
 import com.intellij.openapi.application.AccessToken
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.command.CommandProcessor
@@ -37,13 +38,13 @@ public class LiveTemplateTest extends LightCodeInsightFixtureTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(true);
+    TemplateManagerImpl.setTemplateTesting(getProject(), getTestRootDisposable());
   }
 
   @Override
   protected void tearDown() throws Exception {
     CodeInsightSettings.instance.COMPLETION_CASE_SENSITIVE = CodeInsightSettings.FIRST_LETTER
-    ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(false);
+    CodeInsightSettings.instance.SELECT_AUTOPOPUP_SUGGESTIONS_BY_CHARS = false
     if (state != null) {
       state.gotoEnd();
     }
@@ -157,7 +158,28 @@ class Foo {
     assert !state.finished
   }
 
-  public void "_test non-imported classes in className macro"() {
+  public void "test cancel template when completion placed caret outside the variable"() {
+    myFixture.configureByText 'a.java', '''
+class Foo {
+  void foo(int a) {}
+  { <caret>() }
+}
+'''
+    final TemplateManager manager = TemplateManager.getInstance(getProject());
+    final Template template = manager.createTemplate("frm", "user", '$VAR$');
+    template.addVariable('VAR', new MacroCallNode(new CompleteMacro()), new EmptyNode(), true)
+    manager.startTemplate(getEditor(), template);
+    myFixture.type('fo\n')
+    myFixture.checkResult '''
+class Foo {
+  void foo(int a) {}
+  { foo(<caret>); }
+}
+'''
+    assert !state
+  }
+
+  public void "test non-imported classes in className macro"() {
     myFixture.addClass('package bar; public class Bar {}')
     myFixture.configureByText 'a.java', '''
 class Foo {
@@ -223,6 +245,17 @@ class Foo {
     configure();
     startTemplate("soutv", "output")
     myFixture.type('File')
+    assert myFixture.lookupElementStrings == ['file']
+    myFixture.type('.')
+    checkResult()
+    assert !state.finished
+  }
+
+  public void testFinishTemplateVariantWithDot() {
+    CodeInsightSettings.instance.SELECT_AUTOPOPUP_SUGGESTIONS_BY_CHARS = true
+    configure();
+    startTemplate("soutv", "output")
+    myFixture.type('fil')
     assert myFixture.lookupElementStrings == ['file']
     myFixture.type('.')
     checkResult()
@@ -302,8 +335,11 @@ class Foo {
     assertTrue(isApplicable("class Foo {{ <caret>inst\n a=b; }}", template));
     assertFalse(isApplicable("class Foo {{ return (<caret>inst) }}", template));
     assertFalse(isApplicable("class Foo {{ return a <caret>inst) }}", template));
+    assertFalse(isApplicable("class Foo {{ \"<caret>\" }}", template));
     assertTrue(isApplicable("class Foo {{ <caret>a.b(); ) }}", template));
     assertTrue(isApplicable("class Foo {{ <caret>a(); ) }}", template));
+    assertTrue(isApplicable("class Foo {{ Runnable r = () -> { <caret>System.out.println(\"foo\"); }; ) }}", template));
+    assertTrue(isApplicable("class Foo {{ Runnable r = () -> <caret>System.out.println(\"foo\"); ) }}", template));
   }
 
   public void testJavaExpressionContext() throws Exception {
@@ -312,6 +348,8 @@ class Foo {
     assertTrue(isApplicable("class Foo {{ <caret>toar }}", template));
     assertTrue(isApplicable("class Foo {{ return (<caret>toar) }}", template));
     assertFalse(isApplicable("class Foo {{ return (aaa <caret>toar) }}", template));
+    assertTrue(isApplicable("class Foo {{ Runnable r = () -> { <caret>System.out.println(\"foo\"); }; ) }}", template));
+    assertTrue(isApplicable("class Foo {{ Runnable r = () -> <caret>System.out.println(\"foo\"); ) }}", template));
   }
 
   public void testJavaDeclarationContext() throws Exception {
@@ -332,6 +370,8 @@ class Foo {
     assertTrue(isApplicable("class Foo { <caret>xxx void foo(String bar, xxx goo ) {} }", template));
     assertTrue(isApplicable("class Foo { void foo(<caret>String[] bar) {} }", template));
     assertTrue(isApplicable("class Foo { <caret>xxx String[] foo(String[] bar) {} }", template));
+    
+    assertTrue(isApplicable("<caret>xxx package foo; class Foo {}", template));
   }
 
   public void testOtherContext() throws IOException {
@@ -505,6 +545,75 @@ class Foo {
     finally {
       settings.removeTemplate(template);
     }
+  }
+
+  public void "test expand current live template on no suggestions in lookup"() {
+    myFixture.configureByText "a.java", "class Foo {{ <caret> }}"
+    myFixture.completeBasic()
+    assert myFixture.lookup
+    myFixture.type("sout")
+    assert myFixture.lookup
+    assert myFixture.lookupElementStrings == []
+    myFixture.type('\t')
+    myFixture.checkResult "class Foo {{\n    System.out.println(<caret>); }}"
+  }
+
+  public void "_test multi-dimensional toar"() {
+    myFixture.configureByText "a.java", '''
+class Foo {{
+  java.util.List<String[]> list;
+  String[][] s = toar<caret>
+}}'''
+    myFixture.type('\t')
+    //state.gotoEnd()
+    myFixture.checkResult '''
+class Foo {{
+  java.util.List<String[]> list;
+  String[][] s = list.toArray(new String[list.size()][])<caret>
+}}''' 
+  }
+
+  public void "test inner class name"() {
+    myFixture.configureByText "a.java", '''
+class Outer {
+    class Inner {
+        void foo() {
+            soutm<caret>
+        }
+    }
+}'''
+    myFixture.type('\t')
+    assert myFixture.editor.document.text.contains("Outer.Inner.foo")
+  }
+
+  public void "test do not strip type argument containing class"() {
+    myFixture.configureByText 'a.java', '''
+import java.util.*;
+class Foo {
+  List<Map.Entry<String, Integer>> foo() { 
+    <caret> 
+  }
+}
+'''
+    
+    final TemplateManager manager = TemplateManager.getInstance(getProject());
+    final Template template = manager.createTemplate("result", "user", '$T$ result;');
+    template.addVariable('T', new MacroCallNode(new MethodReturnTypeMacro()), new EmptyNode(), false)
+    template.toReformat = true
+    
+    manager.startTemplate(getEditor(), template);
+    assert myFixture.editor.document.text.contains('List<Map.Entry<String, Integer>> result;')
+  }
+
+  public void "test name shadowing"() {
+    myFixture.configureByText "a.java", """class LiveTemplateVarSuggestion {
+    private Object value;
+    public void setValue(Object value, Object value1){
+      inn<caret>
+    }
+}"""
+    myFixture.type('\t')
+    assert myFixture.lookupElementStrings == ['value', 'value1']
   }
 
 }

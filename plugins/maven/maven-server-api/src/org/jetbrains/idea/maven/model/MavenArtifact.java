@@ -16,6 +16,7 @@
 
 package org.jetbrains.idea.maven.model;
 
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
@@ -23,9 +24,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.Serializable;
-import java.text.MessageFormat;
 
-public class MavenArtifact implements Serializable {
+public class MavenArtifact implements Serializable, MavenCoordinate {
+
+  static long serialVersionUID = 6389627095309274357L;
 
   public static final String MAVEN_LIB_PREFIX = "Maven: ";
 
@@ -46,6 +48,8 @@ public class MavenArtifact implements Serializable {
   private final boolean myStubbed;
 
   private transient volatile String myLibraryNameCache;
+
+  private transient volatile long myLastFileCheckTimeStamp; // File.exists() is a slow operation, don't run it more than once a second
 
   public MavenArtifact(String groupId,
                        String artifactId,
@@ -86,6 +90,10 @@ public class MavenArtifact implements Serializable {
     return myVersion;
   }
 
+  public String getBaseVersion() {
+    return myBaseVersion;
+  }
+
   public MavenId getMavenId() {
     return new MavenId(myGroupId, myArtifactId, myVersion);
   }
@@ -120,7 +128,21 @@ public class MavenArtifact implements Serializable {
   }
 
   public boolean isResolved() {
-    return myResolved && !myStubbed && myFile.exists();
+    if (myResolved && !myStubbed) {
+      long currentTime = System.currentTimeMillis();
+
+      if (myLastFileCheckTimeStamp + 2000 < currentTime) { // File.exists() is a slow operation, don't run it more than once a second
+        if (!myFile.exists()) {
+          return false; // Don't cache result if file is not exist.
+        }
+
+        myLastFileCheckTimeStamp = currentTime;
+      }
+
+      return true;
+    }
+
+    return false;
   }
 
   @NotNull
@@ -136,14 +158,13 @@ public class MavenArtifact implements Serializable {
     return getRelativePathForExtraArtifact(null, null);
   }
 
-  public String getRelativePathForExtraArtifact(@Nullable String extraArtifactClassifier, @Nullable String customExtension) {
-    StringBuilder result = new StringBuilder();
-    result.append(myGroupId.replace('.', '/'));
-    result.append('/');
-    result.append(myArtifactId);
-    result.append('/');
-    result.append(myVersion);
-    result.append('/');
+  public String getFileNameWithBaseVersion(@Nullable String extraArtifactClassifier, @Nullable String customExtension) {
+    StringBuilder res = new StringBuilder();
+    appendFileName(res, extraArtifactClassifier, customExtension);
+    return res.toString();
+  }
+
+  private void appendFileName(StringBuilder result, @Nullable String extraArtifactClassifier, @Nullable String customExtension) {
     result.append(myArtifactId);
     result.append('-');
     result.append(myVersion);
@@ -155,6 +176,18 @@ public class MavenArtifact implements Serializable {
 
     result.append(".");
     result.append(customExtension == null ? myExtension : customExtension);
+  }
+
+  public String getRelativePathForExtraArtifact(@Nullable String extraArtifactClassifier, @Nullable String customExtension) {
+    StringBuilder result = new StringBuilder();
+    result.append(myGroupId.replace('.', '/'));
+    result.append('/');
+    result.append(myArtifactId);
+    result.append('/');
+    result.append(myBaseVersion);
+    result.append('/');
+
+    appendFileName(result, extraArtifactClassifier, customExtension);
     return result.toString();
   }
 
@@ -177,25 +210,39 @@ public class MavenArtifact implements Serializable {
   public String getPathForExtraArtifact(@Nullable String extraArtifactClassifier, @Nullable String customExtension) {
     String path = getPath();
 
-    if (!StringUtil.isEmptyOrSpaces(extraArtifactClassifier)) {
-      int repoEnd = path.lastIndexOf(getRelativePath());
-
-      if (repoEnd == -1) {
-        // unknown path format: try to add a classified at the end of the filename
-        int dotPos = path.lastIndexOf(".");
-        if (dotPos != -1) {// sometimes path doesn't contain '.'; but i can't find any reason why.
-          String withoutExtension = path.substring(0, dotPos);
-          path = MessageFormat.format("{0}-{1}.{2}",
-                                      withoutExtension,
-                                      extraArtifactClassifier,
-                                      customExtension == null ? myExtension : customExtension);
-        }
-      }
-      else {
-        String repoPath = path.substring(0, repoEnd);
-        path = repoPath + getRelativePathForExtraArtifact(extraArtifactClassifier, customExtension);
-      }
+    if (extraArtifactClassifier == null && customExtension == null && Comparing.equal(myVersion, myBaseVersion)) {
+      return path;
     }
+
+    int slashPos = path.lastIndexOf('/');
+    if (slashPos != -1) {
+      StringBuilder res = new StringBuilder();
+      res.append(path, 0, slashPos + 1);
+      res.append(myArtifactId);
+      res.append('-');
+      res.append(myVersion);
+
+      String fullClassifier = getFullClassifier(extraArtifactClassifier);
+      if (fullClassifier != null) {
+        res.append('-').append(fullClassifier);
+      }
+
+      res.append('.');
+      res.append(customExtension == null ? myExtension : customExtension);
+      return res.toString();
+    }
+
+    // unknown path format: try to add a classified at the end of the filename
+    int dotPos = path.lastIndexOf('.');
+    if (dotPos != -1) {// sometimes path doesn't contain '.'; but i can't find any reason why.
+      StringBuilder res = new StringBuilder();
+      res.append(path, 0, dotPos);
+      res.append('-');
+      res.append(extraArtifactClassifier);
+      res.append(customExtension == null ? myExtension : customExtension);
+      return res.toString();
+    }
+
     return path;
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,10 @@ import com.intellij.ide.IconProvider;
 import com.intellij.ide.bookmarks.Bookmark;
 import com.intellij.ide.bookmarks.BookmarkManager;
 import com.intellij.ide.projectView.PresentationData;
+import com.intellij.ide.projectView.ProjectView;
 import com.intellij.ide.projectView.ViewSettings;
 import com.intellij.ide.projectView.impl.ProjectRootsUtil;
+import com.intellij.ide.projectView.impl.ProjectViewImpl;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
@@ -91,12 +93,7 @@ public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements Navig
           data.addText(directoryFile.getName(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
         }
 
-        final boolean canAttach = ProjectAttachProcessor.canAttachToProject();
-        if (parentValue instanceof Project && !canAttach) {
-          final String location = FileUtil.getLocationRelativeToUserHome(((Project)parentValue).getPresentableUrl());
-          data.addText(" (" + location + ")", SimpleTextAttributes.GRAYED_ATTRIBUTES);
-        }
-        else if (parentValue instanceof Module || (parentValue instanceof Project && canAttach)) {
+        if (parentValue instanceof Module || parentValue instanceof Project) {
           final String location = FileUtil.getLocationRelativeToUserHome(directoryFile.getPresentableUrl());
           data.addText(" (" + location + ")", SimpleTextAttributes.GRAYED_ATTRIBUTES);
         }
@@ -262,6 +259,10 @@ public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements Navig
 
   @Override
   public int getWeight() {
+    final ProjectView projectView = ProjectView.getInstance(myProject);
+    if (projectView instanceof ProjectViewImpl && !((ProjectViewImpl)projectView).isFoldersAlwaysOnTop()) {
+      return 20;
+    }
     return isFQNameShown() ? 70 : 0;
   }
 
@@ -279,7 +280,7 @@ public class PsiDirectoryNode extends BasePsiNode<PsiDirectory> implements Navig
 
     final Bookmark bookmarkAtFile = BookmarkManager.getInstance(myProject).findFileBookmark(file);
     if (bookmarkAtFile != null) {
-      final RowIcon composite = new RowIcon(2);
+      final RowIcon composite = new RowIcon(2, RowIcon.Alignment.CENTER);
       composite.setIcon(icon, 0);
       composite.setIcon(bookmarkAtFile.getIcon(), 1);
       icon = composite;

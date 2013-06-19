@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,36 +22,28 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 
 public class RevealFileAction extends DumbAwareAction {
   @Override
   public void update(AnActionEvent e) {
-    final VirtualFile file = PlatformDataKeys.VIRTUAL_FILE.getData(e.getDataContext());
-    final Presentation presentation = e.getPresentation();
+    VirtualFile file = ShowFilePathAction.findLocalFile(PlatformDataKeys.VIRTUAL_FILE.getData(e.getDataContext()));
+    Presentation presentation = e.getPresentation();
     presentation.setText(getActionName());
-    presentation.setEnabled(isLocalFile(file));
-  }
-
-  public static boolean isLocalFile(@Nullable final VirtualFile file) {
-    return file != null && file.isInLocalFileSystem();
+    presentation.setEnabled(file != null);
   }
 
   @NotNull
   public static String getActionName() {
-    return SystemInfo.isMac ? "Reveal in Finder" : "Show in " + SystemInfo.getFileManagerName();
+    return SystemInfo.isMac ? "Reveal in Finder" : "Show in " + ShowFilePathAction.getFileManagerName();
   }
 
   @Override
   public void actionPerformed(AnActionEvent e) {
-    final VirtualFile file = PlatformDataKeys.VIRTUAL_FILE.getData(e.getDataContext());
-    assert file != null;
-    revealFile(file);
-  }
-
-  private static void revealFile(@NotNull final VirtualFile file) {
-    ShowFilePathAction.openFile(new File(file.getPresentableUrl()));
+    VirtualFile file = ShowFilePathAction.findLocalFile(PlatformDataKeys.VIRTUAL_FILE.getData(e.getDataContext()));
+    if (file != null) {
+      ShowFilePathAction.openFile(new File(file.getPresentableUrl()));
+    }
   }
 }

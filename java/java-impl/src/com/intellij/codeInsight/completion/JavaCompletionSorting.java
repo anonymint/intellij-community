@@ -51,75 +51,41 @@ public class JavaCompletionSorting {
   }
 
   public static CompletionResultSet addJavaSorting(final CompletionParameters parameters, CompletionResultSet result) {
-    String prefix = result.getPrefixMatcher().getPrefix();
     final PsiElement position = parameters.getPosition();
     final ExpectedTypeInfo[] expectedTypes = PsiJavaPatterns.psiElement().beforeLeaf(PsiJavaPatterns.psiElement().withText(".")).accepts(position) ? ExpectedTypeInfo.EMPTY_ARRAY : JavaSmartCompletionContributor.getExpectedTypes(parameters);
     final CompletionType type = parameters.getCompletionType();
     final boolean smart = type == CompletionType.SMART;
     final boolean afterNew = JavaSmartCompletionContributor.AFTER_NEW.accepts(position);
 
-    List<LookupElementWeigher> afterPriority = new ArrayList<LookupElementWeigher>();
-    if (!smart) {
-      ContainerUtil.addIfNotNull(afterPriority, preferStatics(position, expectedTypes));
-    }
-    else {
-      afterPriority.add(new PreferDefaultTypeWeigher(expectedTypes, parameters));
-    }
-    ContainerUtil.addIfNotNull(afterPriority, recursion(parameters, expectedTypes));
-    afterPriority.add(new PreferSimilarlyEnding(expectedTypes, prefix));
-
     List<LookupElementWeigher> afterProximity = new ArrayList<LookupElementWeigher>();
     afterProximity.add(new PreferContainingSameWords(expectedTypes));
     if (smart) {
       afterProximity.add(new PreferFieldsAndGetters());
     }
-    afterProximity.add(new PreferShorter(expectedTypes, prefix));
+    afterProximity.add(new PreferShorter(expectedTypes));
 
     CompletionSorter sorter = CompletionSorter.defaultSorter(parameters, result.getPrefixMatcher());
     if (!smart && afterNew) {
       sorter = sorter.weighBefore("liftShorter", new PreferExpected(true, expectedTypes));
     } else {
-      final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(position.getProject()).getFileIndex();
-      sorter = ((CompletionSorterImpl)sorter).withClassifier("liftShorter", true, new ClassifierFactory<LookupElement>("liftShorterClasses") {
-        @Override
-        public Classifier<LookupElement> createClassifier(Classifier<LookupElement> next) {
-          return new LiftShorterItemsClassifier(next, new LiftShorterItemsClassifier.LiftingCondition() {
-            @Override
-            public boolean shouldLift(LookupElement shorterElement, LookupElement longerElement) {
-              Object object = shorterElement.getObject();
-              if (object instanceof PsiClass) {
-                PsiClass psiClass = (PsiClass)object;
-                PsiFile file = psiClass.getContainingFile();
-                if (file != null) {
-                  VirtualFile vFile = file.getOriginalFile().getVirtualFile();
-                  if (vFile != null && fileIndex.isInSource(vFile)) {
-                    return true;
-                  }
-                }
-                Object longerObject = longerElement.getObject();
-                if (longerObject instanceof PsiMember &&
-                    psiClass.getManager().areElementsEquivalent(psiClass, ((PsiMember)longerObject).getContainingClass())) {
-                  return true;
-                }
-              }
-              return false;
-            }
-          }, true);
-        }
-      });
+      sorter = ((CompletionSorterImpl)sorter).withClassifier("liftShorterClasses", true, new LiftShorterClasses(position));
+    }
+    if (smart) {
+      sorter = sorter.weighAfter("priority", new PreferDefaultTypeWeigher(expectedTypes, parameters));
     }
 
     List<LookupElementWeigher> afterPrefix = ContainerUtil.newArrayList();
-    afterPriority.add(new PreferByKindWeigher(type, position, true));
-    afterPrefix.add(new PreferByKindWeigher(type, position, false));
+    if (!smart) {
+      ContainerUtil.addIfNotNull(afterPrefix, preferStatics(position, expectedTypes));
+    }
+    ContainerUtil.addIfNotNull(afterPrefix, recursion(parameters, expectedTypes));
     if (!smart && !afterNew) {
       afterPrefix.add(new PreferExpected(false, expectedTypes));
     }
-    Collections.addAll(afterPrefix, new PreferNonGeneric(), new PreferAccessible(position), new PreferSimple(),
+    Collections.addAll(afterPrefix, new PreferByKindWeigher(type, position), new PreferSimilarlyEnding(expectedTypes),
+                       new PreferNonGeneric(), new PreferAccessible(position), new PreferSimple(),
                        new PreferEnumConstants(parameters));
-    
-    
-    sorter = sorter.weighAfter("priority", afterPriority.toArray(new LookupElementWeigher[afterPriority.size()]));
+
     sorter = sorter.weighAfter("prefix", afterPrefix.toArray(new LookupElementWeigher[afterPrefix.size()]));
     sorter = sorter.weighAfter("proximity", afterProximity.toArray(new LookupElementWeigher[afterProximity.size()]));
     return result.withRelevanceSorter(sorter);
@@ -132,7 +98,7 @@ public class JavaCompletionSorting {
     final PsiReferenceExpression reference = expression != null ? expression.getMethodExpression() : PsiTreeUtil.getParentOfType(position, PsiReferenceExpression.class);
     if (reference == null) return null;
 
-    return new RecursionWeigher(position, reference, expression, expectedInfos);
+    return new RecursionWeigher(position, parameters.getCompletionType(), reference, expression, expectedInfos);
   }
 
   @Nullable
@@ -157,7 +123,9 @@ public class JavaCompletionSorting {
       public Comparable weigh(@NotNull LookupElement element) {
         final Object o = element.getObject();
         if (o instanceof PsiKeyword) return -3;
-        if (!(o instanceof PsiMember)) return 0;
+        if (!(o instanceof PsiMember) || element.getUserData(JavaOverrideCompletionContributor.OVERRIDE_ELEMENT) != null) {
+          return 0;
+        }
 
         if (((PsiMember)o).hasModifierProperty(PsiModifier.STATIC) && !hasNonVoid(infos)) {
           if (o instanceof PsiMethod) return -5;
@@ -176,8 +144,8 @@ public class JavaCompletionSorting {
     PsiType itemType = JavaCompletionUtil.getLookupElementType(item);
 
     if (itemType != null) {
-      assert itemType.isValid() : item + "; " + item.getClass();
-      
+      PsiUtil.ensureValidType(itemType);
+
       for (final ExpectedTypeInfo expectedInfo : expectedInfos) {
         final PsiType defaultType = expectedInfo.getDefaultType();
         final PsiType expectedType = expectedInfo.getType();
@@ -233,18 +201,14 @@ public class JavaCompletionSorting {
     return null;
   }
 
-  private static int getNameEndMatchingDegree(final String name, ExpectedTypeInfo[] expectedInfos, String prefix) {
+  private static int getNameEndMatchingDegree(final String name, ExpectedTypeInfo[] expectedInfos) {
     int res = 0;
     if (name != null && expectedInfos != null) {
-      if (prefix.equals(name)) {
-        res = Integer.MAX_VALUE;
-      } else {
-        final List<String> words = NameUtil.nameToWordsLowerCase(name);
-        final List<String> wordsNoDigits = NameUtil.nameToWordsLowerCase(truncDigits(name));
-        int max1 = calcMatch(words, 0, expectedInfos);
-        max1 = calcMatch(wordsNoDigits, max1, expectedInfos);
-        res = max1;
-      }
+      final List<String> words = NameUtil.nameToWordsLowerCase(name);
+      final List<String> wordsNoDigits = NameUtil.nameToWordsLowerCase(truncDigits(name));
+      int max1 = calcMatch(words, 0, expectedInfos);
+      max1 = calcMatch(wordsNoDigits, max1, expectedInfos);
+      res = max1;
     }
 
     return res;
@@ -430,7 +394,7 @@ public class JavaCompletionSorting {
     public Comparable weigh(@NotNull LookupElement element) {
       final PsiTypeLookupItem lookupItem = element.as(PsiTypeLookupItem.CLASS_CONDITION_KEY);
       if (lookupItem != null) {
-        return lookupItem.getBracketsCount();
+        return lookupItem.getBracketsCount() * 10 + (lookupItem.isAddArrayInitializer() ? 1 : 0);
       }
       if (element.as(CastingLookupElementDecorator.CLASS_CONDITION_KEY) != null) {
         return 239;
@@ -483,19 +447,17 @@ public class JavaCompletionSorting {
 
   private static class PreferSimilarlyEnding extends LookupElementWeigher {
     private final ExpectedTypeInfo[] myExpectedTypes;
-    private final String myPrefix;
 
-    public PreferSimilarlyEnding(ExpectedTypeInfo[] expectedTypes, String prefix) {
+    public PreferSimilarlyEnding(ExpectedTypeInfo[] expectedTypes) {
       super("nameEnd");
       myExpectedTypes = expectedTypes;
-      myPrefix = prefix;
     }
 
     @NotNull
     @Override
     public Comparable weigh(@NotNull LookupElement element) {
       final String name = getLookupObjectName(element.getObject());
-      return -getNameEndMatchingDegree(name, myExpectedTypes, myPrefix);
+      return -getNameEndMatchingDegree(name, myExpectedTypes);
     }
   }
 
@@ -547,12 +509,10 @@ public class JavaCompletionSorting {
 
   private static class PreferShorter extends LookupElementWeigher {
     private final ExpectedTypeInfo[] myExpectedTypes;
-    private final String myPrefix;
 
-    public PreferShorter(ExpectedTypeInfo[] expectedTypes, String prefix) {
+    public PreferShorter(ExpectedTypeInfo[] expectedTypes) {
       super("shorter");
       myExpectedTypes = expectedTypes;
-      myPrefix = prefix;
     }
 
     @NotNull
@@ -561,10 +521,42 @@ public class JavaCompletionSorting {
       final Object object = element.getObject();
       final String name = getLookupObjectName(object);
 
-      if (name != null && getNameEndMatchingDegree(name, myExpectedTypes, myPrefix) != 0) {
+      if (name != null && getNameEndMatchingDegree(name, myExpectedTypes) != 0) {
         return NameUtil.nameToWords(name).length - 1000;
       }
       return 0;
+    }
+  }
+
+  private static class LiftShorterClasses extends ClassifierFactory<LookupElement> {
+    final ProjectFileIndex fileIndex;
+    private final PsiElement myPosition;
+
+    public LiftShorterClasses(PsiElement position) {
+      super("liftShorterClasses");
+      myPosition = position;
+      fileIndex = ProjectRootManager.getInstance(myPosition.getProject()).getFileIndex();
+    }
+
+    @Override
+    public Classifier<LookupElement> createClassifier(Classifier<LookupElement> next) {
+      return new LiftShorterItemsClassifier("liftShorterClasses", next, new LiftShorterItemsClassifier.LiftingCondition() {
+        @Override
+        public boolean shouldLift(LookupElement shorterElement, LookupElement longerElement) {
+          Object object = shorterElement.getObject();
+          if (object instanceof PsiClass && longerElement.getObject() instanceof PsiClass) {
+            PsiClass psiClass = (PsiClass)object;
+            PsiFile file = psiClass.getContainingFile();
+            if (file != null) {
+              VirtualFile vFile = file.getOriginalFile().getVirtualFile();
+              if (vFile != null && fileIndex.isInSource(vFile)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }
+      }, true);
     }
   }
 }

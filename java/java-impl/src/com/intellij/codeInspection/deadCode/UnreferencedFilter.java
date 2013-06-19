@@ -19,19 +19,21 @@
  * User: max
  * Date: Dec 2, 2001
  * Time: 12:14:37 AM
- * To change template for new class use 
+ * To change template for new class use
  * Code Style | Class Templates options (Tools | IDE Options).
  */
 package com.intellij.codeInspection.deadCode;
 
 import com.intellij.codeInspection.ex.InspectionTool;
 import com.intellij.codeInspection.reference.*;
+import org.jetbrains.annotations.NotNull;
 
 public class UnreferencedFilter extends RefUnreachableFilter {
-  public UnreferencedFilter(final InspectionTool tool) {
+  public UnreferencedFilter(@NotNull InspectionTool tool) {
     super(tool);
   }
 
+  @Override
   public int getElementProblemCount(RefJavaElement refElement) {
     if (refElement instanceof RefParameter) return 0;
     if (refElement.isEntry() || !((RefElementImpl)refElement).isSuspicious() || refElement.isSyntheticJSP()) return 0;

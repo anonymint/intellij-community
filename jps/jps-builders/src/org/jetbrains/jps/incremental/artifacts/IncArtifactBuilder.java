@@ -15,14 +15,16 @@
  */
 package org.jetbrains.jps.incremental.artifacts;
 
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.MultiMap;
 import gnu.trove.THashSet;
 import gnu.trove.TIntObjectHashMap;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.jps.builders.*;
+import org.jetbrains.jps.builders.BuildOutputConsumer;
+import org.jetbrains.jps.builders.DirtyFilesHolder;
+import org.jetbrains.jps.builders.FileProcessor;
 import org.jetbrains.jps.builders.artifacts.ArtifactBuildTaskProvider;
 import org.jetbrains.jps.builders.artifacts.impl.ArtifactOutToSourceStorageProvider;
 import org.jetbrains.jps.builders.logging.ProjectBuilderLogger;
@@ -32,7 +34,6 @@ import org.jetbrains.jps.incremental.*;
 import org.jetbrains.jps.incremental.artifacts.impl.ArtifactSorter;
 import org.jetbrains.jps.incremental.artifacts.impl.JarsBuilder;
 import org.jetbrains.jps.incremental.artifacts.instructions.*;
-import org.jetbrains.jps.incremental.fs.BuildFSState;
 import org.jetbrains.jps.incremental.messages.BuildMessage;
 import org.jetbrains.jps.incremental.messages.CompilerMessage;
 import org.jetbrains.jps.incremental.messages.ProgressMessage;
@@ -47,6 +48,7 @@ import java.util.*;
  * @author nik
  */
 public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, ArtifactBuildTarget> {
+  private static final Logger LOG = Logger.getInstance(IncArtifactBuilder.class);
   public static final String BUILDER_NAME = "Artifacts builder";
 
   public IncArtifactBuilder() {
@@ -77,7 +79,10 @@ public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, Ar
     try {
       final Collection<String> deletedFiles = holder.getRemovedFiles(target);
 
-      context.processMessage(new ProgressMessage("Building artifact '" + artifact.getName() + "'..."));
+      String messageText = "Building artifact '" + artifact.getName() + "'...";
+      context.processMessage(new ProgressMessage(messageText));
+      LOG.debug(messageText);
+
       runArtifactTasks(context, target.getArtifact(), ArtifactBuildTaskProvider.ArtifactBuildPhase.PRE_PROCESSING);
       final SourceToOutputMapping srcOutMapping = pd.dataManager.getSourceToOutputMap(target);
       final ArtifactOutputToSourceMapping outSrcMapping = pd.dataManager.getStorage(target, ArtifactOutToSourceStorageProvider.INSTANCE);
@@ -135,6 +140,7 @@ public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, Ar
       deleteOutdatedFiles(filesToDelete, context, srcOutMapping, outSrcMapping);
       context.checkCanceled();
 
+      context.processMessage(new ProgressMessage("Building artifact '" + artifact.getName() + "': copying files..."));
       final Set<JarInfo> changedJars = new THashSet<JarInfo>();
       for (ArtifactRootDescriptor descriptor : pd.getBuildRootIndex().getTargetRoots(target, context)) {
         context.checkCanceled();
@@ -142,6 +148,12 @@ public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, Ar
         if (sourcePaths == null) continue;
 
         for (String sourcePath : sourcePaths) {
+          if (!descriptor.getFilter().shouldBeCopied(sourcePath, pd)) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("File " + sourcePath + " will be skipped because it isn't accepted by filter");
+            }
+            continue;
+          }
           DestinationInfo destination = descriptor.getDestinationInfo();
           if (destination instanceof ExplodedDestinationInfo) {
             descriptor.copyFromRoot(sourcePath, descriptor.getRootIndex(), destination.getOutputPath(), context,
@@ -210,10 +222,13 @@ public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, Ar
 
       boolean deleted = deletedPaths.contains(filePath);
       if (!deleted) {
-        deleted = FileUtil.delete(new File(FileUtil.toSystemDependentName(filePath)));
+        deleted = FileUtil.delete(new File(filePath));
       }
 
       if (deleted) {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Outdated output file deleted: " + filePath);
+        }
         outSrcMapping.remove(filePath);
         deletedPaths.add(filePath);
         for (String sourcePath : filesToDelete.get(filePath)) {
@@ -233,43 +248,6 @@ public class IncArtifactBuilder extends TargetBuilder<ArtifactRootDescriptor, Ar
     if (logger.isEnabled()) {
       logger.logDeletedFiles(deletedPaths);
     }
-  }
-
-  @Override
-  public void buildStarted(final CompileContext context) {
-    //todo[nik] move to common place
-    context.addBuildListener(new BuildListener() {
-      @Override
-      public void filesGenerated(Collection<Pair<String, String>> paths) {
-        BuildFSState fsState = context.getProjectDescriptor().fsState;
-        BuildRootIndex rootsIndex = context.getProjectDescriptor().getBuildRootIndex();
-        for (Pair<String, String> pair : paths) {
-          String relativePath = pair.getSecond();
-          File file = relativePath.equals(".") ? new File(pair.getFirst()) : new File(pair.getFirst(), relativePath);
-          Collection<BuildRootDescriptor> descriptors = rootsIndex.findAllParentDescriptors(file, null, context);
-          for (BuildRootDescriptor descriptor : descriptors) {
-            try {
-              fsState.markDirty(context, file, descriptor, context.getProjectDescriptor().timestamps.getStorage(), false);
-            }
-            catch (IOException ignored) {
-            }
-          }
-        }
-      }
-
-      @Override
-      public void filesDeleted(Collection<String> paths) {
-        BuildFSState state = context.getProjectDescriptor().fsState;
-        BuildRootIndex rootsIndex = context.getProjectDescriptor().getBuildRootIndex();
-        for (String path : paths) {
-          File file = new File(FileUtil.toSystemDependentName(path));
-          Collection<BuildRootDescriptor> descriptors = rootsIndex.findAllParentDescriptors(file, null, context);
-          for (BuildRootDescriptor descriptor : descriptors) {
-            state.registerDeleted(descriptor.getTarget(), file);
-          }
-        }
-      }
-    });
   }
 
   @NotNull

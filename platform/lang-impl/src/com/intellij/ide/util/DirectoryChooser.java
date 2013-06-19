@@ -30,6 +30,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -62,7 +63,7 @@ public class DirectoryChooser extends DialogWrapper {
   private final DirectoryChooserView myView;
   private boolean myFilterExisting;
   private PsiDirectory myDefaultSelection;
-  private List<ItemWrapper> myItems = new ArrayList<ItemWrapper>();
+  private final List<ItemWrapper> myItems = new ArrayList<ItemWrapper>();
   private PsiElement mySelection;
   private final TabbedPaneWrapper myTabbedPaneWrapper;
   private final ChooseByNamePanel myChooseByNamePanel;
@@ -84,9 +85,11 @@ public class DirectoryChooser extends DialogWrapper {
         return super.getNames(false);
       }
     }, "", false, null) {
+      @Override
       protected void showTextFieldPanel() {
       }
 
+      @Override
       protected void close(boolean isOk) {
         super.close(isOk);
         if (isOk) {
@@ -121,6 +124,7 @@ public class DirectoryChooser extends DialogWrapper {
     super.doOKAction();
   }
 
+  @Override
   protected JComponent createCenterPanel(){
     final JPanel panel = new JPanel(new BorderLayout());
 
@@ -131,6 +135,7 @@ public class DirectoryChooser extends DialogWrapper {
     panel.add(toolbarComponent, BorderLayout.NORTH);
 
     final Runnable runnable = new Runnable() {
+      @Override
       public void run() {
         enableButtons();
       }
@@ -171,6 +176,7 @@ public class DirectoryChooser extends DialogWrapper {
     final Action oldAction = oldActionKey != null ? actionMap.get(oldActionKey) : null;
     inputMap.put(enterKeyStroke, "clickButton");
     actionMap.put("clickButton", new AbstractAction() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         if (isOKActionEnabled()) {
           doOKAction();
@@ -182,34 +188,25 @@ public class DirectoryChooser extends DialogWrapper {
     });
   }
 
+  @Override
   protected String getDimensionServiceKey() {
     return "chooseDestDirectoryDialog";
-  }
-
-  private static String[] splitPath(String path) {
-    ArrayList<String> list = new ArrayList<String>();
-    int index = 0;
-    int nextSeparator;
-    while ((nextSeparator = path.indexOf(File.separatorChar, index)) != -1) {
-      list.add(path.substring(index, nextSeparator));
-      index = nextSeparator + 1;
-    }
-    list.add(path.substring(index, path.length()));
-    return ArrayUtil.toStringArray(list);
   }
 
   private void buildFragments() {
     ArrayList<String[]> pathes = new ArrayList<String[]>();
     for (int i = 0; i < myView.getItemsSize(); i++) {
       ItemWrapper item = myView.getItemByIndex(i);
-      pathes.add(splitPath(item.getPresentableUrl()));
+      pathes.add(ArrayUtil.toStringArray(FileUtil.splitPath(item.getPresentableUrl())));
     }
     FragmentBuilder headBuilder = new FragmentBuilder(pathes){
+        @Override
         protected void append(String fragment, StringBuffer buffer) {
           buffer.append(mySeparator);
           buffer.append(fragment);
         }
 
+        @Override
         protected int getFragmentIndex(String[] path, int index) {
           return path.length > index ? index : -1;
         }
@@ -217,10 +214,12 @@ public class DirectoryChooser extends DialogWrapper {
     String commonHead = headBuilder.execute();
     final int headLimit = headBuilder.getIndex();
     FragmentBuilder tailBuilder = new FragmentBuilder(pathes){
+        @Override
         protected void append(String fragment, StringBuffer buffer) {
           buffer.insert(0, fragment + mySeparator);
         }
 
+        @Override
         protected int getFragmentIndex(String[] path, int index) {
           int result = path.length - 1 - index;
           return result > headLimit ? result : -1;
@@ -372,6 +371,7 @@ public class DirectoryChooser extends DialogWrapper {
     }
   }
 
+  @Override
   public JComponent getPreferredFocusedComponent(){
     return myView.getComponent();
   }

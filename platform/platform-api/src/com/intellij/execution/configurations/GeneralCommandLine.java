@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,18 @@
  */
 package com.intellij.execution.configurations;
 
+import com.intellij.execution.CommandLineUtil;
 import com.intellij.execution.ExecutionException;
+import com.intellij.execution.Platform;
 import com.intellij.execution.process.ProcessNotCreatedException;
 import com.intellij.ide.IdeBundle;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.UserDataHolder;
-import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.util.EnvironmentUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.CaseInsensitiveStringHashingStrategy;
 import gnu.trove.THashMap;
@@ -34,23 +37,20 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * OS-independent way of executing external processes with complex parameters.
- *
+ * <p/>
  * Main idea of the class is to accept parameters "as-is", just as they should look to an external process, and quote/escape them
  * as required by the underlying platform.
  */
 public class GeneralCommandLine implements UserDataHolder {
-  public static Key<Boolean> DO_NOT_ESCAPE_QUOTES = Key.create("GeneralCommandLine.do.not.escape.quotes");
+  private static final Logger LOG = Logger.getInstance("#com.intellij.execution.configurations.GeneralCommandLine");
 
   private String myExePath = null;
   private File myWorkDirectory = null;
-  private Map<String, String> myEnvParams = null;
+  private final Map<String, String> myEnvParams = new MyTHashMap();
   private boolean myPassParentEnvironment = true;
   private final ParametersList myProgramParams = new ParametersList();
   private Charset myCharset = CharsetToolkit.getDefaultSystemCharset();
@@ -59,12 +59,12 @@ public class GeneralCommandLine implements UserDataHolder {
 
   public GeneralCommandLine() { }
 
-  public GeneralCommandLine(final String... command) {
+  public GeneralCommandLine(@NotNull String... command) {
     this(Arrays.asList(command));
   }
 
-  public GeneralCommandLine(final List<String> command) {
-    final int size = command.size();
+  public GeneralCommandLine(@NotNull List<String> command) {
+    int size = command.size();
     if (size > 0) {
       setExePath(command.get(0));
       if (size > 1) {
@@ -93,17 +93,37 @@ public class GeneralCommandLine implements UserDataHolder {
     myWorkDirectory = workDirectory;
   }
 
-  @Nullable
-  public Map<String, String> getEnvParams() {
+  /**
+   * Note: the map returned is forgiving to passing null values into putAll().
+   */
+  @NotNull
+  public Map<String, String> getEnvironment() {
     return myEnvParams;
   }
 
-  public void setEnvParams(@Nullable final Map<String, String> envParams) {
-    myEnvParams = envParams;
+  /** @deprecated use {@link #getEnvironment()} (to remove in IDEA 14) */
+  @SuppressWarnings("unused")
+  public Map<String, String> getEnvParams() {
+    return getEnvironment();
   }
 
-  public void setPassParentEnvs(final boolean passParentEnvironment) {
+  /** @deprecated use {@link #getEnvironment()} (to remove in IDEA 14) */
+  @SuppressWarnings("unused")
+  public void setEnvParams(@Nullable Map<String, String> envParams) {
+    myEnvParams.clear();
+    if (envParams != null) {
+      myEnvParams.putAll(envParams);
+    }
+  }
+
+  public void setPassParentEnvironment(boolean passParentEnvironment) {
     myPassParentEnvironment = passParentEnvironment;
+  }
+
+  /** @deprecated use {@link #setPassParentEnvironment(boolean)} (to remove in IDEA 14) */
+  @SuppressWarnings({"unused", "SpellCheckingInspection"})
+  public void setPassParentEnvs(boolean passParentEnvironment) {
+    setPassParentEnvironment(passParentEnvironment);
   }
 
   public boolean isPassParentEnvironment() {
@@ -177,32 +197,46 @@ public class GeneralCommandLine implements UserDataHolder {
 
   /**
    * Prepares command (quotes and escapes all arguments) and returns it as a newline-separated list
-   * (suitable e.g. for passing in a environment variable).
+   * (suitable e.g. for passing in an environment variable).
    *
+   * @param platform a target platform
    * @return command as a newline-separated list.
    */
   @NotNull
-  public String getPreparedCommandLine() {
-    return StringUtil.join(prepareCommands(), "\n");
+  public String getPreparedCommandLine(@NotNull Platform platform) {
+    String exePath = myExePath != null ? myExePath : "";
+    return StringUtil.join(CommandLineUtil.toCommandLine(exePath, myProgramParams.getList(), platform), "\n");
   }
 
   public Process createProcess() throws ExecutionException {
-    checkWorkingDirectory();
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Executing [" + getCommandLineString() + "]");
+    }
 
-    final String[] commands = prepareCommands();
-    if (StringUtil.isEmptyOrSpaces(commands[0])) {
-      throw new ExecutionException(IdeBundle.message("run.configuration.error.executable.not.specified"));
+    List<String> commands;
+    try {
+      checkWorkingDirectory();
+
+      if (StringUtil.isEmptyOrSpaces(myExePath)) {
+        throw new ExecutionException(IdeBundle.message("run.configuration.error.executable.not.specified"));
+      }
+
+      commands = CommandLineUtil.toCommandLine(myExePath, myProgramParams.getList());
+    }
+    catch (ExecutionException e) {
+      LOG.warn(e);
+      throw e;
     }
 
     try {
-      final ProcessBuilder builder = new ProcessBuilder(commands);
-      final Map<String, String> environment = builder.environment();
-      setupEnvironment(environment);
+      ProcessBuilder builder = new ProcessBuilder(commands);
+      setupEnvironment(builder.environment());
       builder.directory(myWorkDirectory);
       builder.redirectErrorStream(myRedirectErrorStream);
       return builder.start();
     }
     catch (IOException e) {
+      LOG.warn(e);
       throw new ProcessNotCreatedException(e.getMessage(), e, this);
     }
   }
@@ -220,36 +254,14 @@ public class GeneralCommandLine implements UserDataHolder {
     }
   }
 
-  private String[] prepareCommands() {
-    final List<String> parameters = myProgramParams.getList();
-    final boolean doNotEscape = Boolean.TRUE.equals(getUserData(DO_NOT_ESCAPE_QUOTES));
-
-    final String[] result = new String[parameters.size() + 1];
-    result[0] = myExePath != null ? prepareCommand(FileUtil.toSystemDependentName(myExePath), doNotEscape) : null;
-    for (int i = 0; i < parameters.size(); i++) {
-      result[i + 1] = prepareCommand(parameters.get(i), doNotEscape);
-    }
-    return result;
-  }
-
-  // please keep in sync with com.intellij.rt.execution.junit.ProcessBuilder.prepareCommand() (besides doNotEscape option)
-  private static String prepareCommand(String parameter, final boolean doNotEscape) {
-    if (SystemInfo.isWindows) {
-      if (!doNotEscape && parameter.contains("\"")) {
-        parameter = StringUtil.replace(parameter, "\"", "\\\"");
-      }
-      else if (parameter.length() == 0) {
-        parameter = "\"\"";
-      }
-    }
-    return parameter;
-  }
-
   private void setupEnvironment(final Map<String, String> environment) {
-    if (!myPassParentEnvironment) {
-      environment.clear();
+    environment.clear();
+
+    if (myPassParentEnvironment) {
+      environment.putAll(EnvironmentUtil.getEnvironmentMap());
     }
-    if (myEnvParams != null) {
+
+    if (!myEnvParams.isEmpty()) {
       if (SystemInfo.isWindows) {
         THashMap<String, String> envVars = new THashMap<String, String>(CaseInsensitiveStringHashingStrategy.INSTANCE);
         envVars.putAll(environment);
@@ -261,6 +273,18 @@ public class GeneralCommandLine implements UserDataHolder {
         environment.putAll(myEnvParams);
       }
     }
+  }
+
+  /**
+   * Normally, double quotes in parameters are escaped so they arrive to a called program as-is.
+   * But some commands (e.g. {@code 'cmd /c start "title" ...'}) should get they quotes non-escaped.
+   * Wrapping a parameter by this method (instead of using quotes) will do exactly this.
+   *
+   * @see com.intellij.execution.util.ExecUtil#getTerminalCommand(String, String)
+   */
+  @NotNull
+  public static String inescapableQuote(@NotNull String parameter) {
+    return CommandLineUtil.specialQuote(parameter);
   }
 
   @Override
@@ -283,5 +307,14 @@ public class GeneralCommandLine implements UserDataHolder {
       myUserData = ContainerUtil.newHashMap();
     }
     myUserData.put(key, value);
+  }
+
+  private static class MyTHashMap extends THashMap<String, String> {
+    @Override
+    public void putAll(Map<? extends String, ? extends String> map) {
+      if (map != null) {
+        super.putAll(map);
+      }
+    }
   }
 }

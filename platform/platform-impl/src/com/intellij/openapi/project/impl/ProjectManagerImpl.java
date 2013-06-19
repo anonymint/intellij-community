@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.project.impl;
 
+import com.intellij.CommonBundle;
 import com.intellij.conversion.ConversionResult;
 import com.intellij.conversion.ConversionService;
 import com.intellij.ide.AppLifecycleListener;
@@ -38,6 +39,8 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.project.ProjectManagerListener;
@@ -50,6 +53,8 @@ import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.impl.local.FileWatcher;
+import com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl;
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame;
 import com.intellij.util.Alarm;
 import com.intellij.util.ArrayUtil;
@@ -90,7 +95,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   private final List<Project> myOpenProjects = new ArrayList<Project>();
   private Project[] myOpenProjectsArrayCache = {};
-  private final List<ProjectManagerListener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<ProjectManagerListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private final Set<Project> myTestProjects = new THashSet<Project>();
 
@@ -120,7 +125,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
     MessageBusConnection connection = messageBus.connect(app);
     connection.subscribe(StateStorage.STORAGE_TOPIC, new StateStorage.Listener() {
       @Override
-      public void storageFileChanged(final VirtualFileEvent event, @NotNull final StateStorage storage) {
+      public void storageFileChanged(@NotNull final VirtualFileEvent event, @NotNull final StateStorage storage) {
         VirtualFile file = event.getFile();
         if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
           saveChangedProjectFile(file, null, storage);
@@ -137,7 +142,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
           MessageBusConnection connection = messageBus.connect(project);
           connection.subscribe(StateStorage.STORAGE_TOPIC, new StateStorage.Listener() {
             @Override
-            public void storageFileChanged(final VirtualFileEvent event, @NotNull final StateStorage storage) {
+            public void storageFileChanged(@NotNull final VirtualFileEvent event, @NotNull final StateStorage storage) {
               VirtualFile file = event.getFile();
               if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
                 saveChangedProjectFile(file, project, storage);
@@ -184,14 +189,10 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   @Override
   public void disposeComponent() {
+    ApplicationManager.getApplication().assertWriteAccessAllowed();
     Disposer.dispose(myChangedFilesAlarm);
     if (myDefaultProject != null) {
-      ApplicationManager.getApplication().runWriteAction(new Runnable() {
-        @Override
-        public void run() {
-          Disposer.dispose(myDefaultProject);
-        }
-      });
+      Disposer.dispose(myDefaultProject);
 
       myDefaultProject = null;
       myDefaultProjectWasDisposed = true;
@@ -206,7 +207,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   @Override
   @Nullable
-  public Project newProject(final String projectName, String filePath, boolean useDefaultProjectSettings, boolean isDummy) {
+  public Project newProject(final String projectName, @NotNull String filePath, boolean useDefaultProjectSettings, boolean isDummy) {
     filePath = toCanonicalName(filePath);
 
     //noinspection ConstantConditions
@@ -287,11 +288,10 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
   }
 
   private ProjectImpl createProject(@Nullable String projectName,
-                                    @Nullable String filePath,
+                                    @NotNull String filePath,
                                     boolean isDefault,
                                     boolean isOptimiseTestLoadSpeed) {
-    assert isDefault || filePath != null : filePath;
-    return isDefault ? new DefaultProject(this, null, isOptimiseTestLoadSpeed, projectName)
+    return isDefault ? new DefaultProject(this, "", isOptimiseTestLoadSpeed, projectName)
                      : new ProjectImpl(this, filePath, isOptimiseTestLoadSpeed, projectName);
   }
 
@@ -313,7 +313,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   @Override
   @Nullable
-  public Project loadProject(String filePath) throws IOException, JDOMException, InvalidDataException {
+  public Project loadProject(@NotNull String filePath) throws IOException, JDOMException, InvalidDataException {
     try {
       ProjectImpl project = createProject(null, filePath, false, false);
       initProject(project, null);
@@ -347,7 +347,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
     LOG.assertTrue(!myDefaultProjectWasDisposed, "Default project has been already disposed!");
     if (myDefaultProject == null) {
       try {
-        myDefaultProject = createProject(null, null, true, ApplicationManager.getApplication().isUnitTestMode());
+        myDefaultProject = createProject("Default project", "Default project", true, ApplicationManager.getApplication().isUnitTestMode());
         initProject(myDefaultProject, null);
         myDefaultProjectRootElement = null;
       }
@@ -374,11 +374,14 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
         LOG.error("Open projects: " + myOpenProjects + "; cache: " + Arrays.asList(myOpenProjectsArrayCache));
       }
       if (myOpenProjectsArrayCache.length > 0 && myOpenProjectsArrayCache[0] != myOpenProjects.get(0)) {
-        LOG
-          .error("Open projects cache corrupted. Open projects: " + myOpenProjects + "; cache: " + Arrays.asList(myOpenProjectsArrayCache));
+        LOG.error("Open projects cache corrupted. Open projects: " + myOpenProjects + "; cache: " + Arrays.asList(myOpenProjectsArrayCache));
       }
       if (ApplicationManager.getApplication().isUnitTestMode()) {
-        return ArrayUtil.mergeArrays(myOpenProjectsArrayCache, myTestProjects.toArray(new Project[myTestProjects.size()]));
+        Project[] testProjects = myTestProjects.toArray(new Project[myTestProjects.size()]);
+        for (Project testProject : testProjects) {
+          assert !testProject.isDisposed() : testProject;
+        }
+        return ArrayUtil.mergeArrays(myOpenProjectsArrayCache, testProjects);
       }
       return myOpenProjectsArrayCache;
     }
@@ -386,7 +389,9 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   @Override
   public boolean isProjectOpened(Project project) {
-    return ApplicationManager.getApplication().isUnitTestMode() && myTestProjects.contains(project) || myOpenProjects.contains(project);
+    synchronized (myOpenProjects) {
+      return ApplicationManager.getApplication().isUnitTestMode() && myTestProjects.contains(project) || myOpenProjects.contains(project);
+    }
   }
 
   @Override
@@ -410,7 +415,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
     fireProjectOpened(project);
 
     final StartupManagerImpl startupManager = (StartupManagerImpl)StartupManager.getInstance(project);
-
+    waitForFileWatcher(project);
     boolean ok = myProgressManager.runProcessWithProgressSynchronously(new Runnable() {
       @Override
       public void run() {
@@ -464,6 +469,31 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
     myOpenProjectsArrayCache = myOpenProjects.toArray(new Project[myOpenProjects.size()]);
   }
 
+  private void waitForFileWatcher(@NotNull Project project) {
+    LocalFileSystem fs = LocalFileSystem.getInstance();
+    if (!(fs instanceof LocalFileSystemImpl)) return;
+
+    final FileWatcher watcher = ((LocalFileSystemImpl)fs).getFileWatcher();
+    if (!watcher.isOperational() || !watcher.isSettingRoots()) return;
+
+    LOG.info("FW/roots waiting started");
+    Task.Modal task = new Task.Modal(project, ProjectBundle.message("project.load.progress"), true) {
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        indicator.setIndeterminate(true);
+        indicator.setText(ProjectBundle.message("project.load.waiting.watcher"));
+        if (indicator instanceof ProgressWindow) {
+          ((ProgressWindow)indicator).setCancelButtonText(CommonBundle.message("button.skip"));
+        }
+        while (watcher.isSettingRoots() && !indicator.isCanceled()) {
+          TimeoutUtil.sleep(10);
+        }
+        LOG.info("FW/roots waiting finished");
+      }
+    };
+    myProgressManager.run(task);
+  }
+
   @Override
   public Project loadAndOpenProject(@NotNull final String filePath) throws IOException {
     final Project project = convertAndLoadProject(filePath);
@@ -472,6 +502,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
       return null;
     }
 
+    // todo unify this logic with PlatformProjectOpenProcessor
     if (!openProject(project)) {
       WelcomeFrame.showIfNoProjectOpened();
       ApplicationManager.getApplication().runWriteAction(new Runnable() {
@@ -631,12 +662,7 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
               ((XmlElementStorage)stateStorage).disableSaving();
             }
           }
-          if (canRestart) {
-            ApplicationManagerEx.getApplicationEx().restart();
-          }
-          else {
-            ApplicationManagerEx.getApplicationEx().exit(true);
-          }
+          ApplicationManagerEx.getApplicationEx().restart(true);
         }
       }
 
@@ -749,27 +775,19 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
 
   @Override
   public void openTestProject(@NotNull final Project project) {
-    assert ApplicationManager.getApplication().isUnitTestMode();
-    myTestProjects.add(project);
+    synchronized (myOpenProjects) {
+      assert ApplicationManager.getApplication().isUnitTestMode();
+      assert !project.isDisposed() : "Must not open already disposed project";
+      myTestProjects.add(project);
+    }
   }
 
   @Override
-  public void closeTestProject(@NotNull Project project) {
-    assert ApplicationManager.getApplication().isUnitTestMode();
-    myTestProjects.remove(project);
-  }
-
-  @TestOnly
-  public void assertTestProjectsClosed() {
-    assert ApplicationManager.getApplication().isUnitTestMode();
-    if (!myTestProjects.isEmpty()) {
-      try {
-        Project project = myTestProjects.iterator().next();
-        throw new AssertionError("Test project is not disposed: " + project);
-      }
-      finally {
-        myTestProjects.clear();
-      }
+  public Collection<Project> closeTestProject(@NotNull Project project) {
+    synchronized (myOpenProjects) {
+      assert ApplicationManager.getApplication().isUnitTestMode();
+      myTestProjects.remove(project);
+      return myTestProjects;
     }
   }
 
@@ -938,8 +956,8 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
           synchronized (myOpenProjects) {
             myOpenProjects.remove(project);
             cacheOpenProjects();
+            myTestProjects.remove(project);
           }
-          myTestProjects.remove(project);
 
           myChangedProjectFiles.remove(project);
 
@@ -1008,7 +1026,8 @@ public class ProjectManagerImpl extends ProjectManagerEx implements NamedJDOMExt
   public void addProjectManagerListener(@NotNull Project project, @NotNull ProjectManagerListener listener) {
     List<ProjectManagerListener> listeners = project.getUserData(LISTENERS_IN_PROJECT_KEY);
     if (listeners == null) {
-      listeners = ((UserDataHolderEx)project).putUserDataIfAbsent(LISTENERS_IN_PROJECT_KEY, ContainerUtil.<ProjectManagerListener>createEmptyCOWList());
+      listeners = ((UserDataHolderEx)project)
+        .putUserDataIfAbsent(LISTENERS_IN_PROJECT_KEY, ContainerUtil.<ProjectManagerListener>createLockFreeCopyOnWriteList());
     }
     listeners.add(listener);
   }

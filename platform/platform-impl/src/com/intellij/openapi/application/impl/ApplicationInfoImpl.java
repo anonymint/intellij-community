@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.application.impl;
 
+import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
@@ -35,6 +36,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.util.*;
 import java.util.List;
 import java.util.jar.JarEntry;
@@ -51,6 +53,7 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
   private String myCompanyUrl = "http://www.jetbrains.com/";
   private Color myProgressColor = null;
   private Color myAboutForeground = Color.black;
+  private Color myAboutLinkColor = null;
   private Icon myProgressTailIcon = null;
 
   private int myProgressY = 350;
@@ -59,11 +62,12 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
   private Color mySplashTextColor = new Color(0, 35, 135);  // idea blue
   @NonNls private String myIconUrl = "/icon.png";
   @NonNls private String mySmallIconUrl = "/icon_small.png";
+  @NonNls private String myBigIconUrl = null;
   @NonNls private String myOpaqueIconUrl = "/icon.png";
   @NonNls private String myToolWindowIconUrl = "/toolwindows/toolWindowProject.png";
   private String myWelcomeScreenLogoUrl = null;
   private String myEditorBackgroundImageUrl = null;
-  
+
   private Calendar myBuildDate = null;
   private Calendar myMajorReleaseBuildDate = null;
   private String myPackageCode = null;
@@ -89,6 +93,11 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
   @NonNls private String myWebHelpUrl = "http://www.jetbrains.com/idea/webhelp/";
   private List<PluginChooserPage> myPluginChooserPages = new ArrayList<PluginChooserPage>();
   private String[] myEssentialPluginsIds;
+  private String myStatisticsSettingsUrl;
+  private String myStatisticsServiceUrl;
+  private String myThirdPartySoftwareUrl;
+
+  private Rectangle myAboutLogoRect;
 
   @NonNls private static final String IDEA_PATH = "/idea/";
   @NonNls private static final String ELEMENT_VERSION = "version";
@@ -106,11 +115,13 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
   @NonNls private static final String ATTRIBUTE_TEXT_COLOR = "textcolor";
   @NonNls private static final String ATTRIBUTE_PROGRESS_COLOR = "progressColor";
   @NonNls private static final String ATTRIBUTE_ABOUT_FOREGROUND_COLOR = "foreground";
+  @NonNls private static final String ATTRIBUTE_ABOUT_LINK_COLOR = "linkColor";
   @NonNls private static final String ATTRIBUTE_PROGRESS_Y = "progressY";
   @NonNls private static final String ATTRIBUTE_PROGRESS_TAIL_ICON = "progressTailIcon";
   @NonNls private static final String ELEMENT_ABOUT = "about";
   @NonNls private static final String ELEMENT_ICON = "icon";
   @NonNls private static final String ATTRIBUTE_SIZE32 = "size32";
+  @NonNls private static final String ATTRIBUTE_SIZE128 = "size128";
   @NonNls private static final String ATTRIBUTE_SIZE16 = "size16";
   @NonNls private static final String ATTRIBUTE_SIZE12 = "size12";
   @NonNls private static final String ATTRIBUTE_SIZE32OPAQUE = "size32opaque";
@@ -146,8 +157,15 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
   @NonNls private static final String ELEMENT_KEYMAP = "keymap";
   @NonNls private static final String ATTRIBUTE_WINDOWS_URL = "win";
   @NonNls private static final String ATTRIBUTE_MAC_URL = "mac";
-  @NonNls private static final String DEFAULT_PLUGINS_HOST = "http://plugins.intellij.net";
+  @NonNls private static final String DEFAULT_PLUGINS_HOST = "http://plugins.jetbrains.com";
   @NonNls private static final String ESSENTIAL_PLUGIN = "essential-plugin";
+
+  @NonNls private static final String ELEMENT_STATISTICS = "statistics";
+  @NonNls private static final String ATTRIBUTE_STATISTICS_SETTINGS = "settings";
+  @NonNls private static final String ATTRIBUTE_STATISTICS_SERVICE = "service";
+
+  @NonNls private static final String ELEMENT_THIRD_PARTY = "third-party";
+
 
   public void initComponent() { }
 
@@ -183,7 +201,7 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
 
   public String getVersionName() {
     final String fullName = ApplicationNamesInfo.getInstance().getFullProductName();
-    if (myEAP) {
+    if (myEAP && !StringUtil.isEmptyOrSpaces(myCodeName)) {
       return fullName + " (" + myCodeName + ")";
     }
     return fullName;
@@ -240,6 +258,12 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
 
   public String getSmallIconUrl() {
     return mySmallIconUrl;
+  }
+
+  @Override
+  @Nullable
+  public String getBigIconUrl() {
+    return myBigIconUrl;
   }
 
   public String getOpaqueIconUrl() {
@@ -340,6 +364,10 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
     return myAboutForeground;
   }
 
+  public Color getAboutLinkColor() {
+    return myAboutLinkColor;
+  }
+
   public String getFullApplicationName() {
     @NonNls StringBuilder buffer = new StringBuilder();
     buffer.append(getVersionName());
@@ -362,6 +390,24 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
     return myShowLicensee;
   }
 
+  public String getStatisticsSettingsUrl() {
+    return myStatisticsSettingsUrl;
+  }
+
+  public String getStatisticsServiceUrl() {
+    return myStatisticsServiceUrl;
+  }
+
+  @Override
+  public String getThirdPartySoftwareURL() {
+    return myThirdPartySoftwareUrl;
+  }
+
+  @Override
+  public Rectangle getAboutLogoRect() {
+    return myAboutLogoRect;
+  }
+
   private static ApplicationInfoImpl ourShadowInstance;
 
   public boolean isBetaOrRC() {
@@ -378,10 +424,11 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
     if (ourShadowInstance == null) {
       ourShadowInstance = new ApplicationInfoImpl();
       try {
-        Document doc = JDOMUtil.loadDocument(ApplicationInfoImpl.class, IDEA_PATH +
-                                                                        ApplicationNamesInfo.getComponentName() +
-                                                                        XML_EXTENSION);
+        Document doc = JDOMUtil.loadDocument(ApplicationInfoImpl.class, IDEA_PATH + ApplicationNamesInfo.getComponentName() + XML_EXTENSION);
         ourShadowInstance.readExternal(doc.getRootElement());
+      }
+      catch (FileNotFoundException e) {
+        LOG.error("Resource is not in classpath or wrong platform prefix: " + System.getProperty(PlatformUtils.PLATFORM_PREFIX_KEY), e);
       }
       catch (Exception e) {
         LOG.error(e);
@@ -408,6 +455,7 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
     Element buildElement = parentNode.getChild(ELEMENT_BUILD);
     if (buildElement != null) {
       myBuildNumber = buildElement.getAttributeValue(ATTRIBUTE_NUMBER);
+      PluginManagerCore.BUILD_NUMBER = myBuildNumber;
       String dateString = buildElement.getAttributeValue(ATTRIBUTE_DATE);
       if (dateString.equals("__BUILD_DATE__")) {
         myBuildDate = new GregorianCalendar();
@@ -458,11 +506,29 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
     Element aboutLogoElement = parentNode.getChild(ELEMENT_ABOUT);
     if (aboutLogoElement != null) {
       myAboutImageUrl = aboutLogoElement.getAttributeValue(ATTRIBUTE_URL);
-      
+
       String v = aboutLogoElement.getAttributeValue(ATTRIBUTE_ABOUT_FOREGROUND_COLOR);
-        if (v != null) {
-          myAboutForeground = parseColor(v);
+      if (v != null) {
+        myAboutForeground = parseColor(v);
+      }
+      String c = aboutLogoElement.getAttributeValue(ATTRIBUTE_ABOUT_LINK_COLOR);
+      if (c != null) {
+        myAboutLinkColor = parseColor(c);
+      }
+
+      String logoX = aboutLogoElement.getAttributeValue("logoX");
+      String logoY = aboutLogoElement.getAttributeValue("logoY");
+      String logoW = aboutLogoElement.getAttributeValue("logoW");
+      String logoH = aboutLogoElement.getAttributeValue("logoH");
+      if (logoX != null && logoY != null && logoW != null && logoH != null) {
+        try {
+          myAboutLogoRect =
+            new Rectangle(Integer.parseInt(logoX), Integer.parseInt(logoY), Integer.parseInt(logoW), Integer.parseInt(logoH));
         }
+        catch (NumberFormatException nfe) {
+          // ignore
+        }
+      }
     }
 
     Element iconElement = parentNode.getChild(ELEMENT_ICON);
@@ -470,6 +536,7 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
       myIconUrl = iconElement.getAttributeValue(ATTRIBUTE_SIZE32);
       mySmallIconUrl = iconElement.getAttributeValue(ATTRIBUTE_SIZE16);
       myOpaqueIconUrl = iconElement.getAttributeValue(ATTRIBUTE_SIZE32OPAQUE);
+      myBigIconUrl = iconElement.getAttributeValue(ATTRIBUTE_SIZE128, (String)null);
       final String toolWindowIcon = iconElement.getAttributeValue(ATTRIBUTE_SIZE12);
       if (toolWindowIcon != null) {
         myToolWindowIconUrl = toolWindowIcon;
@@ -506,10 +573,10 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
       if (webHelpUrl != null) {
         myWebHelpUrl = webHelpUrl;
       }
-      
+
       String attValue = helpElement.getAttributeValue(ATTRIBUTE_HAS_HELP);
       myHasHelp = attValue == null || Boolean.parseBoolean(attValue); // Default is true
-      
+
       attValue = helpElement.getAttributeValue(ATTRIBUTE_HAS_CONTEXT_HELP);
       myHasContextHelp = attValue == null || Boolean.parseBoolean(attValue); // Default is true
     }
@@ -584,6 +651,21 @@ public class ApplicationInfoImpl extends ApplicationInfoEx implements JDOMExtern
       }
     });
     myEssentialPluginsIds = ArrayUtil.toStringArray(essentialPluginsIds);
+
+    Element statisticsElement = parentNode.getChild(ELEMENT_STATISTICS);
+    if (statisticsElement != null) {
+      myStatisticsSettingsUrl = statisticsElement.getAttributeValue(ATTRIBUTE_STATISTICS_SETTINGS);
+      myStatisticsServiceUrl = statisticsElement.getAttributeValue(ATTRIBUTE_STATISTICS_SERVICE);
+    }
+    else {
+      myStatisticsSettingsUrl = "http://jetbrains.com/idea/statistics/stat-assistant.xml";
+      myStatisticsServiceUrl = "http://jetbrains.com/idea/statistics/index.jsp";
+    }
+
+    Element thirdPartyElement = parentNode.getChild(ELEMENT_THIRD_PARTY);
+    if (thirdPartyElement != null) {
+      myThirdPartySoftwareUrl = thirdPartyElement.getAttributeValue(ATTRIBUTE_URL);
+    }
   }
 
   private static GregorianCalendar parseDate(final String dateString) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiReference;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.xml.XmlAttribute;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.dom.model.MavenDomProfilesModel;
 import org.jetbrains.idea.maven.dom.references.MavenPropertyPsiReference;
@@ -40,6 +42,28 @@ public class MavenFilteredPropertiesCompletionAndResolutionTest extends MavenDom
                   "      <filtering>true</filtering>" +
                   "    </resource>" +
                   "  </resources>" +
+                  "</build>");
+
+    VirtualFile f = createProjectSubFile("res/foo.properties",
+                                         "foo=abc${project<caret>.version}abc");
+
+    assertResolved(f, findTag("project.version"));
+  }
+
+  public void testTestResourceProperties() throws Exception {
+    createProjectSubDir("res");
+
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<build>" +
+                  "  <testResources>" +
+                  "    <testResource>" +
+                  "      <directory>res</directory>" +
+                  "      <filtering>true</filtering>" +
+                  "    </testResource>" +
+                  "  </testResources>" +
                   "</build>");
 
     VirtualFile f = createProjectSubFile("res/foo.properties",
@@ -535,4 +559,82 @@ public class MavenFilteredPropertiesCompletionAndResolutionTest extends MavenDom
     assertNotNull(resolveReference(f, "pom.baseUri"));
   }
 
+  public void testDoNotAddReferenceToDelimiterDefinition() throws Exception {
+    importProject("<groupId>test</groupId>\n" +
+                  "<artifactId>project</artifactId>\n" +
+                  "<version>1</version>\n" +
+                  "<properties>\n" +
+                  "  <aaa>${zzz}</aaa>\n" +
+                  "</properties>\n" +
+
+                  "<build>\n" +
+                  "  <plugins>\n" +
+                  "    <plugin>\n" +
+                  "      <artifactId>maven-resources-plugin</artifactId>\n" +
+                  "      <configuration>\n" +
+                  "        <delimiters>\n" +
+                  "          <delimiter>${*}</delimiter>\n" +
+                  "        </delimiters>\n" +
+                  "      </configuration>\n" +
+                  "    </plugin>\n" +
+                  "  </plugins>\n" +
+                  "</build>");
+
+    createProjectPom("<groupId>test</groupId>\n" +
+                     "<artifactId>project</artifactId>\n" +
+                     "<version>1</version>\n" +
+                     "<properties>\n" +
+                     "  <aaa>${<error>zzz</error>}</aaa>\n" +
+                     "</properties>\n" +
+
+                     "<build>\n" +
+                     "  <plugins>\n" +
+                     "    <plugin>\n" +
+                     "      <artifactId>maven-resources-plugin</artifactId>\n" +
+                     "      <configuration>\n" +
+                     "        <delimiters>\n" +
+                     "          <delimiter>${*}</delimiter>\n" +
+                     "        </delimiters>\n" +
+                     "      </configuration>\n" +
+                     "    </plugin>\n" +
+                     "  </plugins>\n" +
+                     "</build>");
+
+    checkHighlighting();
+  }
+
+  public void testReferencesInXml() throws Exception {
+    createProjectSubDir("res");
+
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<build>" +
+                  "  <resources>" +
+                  "    <resource>" +
+                  "      <directory>res</directory>" +
+                  "      <filtering>true</filtering>" +
+                  "    </resource>" +
+                  "  </resources>" +
+                  "</build>");
+
+    VirtualFile f = createProjectSubFile("res/foo.xml",
+                                         "<root attr='${based<caret>ir}'>" +
+                                         "</root>");
+
+    myFixture.configureFromExistingVirtualFile(f);
+
+    XmlAttribute attribute = PsiTreeUtil.getParentOfType(myFixture.getFile().findElementAt(myFixture.getCaretOffset()), XmlAttribute.class);
+
+    PsiReference[] references = attribute.getReferences();
+
+    for (PsiReference ref : references) {
+      if (ref.resolve() instanceof PsiDirectory) {
+        return; // Maven references was added.
+      }
+    }
+
+    assertTrue("Maven filter reference was not added", false);
+  }
 }

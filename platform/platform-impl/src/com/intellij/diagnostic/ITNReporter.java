@@ -21,12 +21,10 @@ import com.intellij.errorreport.bean.ErrorBean;
 import com.intellij.errorreport.error.InternalEAPException;
 import com.intellij.errorreport.error.NoSuchEAPUserException;
 import com.intellij.errorreport.error.UpdateAvailableException;
-import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.idea.IdeaLogger;
-import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.DataContext;
@@ -40,11 +38,10 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Consumer;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import javax.swing.event.HyperlinkEvent;
 import java.awt.*;
 
 /**
@@ -147,7 +144,7 @@ public class ITNReporter extends ErrorReportSubmitter {
       login = "idea_anonymous";
       password = "guest";
     }
-    
+
     ErrorReportSender.sendError(project, login, password, errorBean, new Consumer<Integer>() {
       @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod"})
       @Override
@@ -160,26 +157,20 @@ public class ITNReporter extends ErrorReportSubmitter {
         ApplicationManager.getApplication().invokeLater(new Runnable() {
           @Override
           public void run() {
-            StringBuilder text = new StringBuilder("<html>");
+            StringBuilder text = new StringBuilder();
             final String url = IdeErrorsDialog.getUrl(reportInfo, true);
             IdeErrorsDialog.appendSubmissionInformation(reportInfo, text, url);
             text.append(".");
             if (reportInfo.getStatus() != SubmittedReportInfo.SubmissionStatus.FAILED) {
               text.append("<br/>").append(DiagnosticBundle.message("error.report.gratitude"));
             }
-            text.append("</html>");
+
             NotificationType type = reportInfo.getStatus() == SubmittedReportInfo.SubmissionStatus.FAILED
                                     ? NotificationType.ERROR
                                     : NotificationType.INFORMATION;
-            NotificationListener listener = url != null ? new NotificationListener() {
-              @Override
-              public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
-                BrowserUtil.launchBrowser(url);
-                notification.expire();
-              }
-            } : null;
+            NotificationListener listener = url != null ? new NotificationListener.UrlOpeningListener(true) : null;
             ReportMessages.GROUP.createNotification(ReportMessages.ERROR_REPORT,
-                                                    text.toString(),
+                                                    XmlStringUtil.wrapInHtml(text),
                                                     type, listener).setImportant(false).notify(project);
           }
         });

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,9 @@ import com.intellij.ide.browsers.firefox.FirefoxSettings;
 import com.intellij.ide.browsers.impl.DefaultUrlOpener;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.io.WindowsRegistryUtil;
-import com.intellij.util.SystemProperties;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializer;
@@ -37,8 +35,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.io.File;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
@@ -57,7 +55,7 @@ public class BrowsersConfiguration implements PersistentStateComponent<Element> 
         return new FirefoxSettings();
       }
     },
-    CHROME(XmlBundle.message("browsers.chrome"), getWindowsPathToChrome(), "google-chrome", "Google Chrome", AllIcons.Xml.Browsers.Chrome16) {
+    CHROME(XmlBundle.message("browsers.chrome"), "chrome", "google-chrome", "Google Chrome", AllIcons.Xml.Browsers.Chrome16) {
       @Override
       public BrowserSpecificSettings createBrowserSpecificSettings() {
         return new ChromeSettings();
@@ -152,9 +150,7 @@ public class BrowsersConfiguration implements PersistentStateComponent<Element> 
         }
         myBrowserToSettingsMap.put(browserFamily, new WebBrowserSettings(path, Boolean.parseBoolean(active), specificSettings));
       }
-      catch (IllegalArgumentException e) {
-        // skip
-      }
+      catch (IllegalArgumentException ignored) { }
     }
   }
 
@@ -194,6 +190,8 @@ public class BrowsersConfiguration implements PersistentStateComponent<Element> 
     return ServiceManager.getService(BrowsersConfiguration.class);
   }
 
+  /** @deprecated use {@link DefaultUrlOpener} (to remove in IDEA 13) */
+  @SuppressWarnings("unused")
   public static void launchBrowser(final @Nullable BrowserFamily family, @NotNull final String url) {
     if (family == null) {
       BrowserUtil.launchBrowser(url);
@@ -207,35 +205,33 @@ public class BrowsersConfiguration implements PersistentStateComponent<Element> 
     }
   }
 
-  @Nullable
-  private static String getWindowsPathToChrome() {
-    if (!SystemInfo.isWindows) return null;
-
-    String localSettings = SystemProperties.getUserHome() + (SystemInfo.isWin7OrNewer ? "/AppData/Local" : "/Local Settings");
-    return FileUtil.toSystemDependentName(localSettings + "/Google/Chrome/Application/chrome.exe");
-  }
-
+  /** @deprecated use {@link DefaultUrlOpener} (to remove in IDEA 13) */
+  @SuppressWarnings("unused")
   public static void launchBrowser(final @NotNull BrowserFamily family, @NotNull final String url, String... parameters) {
-    launchBrowser(family, url, false, parameters);
+    DefaultUrlOpener.launchBrowser(family, url, false, parameters);
   }
 
+  /** @deprecated use {@link DefaultUrlOpener} (to remove in IDEA 13) */
+  @SuppressWarnings("unused")
   public static void launchBrowser(final @NotNull BrowserFamily family,
                                    @Nullable final String url,
                                    final boolean forceOpenNewInstanceOnMac,
                                    String... parameters) {
-    DefaultUrlOpener.launchBrowser(family, url, parameters, Conditions.<String>alwaysTrue(), forceOpenNewInstanceOnMac);
+    DefaultUrlOpener.launchBrowser(family, url, forceOpenNewInstanceOnMac, parameters);
   }
 
+  /** @deprecated use {@link DefaultUrlOpener} (to remove in IDEA 13) */
+  @SuppressWarnings("unused")
   public static void launchBrowser(final @NotNull BrowserFamily family,
                                    @NotNull final String url,
                                    final boolean forceOpenNewInstanceOnMac,
                                    final Condition<String> browserSpecificParametersFilter,
                                    String... parameters) {
-    DefaultUrlOpener.launchBrowser(family, url, parameters, browserSpecificParametersFilter, forceOpenNewInstanceOnMac);
+    DefaultUrlOpener.launchBrowser(family, url, forceOpenNewInstanceOnMac, parameters);
   }
 
   @Nullable
-  public static BrowserFamily findFamilyByName(@Nullable String name) {
+  public BrowserFamily findFamilyByName(@Nullable String name) {
     for (BrowserFamily family : BrowserFamily.values()) {
       if (family.getName().equals(name)) {
         return family;
@@ -244,49 +240,17 @@ public class BrowsersConfiguration implements PersistentStateComponent<Element> 
     return null;
   }
 
-  /**
-   * Gets data from Windows registry, may take some time to run (up to ~300ms)
-   *
-   * @return Map[BrowserFamily -> "path to .exe"]
-   */
-  @NotNull
-  public static EnumMap<BrowserFamily, String> getWindowsBrowsersEXE() {
-    EnumMap<BrowserFamily, String> map = new EnumMap<BrowserFamily, String>(BrowserFamily.class);
-    if (SystemInfo.isWindows) {
-      List<String> sections = WindowsRegistryUtil.readRegistryBranch("HKEY_LOCAL_MACHINE\\SOFTWARE\\Clients\\StartMenuInternet");
-      for (String section : sections) {
-        BrowserFamily family = getFamily(section);
-        if (family == null) {
-          continue; //We ignore "unknown" browsers like Maxthon, RockMelt, SeaMonkey, Deepnet Explorer, Avant Browser etc.
-        }
-        String pathToExe = WindowsRegistryUtil.readRegistryDefault(
-          "HKLM\\SOFTWARE\\Clients\\StartMenuInternet\\" + section + "\\shell\\open\\command");
-        if (pathToExe != null) {
-          map.put(family, pathToExe);
+  @Nullable
+  public BrowserFamily findFamilyByPath(@Nullable String path) {
+    if (!StringUtil.isEmptyOrSpaces(path)) {
+      String name = FileUtil.getNameWithoutExtension(new File(path).getName());
+      for (BrowserFamily family : BrowserFamily.values()) {
+        if (name.equalsIgnoreCase(family.getExecutionPath())) {
+          return family;
         }
       }
     }
-    return map;
-  }
 
-  @Nullable
-  private static BrowserFamily getFamily(String registryName) {
-    registryName = registryName.toLowerCase();
-    if (registryName.contains("firefox")) {
-      return BrowserFamily.FIREFOX;
-    }
-    if (registryName.contains("iexplore")) {
-      return BrowserFamily.EXPLORER;
-    }
-    if (registryName.contains("opera")) {
-      return BrowserFamily.OPERA;
-    }
-    if (registryName.contains("safari")) {
-      return BrowserFamily.SAFARI;
-    }
-    if (registryName.contains("google")) {
-      return BrowserFamily.CHROME;
-    }
     return null;
   }
 }

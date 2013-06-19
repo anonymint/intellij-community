@@ -113,10 +113,7 @@ public class HgRegularUpdater implements HgUpdater {
         abortOnMultiplePulledHeads(pulledBranchHeads);
         abortOnMultipleLocalHeads(remainingOriginalBranchHeads);
 
-        //update to the pulled in head, because we consider that head as the 'authoritative' head
-        updateToPulledHead(repository, updatedFiles, pulledBranchHeads.get(0), indicator);
-
-        HgCommandResult mergeResult = doMerge(updatedFiles, indicator, warnings, remainingOriginalBranchHeads.get(0));
+        HgCommandResult mergeResult = doMerge(updatedFiles, indicator, warnings, pulledBranchHeads.get(0));
 
         if (shouldCommitAfterMerge()) {
           commitOrWarnAboutConflicts(warnings, mergeResult);
@@ -219,9 +216,7 @@ public class HgRegularUpdater implements HgUpdater {
   }
 
   private Set<HgChange> getLocalChanges() {
-    HgStatusCommand statusCommand = new HgStatusCommand(project);
-    statusCommand.setIncludeIgnored(false);
-    statusCommand.setIncludeUnknown(false);
+    HgStatusCommand statusCommand = new HgStatusCommand.Builder(true).unknown(false).ignored(false).build(project);
     return statusCommand.execute(repository);
   }
 
@@ -269,9 +264,8 @@ public class HgRegularUpdater implements HgUpdater {
     if (parentAfterUpdate.equals(parentBeforeUpdate)) { // nothing to update => returning not to capture local uncommitted changes
       return;
     }
-    HgStatusCommand statusCommand = new HgStatusCommand(project);
-    statusCommand.setBaseRevision(parentBeforeUpdate);
-    statusCommand.setTargetRevision(parentAfterUpdate);
+    HgStatusCommand statusCommand = new HgStatusCommand.Builder(true).baseRevision(parentBeforeUpdate).targetRevision(
+      parentAfterUpdate).build(project);
     Set<HgChange> changes = statusCommand.execute(repo);
     for (HgChange change : changes) {
       HgFileStatusEnum status = change.getStatus();

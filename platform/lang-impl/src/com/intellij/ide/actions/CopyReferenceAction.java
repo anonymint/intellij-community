@@ -62,6 +62,7 @@ public class CopyReferenceAction extends DumbAwareAction {
     setInjectedContext(true);
   }
 
+  @Override
   public void update(AnActionEvent e) {
     DataContext dataContext = e.getDataContext();
     Editor editor = PlatformDataKeys.EDITOR.getData(dataContext);
@@ -76,6 +77,7 @@ public class CopyReferenceAction extends DumbAwareAction {
     }
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     DataContext dataContext = e.getDataContext();
     Editor editor = PlatformDataKeys.EDITOR.getData(dataContext);
@@ -104,7 +106,7 @@ public class CopyReferenceAction extends DumbAwareAction {
         PsiReference reference = TargetElementUtilBase.findReference(editor, editor.getCaretModel().getOffset());
         if (reference != null) {
           highlightManager.addOccurrenceHighlights(editor, new PsiReference[]{reference}, attributes, true, null);
-        } else {
+        } else if (element != PsiDocumentManager.getInstance(project).getCachedPsiFile(editor.getDocument())) {
           highlightManager.addOccurrenceHighlights(editor, new PsiElement[]{element}, attributes, true, null);
         }
       }
@@ -172,14 +174,17 @@ public class CopyReferenceAction extends DumbAwareAction {
       this.fqn = fqn;
     }
 
+    @Override
     public DataFlavor[] getTransferDataFlavors() {
       return new DataFlavor[]{ourFlavor, DataFlavor.stringFlavor};
     }
 
+    @Override
     public boolean isDataFlavorSupported(DataFlavor flavor) {
       return ArrayUtil.find(getTransferDataFlavors(), flavor) != -1;
     }
 
+    @Override
     @Nullable
     public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException {
       if (isDataFlavorSupported(flavor)) {

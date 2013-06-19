@@ -83,18 +83,17 @@ public class PivotalTrackerRepository extends BaseRepositoryImpl {
 
   @Override
   public Task[] getIssues(@Nullable final String query, final int max, final long since) throws Exception {
-    @SuppressWarnings({"unchecked"}) List<Object> children = getStories(query, max);
+    List<Element> children = getStories(query, max);
 
-    final List<Task> tasks = ContainerUtil.mapNotNull(children, new NullableFunction<Object, Task>() {
-      public Task fun(Object o) {
-        return createIssue((Element)o);
+    final List<Task> tasks = ContainerUtil.mapNotNull(children, new NullableFunction<Element, Task>() {
+      public Task fun(Element o) {
+        return createIssue(o);
       }
     });
     return tasks.toArray(new Task[tasks.size()]);
   }
 
-  @SuppressWarnings({"unchecked"})
-  private List<Object> getStories(@Nullable final String query, final int max) throws Exception {
+  private List<Element> getStories(@Nullable final String query, final int max) throws Exception {
     String url = API_URL + "/projects/" + myProjectId + "/stories";
     url += "?filter=" + encodeUrl("state:started,unstarted,unscheduled,rejected");
     if (!StringUtil.isEmpty(query)) {
@@ -360,5 +359,10 @@ public class PivotalTrackerRepository extends BaseRepositoryImpl {
     if (getProjectId() != null ? !getProjectId().equals(that.getProjectId()) : that.getProjectId() != null) return false;
     if (getCommitMessageFormat() != null ? !getCommitMessageFormat().equals(that.getCommitMessageFormat()) : that.getCommitMessageFormat() != null) return false;
     return isShouldFormatCommitMessage() == that.isShouldFormatCommitMessage();
+  }
+
+  @Override
+  protected int getFeatures() {
+    return BASIC_HTTP_AUTHORIZATION;
   }
 }

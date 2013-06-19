@@ -30,27 +30,46 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.impl.file.PsiDirectoryFactory;
 import com.intellij.util.IncorrectOperationException;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
+import java.awt.*;
 import java.io.File;
 
 public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
-  private final Project myProject;
-  private final PsiDirectory myDirectory;
+  @Nullable private final Project myProject;
+  @NotNull private final PsiDirectory myDirectory;
   private final boolean myIsDirectory;
-  private PsiDirectory myCreatedElement = null;
-  private String myDelimiters;
+  @Nullable private PsiDirectory myCreatedElement = null;
+  @NotNull private final String myDelimiters;
+  @Nullable private final Component myDialogParent;
 
-  public CreateDirectoryOrPackageHandler(Project project, PsiDirectory directory, boolean isDirectory, final String delimiters) {
+  public CreateDirectoryOrPackageHandler(@Nullable Project project,
+                                         @NotNull PsiDirectory directory,
+                                         boolean isDirectory,
+                                         @NotNull final String delimiters) {
+    this(project, directory, isDirectory, delimiters, null);
+  }
+
+  public CreateDirectoryOrPackageHandler(@Nullable Project project,
+                                         @NotNull PsiDirectory directory,
+                                         boolean isDirectory,
+                                         @NotNull final String delimiters,
+                                         @Nullable Component dialogParent) {
     myProject = project;
     myDirectory = directory;
     myIsDirectory = isDirectory;
     myDelimiters = delimiters;
+    myDialogParent = dialogParent;
   }
 
+  @Override
   public boolean checkInput(String inputString) {
     return true;
   }
 
+  @Override
   public String getErrorText(String inputString) {
     if (FileTypeManager.getInstance().isFileIgnored(inputString)) {
       return "Trying to create a " + (myIsDirectory ? "directory" : "package") + " with ignored name, result will not be visible";
@@ -61,12 +80,12 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
     return null;
   }
 
+  @Override
   public boolean canClose(String inputString) {
     final String subDirName = inputString;
 
     if (subDirName.length() == 0) {
-      Messages.showMessageDialog(myProject, IdeBundle.message("error.name.should.be.specified"), CommonBundle.getErrorTitle(),
-                                 Messages.getErrorIcon());
+      showErrorDialog(IdeBundle.message("error.name.should.be.specified"));
       return false;
     }
 
@@ -76,15 +95,16 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
         myDirectory.checkCreateSubdirectory(subDirName);
       }
       catch (IncorrectOperationException ex) {
-        Messages.showMessageDialog(myProject, CreateElementActionBase.filterMessage(ex.getMessage()), CommonBundle.getErrorTitle(),
-                                   Messages.getErrorIcon());
+        showErrorDialog(CreateElementActionBase.filterMessage(ex.getMessage()));
         return false;
       }
     }
 
     Runnable command = new Runnable() {
+      @Override
       public void run() {
         final Runnable run = new Runnable() {
+          @Override
           public void run() {
             LocalHistoryAction action = LocalHistoryAction.NULL;
             try {
@@ -94,13 +114,12 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
               action = LocalHistory.getInstance().startAction(actionName);
 
               createDirectories(subDirName);
-
             }
             catch (final IncorrectOperationException ex) {
               ApplicationManager.getApplication().invokeLater(new Runnable() {
+                @Override
                 public void run() {
-                  Messages.showMessageDialog(myProject, CreateElementActionBase.filterMessage(ex.getMessage()),
-                                             CommonBundle.getErrorTitle(), Messages.getErrorIcon());
+                  showErrorDialog(CreateElementActionBase.filterMessage(ex.getMessage()));
                 }
               });
             }
@@ -119,10 +138,22 @@ public class CreateDirectoryOrPackageHandler implements InputValidatorEx {
     return myCreatedElement != null;
   }
 
+  private void showErrorDialog(String message) {
+    String title = CommonBundle.getErrorTitle();
+    Icon icon = Messages.getErrorIcon();
+    if (myDialogParent != null) {
+      Messages.showMessageDialog(myDialogParent, message, title, icon);
+    }
+    else {
+      Messages.showMessageDialog(myProject, message, title, icon);
+    }
+  }
+
   protected void createDirectories(String subDirName) {
     myCreatedElement = DirectoryUtil.createSubdirectories(subDirName, myDirectory, myDelimiters);
   }
 
+  @Nullable
   public PsiDirectory getCreatedElement() {
     return myCreatedElement;
   }

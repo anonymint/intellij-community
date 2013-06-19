@@ -27,6 +27,7 @@ import com.intellij.ui.DoubleClickListener;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SeparatorFactory;
 import com.intellij.ui.components.JBList;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -68,11 +69,13 @@ public final class MacrosDialog extends DialogWrapper {
     init();
   }
 
+  @Override
   protected void init() {
     super.init();
 
     java.util.List<Macro> macros = new ArrayList<Macro>(MacroManager.getInstance().getMacros());
     Collections.sort(macros, new Comparator<Macro>() {
+      @Override
       public int compare(Macro macro1, Macro macro2) {
         String name1 = macro1.getName();
         String name2 = macro2.getName();
@@ -99,18 +102,23 @@ public final class MacrosDialog extends DialogWrapper {
     }
   }
 
+  @Override
+  @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(),getCancelAction(),getHelpAction()};
   }
 
+  @Override
   protected void doHelpAction() {
     HelpManager.getInstance().invokeHelp("reference.settings.ide.settings.external.tools.macros");
   }
 
+  @Override
   protected String getDimensionServiceKey(){
     return "#com.intellij.ide.macro.MacrosDialog";
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     JPanel panel = new JPanel(new GridBagLayout());
     GridBagConstraints constr;
@@ -177,6 +185,7 @@ public final class MacrosDialog extends DialogWrapper {
   private void addListeners() {
     myMacrosList.getSelectionModel().addListSelectionListener(
       new ListSelectionListener() {
+        @Override
         public void valueChanged(ListSelectionEvent e) {
           Macro macro = getSelectedMacro();
           if (macro == null){
@@ -211,6 +220,7 @@ public final class MacrosDialog extends DialogWrapper {
     return null;
   }
 
+  @Override
   public JComponent getPreferredFocusedComponent() {
     return myMacrosList;
   }

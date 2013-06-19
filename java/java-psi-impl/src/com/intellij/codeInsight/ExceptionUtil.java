@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,15 @@ package com.intellij.codeInsight;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.NullableComputable;
 import com.intellij.psi.*;
 import com.intellij.psi.controlFlow.*;
 import com.intellij.psi.impl.PsiImplUtil;
-import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.ProjectScope;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.NullableFunction;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
@@ -240,6 +238,9 @@ public class ExceptionUtil {
       PsiCallExpression expression = (PsiCallExpression)element;
       unhandledExceptions = getUnhandledExceptions(expression, topElement, includeSelfCalls);
     }
+    else if (element instanceof PsiMethodReferenceExpression) {
+      unhandledExceptions = getUnhandledExceptions((PsiMethodReferenceExpression)element, topElement);
+    }
     else if (element instanceof PsiThrowStatement) {
       PsiThrowStatement statement = (PsiThrowStatement)element;
       unhandledExceptions = getUnhandledExceptions(statement, topElement);
@@ -310,6 +311,16 @@ public class ExceptionUtil {
     return foundExceptions;
   }
 
+  private static Collection<PsiClassType> getUnhandledExceptions(PsiMethodReferenceExpression methodReferenceExpression,
+                                                                 PsiElement topElement) {
+    final JavaResolveResult resolveResult = methodReferenceExpression.advancedResolve(false);
+    final PsiElement resolve = resolveResult.getElement();
+    if (resolve instanceof PsiMethod) {
+      return getUnhandledExceptions((PsiMethod)resolve, methodReferenceExpression, topElement, resolveResult.getSubstitutor());
+    }
+    return Collections.emptyList();
+  }
+
   private static boolean firstStatementIsConstructorCall(PsiCodeBlock constructorBody) {
     final PsiStatement[] statements = constructorBody.getStatements();
     if (statements.length == 0) return false;
@@ -335,6 +346,12 @@ public class ExceptionUtil {
       public void visitThrowStatement(PsiThrowStatement statement) {
         addExceptions(array, getUnhandledExceptions(statement, null));
         visitElement(statement);
+      }
+
+      @Override
+      public void visitMethodReferenceExpression(PsiMethodReferenceExpression expression) {
+        addExceptions(array, getUnhandledExceptions(expression, null));
+        visitElement(expression);
       }
 
       @Override
@@ -405,21 +422,20 @@ public class ExceptionUtil {
   }
 
   @NotNull
-  public static List<PsiClassType> getUnhandledExceptions(final PsiThrowStatement throwStatement, @Nullable final PsiElement topElement) {
-    final PsiExpression exception = throwStatement.getException();
-    final List<PsiType> types = getPreciseThrowTypes(exception);
-    return ContainerUtil.mapNotNull(types, new NullableFunction<PsiType, PsiClassType>() {
-      @Override
-      public PsiClassType fun(PsiType type) {
-        if (type instanceof PsiClassType) {
-          final PsiClassType classType = (PsiClassType)type;
+  public static List<PsiClassType> getUnhandledExceptions(PsiThrowStatement throwStatement, @Nullable PsiElement topElement) {
+    List<PsiClassType> unhandled = new SmartList<PsiClassType>();
+    for (PsiType type : getPreciseThrowTypes(throwStatement.getException())) {
+      List<PsiType> types = type instanceof PsiDisjunctionType ? ((PsiDisjunctionType)type).getDisjunctions() : Collections.singletonList(type);
+      for (PsiType subType : types) {
+        if (subType instanceof PsiClassType) {
+          PsiClassType classType = (PsiClassType)subType;
           if (!isUncheckedException(classType) && !isHandled(throwStatement, classType, topElement)) {
-            return classType;
+            unhandled.add(classType);
           }
         }
-        return null;
       }
-    });
+    }
+    return unhandled;
   }
 
   @NotNull
@@ -472,12 +488,17 @@ public class ExceptionUtil {
   }
 
   private static boolean isArrayClone(PsiMethod method, PsiElement element) {
-    if (!(element instanceof PsiMethodCallExpression)) return false;
     if (!method.getName().equals(CLONE_METHOD_NAME)) return false;
     PsiClass containingClass = method.getContainingClass();
     if (containingClass == null || !CommonClassNames.JAVA_LANG_OBJECT.equals(containingClass.getQualifiedName())) {
       return false;
     }
+    if (element instanceof PsiMethodReferenceExpression) {
+      final PsiMethodReferenceExpression methodCallExpression = (PsiMethodReferenceExpression)element;
+      final PsiExpression qualifierExpression = methodCallExpression.getQualifierExpression();
+      return qualifierExpression != null && qualifierExpression.getType() instanceof PsiArrayType;
+    }
+    if (!(element instanceof PsiMethodCallExpression)) return false;
 
     PsiMethodCallExpression methodCallExpression = (PsiMethodCallExpression)element;
     final PsiExpression qualifierExpression = methodCallExpression.getMethodExpression().getQualifierExpression();
@@ -485,35 +506,7 @@ public class ExceptionUtil {
   }
 
   public static boolean isUncheckedException(@NotNull PsiClassType type) {
-    final PsiClass aClass = type.resolve();
-    if (aClass == null) return false;
-
-    final GlobalSearchScope searchScope = ProjectScope.getLibrariesScope(aClass.getProject());
-    final PsiClass runtimeExceptionClass = ApplicationManager.getApplication().runReadAction(
-        new NullableComputable<PsiClass>() {
-          @Override
-          public PsiClass compute() {
-            return JavaPsiFacade.getInstance(aClass.getProject()).findClass(CommonClassNames.JAVA_LANG_RUNTIME_EXCEPTION, searchScope);
-          }
-        }
-    );
-    if (runtimeExceptionClass != null && InheritanceUtil.isInheritorOrSelf(aClass, runtimeExceptionClass, true)) {
-      return true;
-    }
-
-    final PsiClass errorClass = ApplicationManager.getApplication().runReadAction(
-      new NullableComputable<PsiClass>() {
-        @Override
-        public PsiClass compute() {
-          return JavaPsiFacade.getInstance(aClass.getProject()).findClass(CommonClassNames.JAVA_LANG_ERROR, searchScope);
-        }
-      }
-    );
-    if (errorClass != null && InheritanceUtil.isInheritorOrSelf(aClass, errorClass, true)) {
-      return true;
-    }
-
-    return false;
+    return InheritanceUtil.isInheritor(type, CommonClassNames.JAVA_LANG_RUNTIME_EXCEPTION) || InheritanceUtil.isInheritor(type, CommonClassNames.JAVA_LANG_ERROR);
   }
 
   public static boolean isUncheckedExceptionOrSuperclass(@NotNull final PsiClassType type) {
@@ -545,7 +538,12 @@ public class ExceptionUtil {
       return parent instanceof PsiAnonymousClass && isHandled(parent, exceptionType, topElement);
     }
     else if (parent instanceof PsiLambdaExpression) {
-      return true;
+      final PsiType interfaceType = ((PsiLambdaExpression)parent).getFunctionalInterfaceType();
+      return isDeclaredBySAMMethod(exceptionType, interfaceType);
+    }
+    else if (element instanceof PsiMethodReferenceExpression) {
+      final PsiType interfaceType = ((PsiMethodReferenceExpression)element).getFunctionalInterfaceType();
+      return isDeclaredBySAMMethod(exceptionType, interfaceType);
     }
     else if (parent instanceof PsiClassInitializer) {
       if (((PsiClassInitializer)parent).hasModifierProperty(PsiModifier.STATIC)) return false;
@@ -590,6 +588,16 @@ public class ExceptionUtil {
       }
     }
     return isHandled(parent, exceptionType, topElement);
+  }
+
+  private static boolean isDeclaredBySAMMethod(PsiClassType exceptionType, PsiType interfaceType) {
+    if (interfaceType != null) {
+      final PsiMethod interfaceMethod = LambdaUtil.getFunctionalInterfaceMethod(interfaceType);
+      if (interfaceMethod != null) {
+        return isHandledByMethodThrowsClause(interfaceMethod, exceptionType);
+      }
+    }
+    return true;
   }
 
   private static boolean areAllConstructorsThrow(final PsiClass aClass, PsiClassType exceptionType) {

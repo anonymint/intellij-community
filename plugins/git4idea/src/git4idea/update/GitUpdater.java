@@ -24,6 +24,7 @@ import com.intellij.openapi.vcs.update.UpdatedFiles;
 import com.intellij.openapi.vfs.VirtualFile;
 import git4idea.GitBranch;
 import git4idea.GitRevisionNumber;
+import git4idea.GitUtil;
 import git4idea.GitVcs;
 import git4idea.branch.GitBranchPair;
 import git4idea.branch.GitBranchUtil;
@@ -33,6 +34,7 @@ import git4idea.commands.GitSimpleHandler;
 import git4idea.config.GitConfigUtil;
 import git4idea.config.GitVcsSettings;
 import git4idea.merge.MergeChangeCollector;
+import git4idea.repo.GitRepositoryManager;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -48,11 +50,12 @@ public abstract class GitUpdater {
 
   @NotNull protected final Project myProject;
   @NotNull protected final Git myGit;
-  protected final @NotNull VirtualFile myRoot;
-  protected final @NotNull Map<VirtualFile, GitBranchPair> myTrackedBranches;
-  protected final @NotNull ProgressIndicator myProgressIndicator;
-  protected final @NotNull UpdatedFiles myUpdatedFiles;
-  protected final @NotNull AbstractVcsHelper myVcsHelper;
+  @NotNull protected final VirtualFile myRoot;
+  @NotNull protected final Map<VirtualFile, GitBranchPair> myTrackedBranches;
+  @NotNull protected final ProgressIndicator myProgressIndicator;
+  @NotNull protected final UpdatedFiles myUpdatedFiles;
+  @NotNull protected final AbstractVcsHelper myVcsHelper;
+  @NotNull protected final GitRepositoryManager myRepositoryManager;
   protected final GitVcs myVcs;
 
   protected GitRevisionNumber myBefore; // The revision that was before update
@@ -68,6 +71,7 @@ public abstract class GitUpdater {
     myUpdatedFiles = updatedFiles;
     myVcsHelper = AbstractVcsHelper.getInstance(project);
     myVcs = GitVcs.getInstance(project);
+    myRepositoryManager = GitUtil.getRepositoryManager(myProject);
   }
 
   /**
@@ -168,10 +172,15 @@ public abstract class GitUpdater {
   protected boolean hasRemoteChanges(@NotNull String currentBranch, @NotNull String remoteBranch) throws VcsException {
     GitSimpleHandler handler = new GitSimpleHandler(myProject, myRoot, GitCommand.REV_LIST);
     handler.setSilent(true);
-    handler.setNoSSH(true);
     handler.addParameters("-1");
     handler.addParameters(currentBranch + ".." + remoteBranch);
     String output = handler.run();
     return output != null && !output.isEmpty();
   }
+
+  @NotNull
+  protected String makeProgressTitle(@NotNull String operation) {
+    return myRepositoryManager.moreThanOneRoot() ? String.format("%s %s...", operation, myRoot.getName()) : operation + "...";
+  }
+
 }

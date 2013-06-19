@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,10 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Ref;
 import com.intellij.util.Function;
 import com.intellij.util.ui.tree.TreeUtil;
-import gnu.trove.THashSet;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.tree.DefaultTreeModel;
@@ -39,10 +40,10 @@ import javax.swing.tree.TreeNode;
 import java.util.*;
 
 public abstract class InspectionRVContentProvider {
-  private final Project myProject;
   private static final Logger LOG = Logger.getInstance("#" + InspectionRVContentProvider.class.getName());
+  private final Project myProject;
 
-  public InspectionRVContentProvider(final Project project) {
+  public InspectionRVContentProvider(@NotNull Project project) {
     myProject = project;
   }
 
@@ -50,7 +51,8 @@ public abstract class InspectionRVContentProvider {
     @Nullable
     UserObjectContainer<T> getOwner();
 
-    RefElementNode createNode(InspectionTool tool);
+    @NotNull
+    RefElementNode createNode(@NotNull InspectionTool tool);
 
     T getUserObject();
 
@@ -62,14 +64,14 @@ public abstract class InspectionRVContentProvider {
     boolean supportStructure();
   }
 
-  public abstract boolean checkReportedProblems(final InspectionTool tool);
+  public abstract boolean checkReportedProblems(@NotNull InspectionToolWrapper toolWrapper);
 
   @Nullable
-  public abstract QuickFixAction[] getQuickFixes(final InspectionTool tool, final InspectionTree tree);
+  public abstract QuickFixAction[] getQuickFixes(@NotNull InspectionTool tool, @NotNull InspectionTree tree);
 
 
-  public void appendToolNodeContent(final InspectionNode toolNode,
-                                    final InspectionTreeNode parentNode,
+  public void appendToolNodeContent(@NotNull InspectionNode toolNode,
+                                    @NotNull InspectionTreeNode parentNode,
                                     final boolean showStructure) {
     final InspectionTool tool = toolNode.getTool();
     final Map<String, Set<RefEntity>> content = tool.getContent();
@@ -82,11 +84,11 @@ public abstract class InspectionRVContentProvider {
                                              final boolean showStructure,
                                              final Map<String, Set<RefEntity>> contents,
                                              final Map<RefEntity, CommonProblemDescriptor[]> problems,
-                                             final @Nullable DefaultTreeModel model);
+                                             @Nullable final DefaultTreeModel model);
 
-  protected abstract void appendDescriptor(final InspectionTool tool,
-                                           final UserObjectContainer container,
-                                           final InspectionPackageNode pNode,
+  protected abstract void appendDescriptor(@NotNull InspectionTool tool,
+                                           @NotNull UserObjectContainer container,
+                                           @NotNull InspectionPackageNode pNode,
                                            final boolean canPackageRepeat);
 
   public boolean isContentLoaded() {
@@ -187,6 +189,7 @@ public abstract class InspectionRVContentProvider {
             for (RefElementNode parentNode : parentNodes) {
               final List<ProblemDescriptionNode> nodes = new ArrayList<ProblemDescriptionNode>();
               TreeUtil.traverse(parentNode, new TreeUtil.Traverse() {
+                @Override
                 public boolean accept(final Object node) {
                   if (node instanceof ProblemDescriptionNode) {
                     nodes.add((ProblemDescriptionNode)node);
@@ -208,36 +211,41 @@ public abstract class InspectionRVContentProvider {
     return content;
   }
 
-  protected static RefElementNode addNodeToParent(UserObjectContainer container,
-                                                  final InspectionTool tool,
+  @NotNull
+  protected static RefElementNode addNodeToParent(@NotNull UserObjectContainer container,
+                                                  @NotNull InspectionTool tool,
                                                   final InspectionTreeNode parentNode) {
-    final Set<InspectionTreeNode> children = new THashSet<InspectionTreeNode>(1000);
-    TreeUtil.traverseDepth(parentNode, new TreeUtil.Traverse() {
-      public boolean accept(Object node) {
-        children.add((InspectionTreeNode)node);
-        return true;
-      }
-    });
     final RefElementNode nodeToBeAdded = container.createNode(tool);
-    boolean firstLevel = true;
+    final Ref<Boolean> firstLevel = new Ref<Boolean>(true);
     RefElementNode prevNode = null;
+    final Ref<RefElementNode> result = new Ref<RefElementNode>();
     while (true) {
-      final RefElementNode currentNode = firstLevel ? nodeToBeAdded : container.createNode(tool);
-      for (InspectionTreeNode node : children) {
-        if (node instanceof RefElementNode) {
-          final RefElementNode refElementNode = (RefElementNode)node;
-          if (container.areEqual(refElementNode.getUserObject(), container.getUserObject())) {
-            if (firstLevel) {
-              return refElementNode;
-            }
-            else {
-              insertByIndex(prevNode, refElementNode);
-              return nodeToBeAdded;
+      final RefElementNode currentNode = firstLevel.get() ? nodeToBeAdded : container.createNode(tool);
+      final UserObjectContainer finalContainer = container;
+      final RefElementNode finalPrevNode = prevNode;
+      TreeUtil.traverseDepth(parentNode, new TreeUtil.Traverse() {
+        @Override
+        public boolean accept(Object node) {
+          if (node instanceof RefElementNode) {
+            final RefElementNode refElementNode = (RefElementNode)node;
+            if (finalContainer.areEqual(refElementNode.getUserObject(), finalContainer.getUserObject())) {
+              if (firstLevel.get()) {
+                result.set(refElementNode);
+                return false;
+              }
+              else {
+                insertByIndex(finalPrevNode, refElementNode);
+                result.set(nodeToBeAdded);
+                return false;
+              }
             }
           }
+          return true;
         }
-      }
-      if (!firstLevel) {
+      });
+      if(!result.isNull()) return result.get();
+
+      if (!firstLevel.get()) {
         insertByIndex(prevNode, currentNode);
       }
       final UserObjectContainer owner = container.getOwner();
@@ -247,7 +255,7 @@ public abstract class InspectionRVContentProvider {
       }
       container = owner;
       prevNode = currentNode;
-      firstLevel = false;
+      firstLevel.set(false);
     }
   }
 

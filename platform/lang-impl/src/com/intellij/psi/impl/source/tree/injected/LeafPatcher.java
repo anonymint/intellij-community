@@ -17,6 +17,7 @@
 package com.intellij.psi.impl.source.tree.injected;
 
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.LiteralTextEscaper;
@@ -51,7 +52,7 @@ class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
   }
 
   @Override
-    public void visitLeaf(LeafElement leaf) {
+  public void visitLeaf(LeafElement leaf) {
     String leafText = leaf instanceof ForeignLeafPsiElement ? "" : leaf.getText();
     catLeafs.append(leafText);
     final TextRange leafRange = leaf.getTextRange();
@@ -74,10 +75,12 @@ class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
   }
 
   private StringBuilder constructTextFromHostPSI(int startOffset, int endOffset) {
+    boolean firstTimer = false;
     PsiLanguageInjectionHost.Shred current = myShreds.get(shredNo);
     if (hostText == null) {
       hostText = current.getHost().getText();
       rangeInHost = current.getRangeInsideHost();
+      firstTimer = true;
     }
 
     StringBuilder text = new StringBuilder(endOffset-startOffset);
@@ -88,6 +91,7 @@ class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
         current = myShreds.get(++shredNo);
         hostText = current.getHost().getText();
         rangeInHost = current.getRangeInsideHost();
+        firstTimer = true;
         continue;
       }
       assert startOffset >= shredRange.getStartOffset();
@@ -108,8 +112,10 @@ class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
         int endOffsetInHost = myEscapers.get(shredNo).getOffsetInHost(
           endOffsetCut - shredRange.getStartOffset() - prefix.length(), rangeInHost);
         if (endOffsetInHost != -1) {
+          if (firstTimer ) text.append(hostText, rangeInHost.getStartOffset(), startOffsetInHost);
           text.append(hostText, startOffsetInHost, endOffsetInHost);
           startOffset = endOffsetCut;
+          // todo what about lastTimer?
           continue;
         }
       }
@@ -123,10 +129,11 @@ class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
     return text;
   }
 
+  static final Key<String> UNESCAPED_TEXT = Key.create("INJECTED_UNESCAPED_TEXT");
   private static void storeUnescapedTextFor(final LeafElement leaf, final String leafText) {
     PsiElement psi = leaf.getPsi();
     if (psi != null) {
-      psi.putCopyableUserData(InjectedLanguageManagerImpl.UNESCAPED_TEXT, leafText);
+      psi.putCopyableUserData(UNESCAPED_TEXT, leafText);
     }
   }
 }

@@ -15,17 +15,17 @@
  */
 package git4idea.ui.branch;
 
+import com.intellij.dvcs.ui.NewBranchAction;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.util.IconUtil;
 import git4idea.GitBranch;
+import git4idea.branch.GitBranchUtil;
 import git4idea.branch.GitBrancher;
 import git4idea.repo.GitRepository;
 import git4idea.validators.GitNewBranchNameValidator;
@@ -42,7 +42,6 @@ import java.util.List;
  */
 class GitBranchPopupActions {
 
-  private static final Logger LOG = Logger.getInstance(GitBranchPopupActions.class);
   private final Project myProject;
   private final GitRepository myRepository;
 
@@ -54,7 +53,7 @@ class GitBranchPopupActions {
   ActionGroup createActions(@Nullable DefaultActionGroup toInsert) {
     DefaultActionGroup popupGroup = new DefaultActionGroup(null, false);
 
-    popupGroup.addAction(new NewBranchAction(myProject, Collections.singletonList(myRepository)));
+    popupGroup.addAction(new GitNewBranchAction(myProject,Collections.singletonList(myRepository)));
     popupGroup.addAction(new CheckoutRevisionActions(myProject, myRepository));
 
     if (toInsert != null) {
@@ -79,41 +78,20 @@ class GitBranchPopupActions {
     
     return popupGroup;
   }
-  
-  static class NewBranchAction extends DumbAwareAction {
-    private final Project myProject;
-    private final List<GitRepository> myRepositories;
 
-    NewBranchAction(@NotNull Project project, @NotNull List<GitRepository> repositories) {
-      super("New Branch", "Create and checkout new branch", IconUtil.getAddIcon());
-      myProject = project;
-      myRepositories = repositories;
+  public static class GitNewBranchAction extends NewBranchAction<GitRepository> {
+
+    public GitNewBranchAction(@NotNull Project project, @NotNull List<GitRepository> repositories) {
+      super(project, repositories);
     }
 
     @Override
     public void actionPerformed(AnActionEvent e) {
-      final String name = GitBranchUiUtil.getNewBranchNameFromUser(myProject, myRepositories, "Create New Branch");
+      final String name = GitBranchUtil.getNewBranchNameFromUser(myProject, myRepositories, "Create New Branch");
       if (name != null) {
         GitBrancher brancher = ServiceManager.getService(myProject, GitBrancher.class);
         brancher.checkoutNewBranch(name, myRepositories);
       }
-    }
-
-    @Override
-    public void update(AnActionEvent e) {
-      if (anyRepositoryIsFresh()) {
-        e.getPresentation().setEnabled(false);
-        e.getPresentation().setDescription("Checkout of a new branch is not possible before the first commit.");
-      }
-    }
-
-    private boolean anyRepositoryIsFresh() {
-      for (GitRepository repository : myRepositories) {
-        if (repository.isFresh()) {
-          return true;
-        }
-      }
-      return false;
     }
   }
 

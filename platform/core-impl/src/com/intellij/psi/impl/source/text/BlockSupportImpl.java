@@ -23,6 +23,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.DocumentBulkUpdateListener;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.PlainTextLanguage;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
@@ -74,35 +75,25 @@ public class BlockSupportImpl extends BlockSupport {
   @Override
   @NotNull
   public DiffLog reparseRange(@NotNull final PsiFile file,
-                              final int startOffset,
-                              final int endOffset,
-                              final int lengthShift,
+                              TextRange changedPsiRange,
                               @NotNull final CharSequence newFileText,
                               @NotNull final ProgressIndicator indicator) {
-    return reparseRangeInternal(file, startOffset > 0 ? startOffset - 1 : 0, endOffset, lengthShift, newFileText, indicator);
-  }
-
-  @NotNull
-  private static DiffLog reparseRangeInternal(@NotNull PsiFile file,
-                                              int startOffset,
-                                              int endOffset,
-                                              int lengthShift,
-                                              @NotNull CharSequence newFileText,
-                                              @NotNull ProgressIndicator indicator) {
     final PsiFileImpl fileImpl = (PsiFileImpl)file;
     Project project = fileImpl.getProject();
     final FileElement treeFileElement = fileImpl.getTreeElement();
     final CharTable charTable = treeFileElement.getCharTable();
 
-    final int textLength = treeFileElement.getTextLength() + lengthShift;
+    
+    final int textLength = newFileText.length();
+    int lengthShift = textLength - treeFileElement.getTextLength();
 
     if (treeFileElement.getElementType() instanceof ITemplateDataElementType || isTooDeep(file)) {
       // unable to perform incremental reparse for template data in JSP, or in exceptionally deep trees
       return makeFullParse(treeFileElement, newFileText, textLength, fileImpl, indicator);
     }
 
-    final ASTNode leafAtStart = treeFileElement.findLeafElementAt(startOffset);
-    final ASTNode leafAtEnd = treeFileElement.findLeafElementAt(endOffset);
+    final ASTNode leafAtStart = treeFileElement.findLeafElementAt(Math.max(0, changedPsiRange.getStartOffset() - 1));
+    final ASTNode leafAtEnd = treeFileElement.findLeafElementAt(changedPsiRange.getEndOffset());
     ASTNode node = leafAtStart != null && leafAtEnd != null ? TreeUtil.findCommonParent(leafAtStart, leafAtEnd) : treeFileElement;
     Language baseLanguage = file.getViewProvider().getBaseLanguage();
 
@@ -179,20 +170,15 @@ public class BlockSupportImpl extends BlockSupport {
       FileViewProvider viewProvider = fileImpl.getViewProvider();
       viewProvider.getLanguages();
       FileType fileType = viewProvider.getVirtualFile().getFileType();
-      final LightVirtualFile lightFile = new LightVirtualFile(fileImpl.getName(), fileType, newFileText, viewProvider.getVirtualFile().getCharset(),
+      String fileName = fileImpl.getName();
+      final LightVirtualFile lightFile = new LightVirtualFile(fileName, fileType, newFileText, viewProvider.getVirtualFile().getCharset(),
                                                               fileImpl.getViewProvider().getModificationStamp());
       lightFile.setOriginalFile(viewProvider.getVirtualFile());
 
       FileViewProvider copy = viewProvider.createCopy(lightFile);
       copy.getLanguages();
-      Language language = fileImpl.getLanguage();
       SingleRootFileViewProvider.doNotCheckFileSizeLimit(lightFile); // optimization: do not convert file contents to bytes to determine if we should codeinsight it
-      final PsiFileImpl newFile = (PsiFileImpl)copy.getPsi(language);
-
-      if (newFile == null) {
-        throw new RuntimeException("View provider " + viewProvider + " refused to parse text with " + language +
-                  "; base: " + viewProvider.getBaseLanguage() + "; copy: " + copy.getBaseLanguage() + "; fileType: " + fileType);
-      }
+      PsiFileImpl newFile = getFileCopy(fileImpl, copy);
 
       newFile.setOriginalFile(fileImpl);
 
@@ -205,6 +191,32 @@ public class BlockSupportImpl extends BlockSupport {
       ((PsiManagerEx)fileImpl.getManager()).getFileManager().setViewProvider(lightFile, null);
       return diffLog;
     }
+  }
+
+  @NotNull
+  public static PsiFileImpl getFileCopy(PsiFileImpl originalFile, FileViewProvider providerCopy) {
+    FileViewProvider viewProvider = originalFile.getViewProvider();
+    Language language = originalFile.getLanguage();
+    PsiFileImpl newFile = (PsiFileImpl)providerCopy.getPsi(language);
+
+    if (newFile == null && language == PlainTextLanguage.INSTANCE && originalFile == viewProvider.getPsi(viewProvider.getBaseLanguage())) {
+      newFile = (PsiFileImpl)providerCopy.getPsi(providerCopy.getBaseLanguage());
+    }
+
+    if (newFile == null) {
+      throw new RuntimeException("View provider " + viewProvider + " refused to parse text with " + language +
+                                 "; languages: " + viewProvider.getLanguages() +
+                                 "; base: " + viewProvider.getBaseLanguage() +
+                                 "; copy: " + providerCopy +
+                                 "; copy.base: " + providerCopy.getBaseLanguage() +
+                                 "; vFile: " + viewProvider.getVirtualFile() +
+                                 "; copy.vFile: " + providerCopy.getVirtualFile() +
+                                 "; fileType: " + viewProvider.getVirtualFile().getFileType() +
+                                 "; copy.original(): " +
+                                 (providerCopy.getVirtualFile() instanceof LightVirtualFile ? ((LightVirtualFile)providerCopy.getVirtualFile()).getOriginalFile() : null));
+    }
+
+    return newFile;
   }
 
   @NotNull

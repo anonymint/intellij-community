@@ -73,7 +73,7 @@ public class XDebuggerTree extends DnDAwareTree implements DataProvider, Disposa
   private final Project myProject;
   private final XDebuggerEditorsProvider myEditorsProvider;
   private XSourcePosition mySourcePosition;
-  private final List<XDebuggerTreeListener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<XDebuggerTreeListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final XDebugSession mySession;
   private final PopupHandler myPopupHandler;
 
@@ -213,7 +213,7 @@ public class XDebuggerTree extends DnDAwareTree implements DataProvider, Disposa
     }
   }
 
-  public void nodeLoaded(final @NotNull XValueNodeImpl node, final @NotNull String name, final @NotNull String value) {
+  public void nodeLoaded(final @NotNull XValueNodeImpl node, final @NotNull String name, final @Nullable String value) {
     for (XDebuggerTreeListener listener : myListeners) {
       listener.nodeLoaded(node, name, value);
     }

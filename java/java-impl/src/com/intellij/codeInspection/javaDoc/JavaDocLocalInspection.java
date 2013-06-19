@@ -26,6 +26,7 @@ import com.intellij.psi.impl.source.jsp.jspJava.JspClass;
 import com.intellij.psi.impl.source.jsp.jspJava.JspHolderMethod;
 import com.intellij.psi.javadoc.*;
 import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.PropertyUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.FieldPanel;
@@ -70,6 +71,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
     ourUniqueTags.add("serialData");
   }
 
+  private static final String IGNORE_ACCESSORS_ATTR_NAME = "IGNORE_ACCESSORS";
 
   public static class Options implements JDOMExternalizable {
     @NonNls public String ACCESS_JAVADOC_REQUIRED_FOR = NONE;
@@ -83,10 +85,12 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       this.REQUIRED_TAGS = REQUIRED_TAGS;
     }
 
+    @Override
     public void readExternal(Element element) throws InvalidDataException {
       DefaultJDOMExternalizer.readExternal(this, element);
     }
 
+    @Override
     public void writeExternal(Element element) throws WriteExternalException {
       DefaultJDOMExternalizer.writeExternal(this, element);
     }
@@ -103,6 +107,11 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
   public         String  myAdditionalJavadocTags  = "";
 
   private boolean myIgnoreEmptyDescriptions = false;
+  private boolean myIgnoreSimpleAccessors = false;
+
+  public void setIgnoreSimpleAccessors(boolean ignoreSimpleAccessors) {
+    myIgnoreSimpleAccessors = ignoreSimpleAccessors;
+  }
 
   private static final Logger LOG = Logger.getInstance("com.intellij.codeInspection.javaDoc.JavaDocLocalInspection");
 
@@ -156,6 +165,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
         myTagName = tagName;
       }
 
+      @Override
       public void stateChanged(ChangeEvent e) {
         if (myCheckBox.isSelected()) {
           if (!isTagRequired(myOptions, myTagName)) {
@@ -187,6 +197,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       slider.setPaintLabels(true);
       slider.setSnapToTicks(true);
       slider.addChangeListener(new ChangeListener() {
+        @Override
         public void stateChanged(ChangeEvent e) {
           int value = slider.getValue();
           options.ACCESS_JAVADOC_REQUIRED_FOR = modifiers[value - 1];
@@ -235,6 +246,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       final JCheckBox checkBox = new JCheckBox(InspectionsBundle.message("inspection.javadoc.option.ignore.deprecated"),
                                                IGNORE_DEPRECATED);
       checkBox.addActionListener(new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           IGNORE_DEPRECATED = checkBox.isSelected();
         }
@@ -244,6 +256,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       final JCheckBox periodCheckBox = new JCheckBox(InspectionsBundle.message("inspection.javadoc.option.ignore.period"),
                                                      IGNORE_JAVADOC_PERIOD);
       periodCheckBox.addActionListener(new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           IGNORE_JAVADOC_PERIOD = periodCheckBox.isSelected();
         }
@@ -253,6 +266,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       final JCheckBox ignoreDuplicateThrowsCheckBox = new JCheckBox("Ignore duplicate throws tag",
                                                      IGNORE_DUPLICATED_THROWS);
       ignoreDuplicateThrowsCheckBox.addActionListener(new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           IGNORE_DUPLICATED_THROWS = ignoreDuplicateThrowsCheckBox.isSelected();
         }
@@ -261,17 +275,27 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
 
       final JCheckBox ignorePointToItselfCheckBox = new JCheckBox("Ignore javadoc pointing to itself", IGNORE_POINT_TO_ITSELF);
       ignorePointToItselfCheckBox.addActionListener(new ActionListener() {
+        @Override
         public void actionPerformed(ActionEvent e) {
           IGNORE_POINT_TO_ITSELF = ignorePointToItselfCheckBox.isSelected();
         }
       });
       add(ignorePointToItselfCheckBox, gc);
+      final JCheckBox ignoreSimpleAccessorsCheckBox = new JCheckBox("Ignore simple property accessors", myIgnoreSimpleAccessors);
+      ignoreSimpleAccessorsCheckBox.addActionListener(new ActionListener() {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          myIgnoreSimpleAccessors = ignoreSimpleAccessorsCheckBox.isSelected();
+        }
+      });
+      add(ignoreSimpleAccessorsCheckBox, gc);
     }
 
     public FieldPanel createAdditionalJavadocTagsPanel(){
       FieldPanel additionalTagsPanel = new FieldPanel(InspectionsBundle.message("inspection.javadoc.label.text"), InspectionsBundle.message("inspection.javadoc.dialog.title"), null, null);
       additionalTagsPanel.setPreferredSize(new Dimension(150, additionalTagsPanel.getPreferredSize().height));
       additionalTagsPanel.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
+        @Override
         protected void textChanged(DocumentEvent e) {
           final Document document = e.getDocument();
           try {
@@ -290,8 +314,28 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
     }
   }
 
+  @Override
   public JComponent createOptionsPanel() {
     return new OptionsPanel();
+  }
+
+  @Override
+  public void writeSettings(@NotNull Element node) throws WriteExternalException {
+    super.writeSettings(node);
+    if (myIgnoreSimpleAccessors) {
+      final Element option = new Element(IGNORE_ACCESSORS_ATTR_NAME);
+      option.setAttribute("value", String.valueOf(true));
+      node.addContent(option);
+    }
+  }
+
+  @Override
+  public void readSettings(@NotNull Element node) throws InvalidDataException {
+    super.readSettings(node);
+    final Element ignoreAccessorsTag = node.getChild(IGNORE_ACCESSORS_ATTR_NAME);
+    if (ignoreAccessorsTag != null) {
+      myIgnoreSimpleAccessors = Boolean.parseBoolean(ignoreAccessorsTag.getAttributeValue("value"));
+    }
   }
 
   private static ProblemDescriptor createDescriptor(@NotNull PsiElement element, String template, InspectionManager manager,
@@ -316,11 +360,13 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       this(tag, "");
     }
 
+    @Override
     @NotNull
     public String getName() {
       return InspectionsBundle.message("inspection.javadoc.problem.add.tag", myTag, myValue);
     }
 
+    @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       final PsiElementFactory factory = JavaPsiFacade.getInstance(project).getElementFactory();
       try {
@@ -365,11 +411,13 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       }
     }
 
+    @Override
     @NotNull
     public String getFamilyName() {
       return InspectionsBundle.message("inspection.javadoc.problem.add.tag.family");
     }
   }
+  @Override
   @Nullable
   public ProblemDescriptor[] checkClass(@NotNull PsiClass psiClass, @NotNull InspectionManager manager, boolean isOnTheFly) {
     if (psiClass instanceof PsiAnonymousClass) return null;
@@ -473,6 +521,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
                             isOnTheFly);
   }
 
+  @Override
   @Nullable
   public ProblemDescriptor[] checkField(@NotNull PsiField psiField, @NotNull InspectionManager manager, boolean isOnTheFly) {
     if (IGNORE_DEPRECATED && (psiField.isDeprecated() || psiField.getContainingClass().isDeprecated())) {
@@ -501,10 +550,14 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
            : problems.toArray(new ProblemDescriptor[problems.size()]);
   }
 
+  @Override
   @Nullable
   public ProblemDescriptor[] checkMethod(@NotNull PsiMethod psiMethod, @NotNull InspectionManager manager, boolean isOnTheFly) {
     if (psiMethod instanceof JspHolderMethod) return null;
     if (IGNORE_DEPRECATED && (psiMethod.isDeprecated() || psiMethod.getContainingClass().isDeprecated())) {
+      return null;
+    }
+    if (myIgnoreSimpleAccessors && PropertyUtil.isSimplePropertyAccessor(psiMethod)) {
       return null;
     }
     PsiDocComment docComment = psiMethod.getDocComment();
@@ -617,7 +670,7 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
                                             InspectionsBundle.message("inspection.javadoc.method.problem.missing.tag.description", "<code>@param " + valueElement.getText() + "</code>"),
                                             manager, isOnTheFly));
             }
-  
+
           }
         }
       }
@@ -763,11 +816,13 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       myName = name;
     }
 
+    @Override
     @NotNull
     public String getName() {
       return InspectionsBundle.message("inspection.javadoc.problem.add.param.tag", myName);
     }
 
+    @Override
     @Nullable
     protected PsiElement getAnchor(ProblemDescriptor descriptor) {
       PsiElement element = descriptor.getPsiElement();
@@ -1136,16 +1191,19 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
     return 5;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return InspectionsBundle.message("inspection.javadoc.display.name");
   }
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return InspectionsBundle.message("group.names.javadoc.issues");
   }
 
+  @Override
   @NotNull
   public String getShortName() {
     return SHORT_NAME;
@@ -1162,16 +1220,19 @@ public class JavaDocLocalInspection extends BaseLocalInspectionTool {
       myTag = tag;
     }
 
+    @Override
     @NotNull
     public String getName() {
       return QuickFixBundle.message("add.doctag.to.custom.tags", myTag);
     }
 
+    @Override
     @NotNull
     public String getFamilyName() {
      return QuickFixBundle.message("fix.javadoc.family");
    }
 
+    @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       if (myTag == null) return;
       if (myAdditionalJavadocTags.length() > 0) {

@@ -15,6 +15,7 @@
  */
 package com.intellij.xdebugger.impl.breakpoints;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.editor.Document;
@@ -22,6 +23,7 @@ import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.XDebuggerManager;
@@ -44,7 +46,7 @@ import java.util.List;
  */
 public class XBreakpointPanelProvider extends BreakpointPanelProvider<XBreakpoint> {
 
-  private final List<MyXBreakpointListener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<MyXBreakpointListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   @Override
   public void createBreakpointsGroupingRules(Collection<XBreakpointGroupingRule> rules) {
@@ -53,14 +55,20 @@ public class XBreakpointPanelProvider extends BreakpointPanelProvider<XBreakpoin
   }
 
   @Override
-  public void addListener(BreakpointsListener listener, Project project) {
+  public void addListener(final BreakpointsListener listener, Project project, Disposable disposable) {
     final MyXBreakpointListener listener1 = new MyXBreakpointListener(listener);
     XDebuggerManager.getInstance(project).getBreakpointManager().addBreakpointListener(listener1);
     myListeners.add(listener1);
+    Disposer.register(disposable, new Disposable() {
+      @Override
+      public void dispose() {
+        removeListener(listener);
+      }
+    });
   }
 
   @Override
-  public void removeListener(BreakpointsListener listener) {
+  protected void removeListener(BreakpointsListener listener) {
     for (MyXBreakpointListener breakpointListener : myListeners) {
       if (breakpointListener.myListener == listener) {
         myListeners.remove(breakpointListener);
@@ -148,6 +156,7 @@ public class XBreakpointPanelProvider extends BreakpointPanelProvider<XBreakpoin
 
     @Override
     public void breakpointChanged(@NotNull XBreakpoint<?> breakpoint) {
+      myListener.breakpointsChanged();
     }
   }
 

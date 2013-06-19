@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.util.Arrays;
 
 /**
  * Do not use this class directly.
@@ -39,15 +40,19 @@ public class IdeaWin32 {
   static {
     boolean available = false;
     if (SystemInfo.isWin2kOrNewer) {
-      String libName = SystemInfo.is64Bit ? "IdeaWin64" : "IdeaWin32";
+      String libName = SystemInfo.is64Bit ? "IdeaWin64.dll" : "IdeaWin32.dll";
       try {
-        String path = PathManager.getBinPath() + "/" + libName + ".dll";
+        String path = PathManager.getBinPath() + "/" + libName;
         if (!new File(path).exists()) {
-          path = PathManager.getHomePath() + "/community/bin/win/" + libName + ".dll";
+          path = PathManager.getHomePath() + "/community/bin/win/" + libName;
           if (!new File(path).exists()) {
-            path = PathManager.getHomePath() + "/bin/win/" + libName + ".dll";
+            path = PathManager.getHomePath() + "/bin/win/" + libName;
             if (!new File(path).exists()) {
-              throw new FileNotFoundException("Native filesystem .dll is missing, home: " + PathManager.getHomePath());
+              path = PathManager.getHomePathFor(IdeaWin32.class) + "/bin/" + libName;
+              if (!new File(path).exists()) {
+                throw new FileNotFoundException("Native filesystem .dll is missing (path=" + PathManager.getBinPath() +
+                                                " content=" + Arrays.toString(new File(PathManager.getBinPath()).list()) + ")");
+              }
             }
           }
         }

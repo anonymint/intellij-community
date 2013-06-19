@@ -42,6 +42,7 @@ public class FavoritesTreeStructure extends ProjectTreeStructure {
     super(project, FavoritesProjectViewPane.ID);
   }
 
+  @Override
   protected AbstractTreeNode createRoot(final Project project, ViewSettings settings) {
     return new FavoritesRootNode(project);
   }
@@ -51,29 +52,33 @@ public class FavoritesTreeStructure extends ProjectTreeStructure {
   }
 
 
+  @Override
   public Object[] getChildElements(Object element) {
-    if (! (element instanceof AbstractTreeNode)) {
+    if (!(element instanceof AbstractTreeNode)) {
       return ArrayUtil.EMPTY_OBJECT_ARRAY;
     }
-    
+
     final AbstractTreeNode favTreeElement = (AbstractTreeNode)element;
     try {
       if (!(element instanceof FavoritesListNode)) {
         return super.getChildElements(favTreeElement);
-      }      
-    
+      }
+
       final List<AbstractTreeNode> result = new ArrayList<AbstractTreeNode>();
       final FavoritesListNode listNode = (FavoritesListNode)element;
+      if (listNode.getProvider() != null) {
+        return ArrayUtil.toObjectArray(listNode.getChildren());
+      }
       final Collection<AbstractTreeNode> roots = FavoritesListNode.getFavoritesRoots(myProject, listNode.getName(), listNode);
       for (AbstractTreeNode<?> abstractTreeNode : roots) {
         final Object value = abstractTreeNode.getValue();
 
         if (value == null) continue;
-        if (value instanceof PsiElement && !((PsiElement)value).isValid())  continue;
-        if (value instanceof SmartPsiElementPointer && ((SmartPsiElementPointer)value).getElement() == null)  continue;
+        if (value instanceof PsiElement && !((PsiElement)value).isValid()) continue;
+        if (value instanceof SmartPsiElementPointer && ((SmartPsiElementPointer)value).getElement() == null) continue;
 
         boolean invalid = false;
-        for(FavoriteNodeProvider nodeProvider: Extensions.getExtensions(FavoriteNodeProvider.EP_NAME, myProject)) {
+        for (FavoriteNodeProvider nodeProvider : Extensions.getExtensions(FavoriteNodeProvider.EP_NAME, myProject)) {
           if (nodeProvider.isInvalidElement(value)) {
             invalid = true;
             break;
@@ -97,17 +102,20 @@ public class FavoritesTreeStructure extends ProjectTreeStructure {
 
   private AbstractTreeNode<String> getEmptyScreen() {
     return new AbstractTreeNode<String>(myProject, IdeBundle.message("favorites.empty.screen")) {
+      @Override
       @NotNull
       public Collection<AbstractTreeNode> getChildren() {
         return Collections.emptyList();
       }
 
+      @Override
       public void update(final PresentationData presentation) {
         presentation.setPresentableText(getValue());
       }
     };
   }
 
+  @Override
   public Object getParentElement(Object element) {
     AbstractTreeNode parent = null;
     if (element == getRootElement()) {
@@ -122,6 +130,7 @@ public class FavoritesTreeStructure extends ProjectTreeStructure {
     return parent;
   }
 
+  @Override
   @NotNull
   public NodeDescriptor createDescriptor(Object element, NodeDescriptor parentDescriptor) {
     return new FavoritesTreeNodeDescriptor(myProject, parentDescriptor, (AbstractTreeNode)element);

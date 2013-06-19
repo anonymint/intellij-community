@@ -21,15 +21,12 @@ import com.intellij.codeHighlighting.HighlightDisplayLevel;
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.SeverityRegistrar;
+import com.intellij.codeInsight.daemon.impl.SeverityUtil;
 import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.codeInspection.InspectionProfile;
-import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.codeInspection.ModifiableModel;
-import com.intellij.codeInspection.ex.Descriptor;
-import com.intellij.codeInspection.ex.InspectionProfileImpl;
-import com.intellij.codeInspection.ex.InspectionToolRegistrar;
-import com.intellij.codeInspection.ex.ScopeToolState;
+import com.intellij.codeInspection.ex.*;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.CommonActionsManager;
 import com.intellij.ide.DefaultTreeExpander;
@@ -47,8 +44,11 @@ import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.profile.ApplicationProfileManager;
+import com.intellij.profile.DefaultProjectProfileManager;
 import com.intellij.profile.ProfileManager;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
+import com.intellij.profile.codeInspection.InspectionProfileManagerImpl;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.profile.codeInspection.SeverityProvider;
 import com.intellij.profile.codeInspection.ui.actions.AddScopeAction;
@@ -65,6 +65,7 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -130,14 +131,26 @@ public class SingleInspectionProfilePanel extends JPanel {
     myShareProfile = profile.getProfileManager() == projectProfileManager;
   }
 
+  private static VisibleTreeState getExpandedNodes(InspectionProfileImpl profile) {
+    if (profile.getProfileManager() instanceof ApplicationProfileManager) {
+      return AppInspectionProfilesVisibleTreeState.getInstance().getVisibleTreeState(profile);
+    }
+    else {
+      DefaultProjectProfileManager projectProfileManager = (DefaultProjectProfileManager)profile.getProfileManager();
+      return ProjectInspectionProfilesVisibleTreeState.getInstance(projectProfileManager.getProject()).getVisibleTreeState(profile);
+    }
+  }
+
   private void initUI() {
     myInspectionProfilePanel = createInspectionProfileSettingsPanel();
     add(myInspectionProfilePanel, BorderLayout.CENTER);
     UserActivityWatcher userActivityWatcher = new UserActivityWatcher();
     userActivityWatcher.addUserActivityListener(new UserActivityListener() {
+      @Override
       public void stateChanged() {
         //invoke after all other listeners
         SwingUtilities.invokeLater(new Runnable() {
+          @Override
           public void run() {
             if (mySelectedProfile == null) return; //panel was disposed
             updateProperSettingsForSelection();
@@ -182,16 +195,17 @@ public class SingleInspectionProfilePanel extends JPanel {
   }
 
   private boolean wereToolSettingsModified(Descriptor descriptor) {
-    InspectionProfileEntry tool = descriptor.getTool();
-    if (tool == null || !mySelectedProfile.isToolEnabled(descriptor.getKey())) {
+    InspectionToolWrapper toolWrapper = descriptor.getTool();
+    if (toolWrapper == null || !mySelectedProfile.isToolEnabled(descriptor.getKey())) {
       return false;
     }
     Element oldConfig = descriptor.getConfig();
     if (oldConfig == null) return false;
-    Element newConfig = Descriptor.createConfigElement(tool);
+    Element newConfig = Descriptor.createConfigElement(toolWrapper);
     if (!JDOMUtil.areElementsEqual(oldConfig, newConfig)) {
       myAlarm.cancelAllRequests();
       myAlarm.addRequest(new Runnable() {
+        @Override
         public void run() {
           myTree.repaint();
         }
@@ -212,6 +226,7 @@ public class SingleInspectionProfilePanel extends JPanel {
         if (node.isProperSetting() != properSetting) {
           myAlarm.cancelAllRequests();
           myAlarm.addRequest(new Runnable() {
+            @Override
             public void run() {
               myTree.repaint();
             }
@@ -234,7 +249,8 @@ public class SingleInspectionProfilePanel extends JPanel {
         continue;
       }
       myDescriptors.put(new Descriptor(state, profile), descriptors);
-      final List<ScopeToolState> nonDefaultTools = profile.getNonDefaultTools(state.getTool().getShortName());
+      InspectionToolWrapper toolWrapper = (InspectionToolWrapper)state.getTool();
+      final List<ScopeToolState> nonDefaultTools = profile.getNonDefaultTools(toolWrapper.getShortName());
       if (nonDefaultTools != null) {
         for (ScopeToolState nonDefaultToolState : nonDefaultTools) {
           descriptors.add(new Descriptor(nonDefaultToolState, profile));
@@ -259,7 +275,7 @@ public class SingleInspectionProfilePanel extends JPanel {
   public static ModifiableModel createNewProfile(final int initValue,
                                                  ModifiableModel selectedProfile,
                                                  JPanel parent,
-                                                 String profileName, 
+                                                 String profileName,
                                                  Set<String> existingProfileNames) {
     profileName = Messages.showInputDialog(parent, profileName, "Create New Inspection Profile", Messages.getQuestionIcon());
     if (profileName == null) return null;
@@ -274,9 +290,9 @@ public class SingleInspectionProfilePanel extends JPanel {
       if (initValue == -1) {
         inspectionProfile.initInspectionTools(null);
         ModifiableModel profileModifiableModel = inspectionProfile.getModifiableModel();
-        final InspectionProfileEntry[] profileEntries = profileModifiableModel.getInspectionTools(null);
-        for (InspectionProfileEntry entry : profileEntries) {
-          profileModifiableModel.disableTool(entry.getShortName(), (NamedScope)null);
+        final InspectionToolWrapper[] profileEntries = (InspectionToolWrapper[])profileModifiableModel.getInspectionTools(null);
+        for (InspectionToolWrapper toolWrapper : profileEntries) {
+          profileModifiableModel.disableTool(toolWrapper.getShortName(), (NamedScope)null);
         }
         profileModifiableModel.setLocal(true);
         profileModifiableModel.setModified(true);
@@ -294,10 +310,10 @@ public class SingleInspectionProfilePanel extends JPanel {
   public void setFilter(String filter) {
     myProfileFilter.setFilter(filter);
   }
-  
+
   public void filterTree(String filter) {
     if (myTree != null) {
-      mySelectedProfile.getExpandedNodes().saveVisibleState(myTree);
+      getExpandedNodes(mySelectedProfile).saveVisibleState(myTree);
       fillTreeData(filter, true);
       reloadModel();
       restoreTreeState();
@@ -322,7 +338,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
     try {
       myIsInRestore = true;
-      mySelectedProfile.getExpandedNodes().restoreVisibleState(myTree);
+      getExpandedNodes(mySelectedProfile).restoreVisibleState(myTree);
     }
     finally {
       myIsInRestore = false;
@@ -337,7 +353,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     actions.add(actionManager.createCollapseAllAction(myTreeExpander, myTree));
 
     actions.add(new AnAction(CommonBundle.message("button.reset.to.default"), CommonBundle.message("button.reset.to.default"),
-                             AllIcons.Actions.Reset_to_default) {
+                             AllIcons.General.Reset) {
       {
         registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_MASK)), myTree);
       }
@@ -353,13 +369,14 @@ public class SingleInspectionProfilePanel extends JPanel {
       }
     });
 
-    actions.add(new AnAction("Reset to Empty", "Reset to empty", AllIcons.General.Reset){
+    actions.add(new AnAction("Reset to Empty", "Reset to empty", AllIcons.Actions.Reset_to_empty){
 
       @Override
       public void update(AnActionEvent e) {
         e.getPresentation().setEnabled(mySelectedProfile != null && mySelectedProfile.isExecutable());
       }
 
+      @Override
       public void actionPerformed(AnActionEvent e) {
         mySelectedProfile.resetToEmpty();
         postProcessModification();
@@ -367,10 +384,12 @@ public class SingleInspectionProfilePanel extends JPanel {
     });
 
     actions.add(new ToggleAction("Lock Profile", "Lock profile", AllIcons.Nodes.Padlock) {
+      @Override
       public boolean isSelected(AnActionEvent e) {
         return mySelectedProfile != null && mySelectedProfile.isProfileLocked();
       }
 
+      @Override
       public void setSelected(AnActionEvent e, boolean state) {
         mySelectedProfile.lockProfile(state);
       }
@@ -380,19 +399,23 @@ public class SingleInspectionProfilePanel extends JPanel {
     actions.add(new MyAddScopeAction());
     actions.add(new MyDeleteScopeAction());
     actions.add(new MoveScopeAction(myTree, "Move Scope Up", IconUtil.getMoveUpIcon(), -1) {
+      @Override
       protected boolean isEnabledFor(int idx, InspectionConfigTreeNode parent) {
         return idx > 0;
       }
 
+      @Override
       protected InspectionProfileImpl getSelectedProfile() {
         return mySelectedProfile;
       }
     });
     actions.add(new MoveScopeAction(myTree, "Move Scope Down", IconUtil.getMoveDownIcon(), 1) {
+      @Override
       protected boolean isEnabledFor(int idx, InspectionConfigTreeNode parent) {
         return idx < parent.getChildCount() - 2;
       }
 
+      @Override
       protected InspectionProfileImpl getSelectedProfile() {
         return mySelectedProfile;
       }
@@ -406,7 +429,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
   private void repaintTableData() {
     if (myTree != null) {
-      mySelectedProfile.getExpandedNodes().saveVisibleState(myTree);
+      getExpandedNodes(mySelectedProfile).saveVisibleState(myTree);
       reloadModel();
       restoreTreeState();
     }
@@ -443,11 +466,13 @@ public class SingleInspectionProfilePanel extends JPanel {
     fillTreeData(null, true);
 
     final InspectionsConfigTreeRenderer renderer = new InspectionsConfigTreeRenderer(){
+      @Override
       protected String getFilter() {
         return myProfileFilter != null ? myProfileFilter.getFilter() : null;
       }
     };
     myTree = new CheckboxTree(renderer, myRoot) {
+      @Override
       public Dimension getPreferredScrollableViewportSize() {
         Dimension size = super.getPreferredScrollableViewportSize();
         size = new Dimension(size.width + 10, size.height);
@@ -469,6 +494,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
 
     myTree.addTreeSelectionListener(new TreeSelectionListener() {
+      @Override
       public void valueChanged(TreeSelectionEvent e) {
         if (myTree.getSelectionPaths() != null && myTree.getSelectionPaths().length == 1) {
           updateOptionsAndDescriptionPanel(myTree.getSelectionPaths()[0]);
@@ -482,9 +508,9 @@ public class SingleInspectionProfilePanel extends JPanel {
           if (selected != null) {
             InspectionProfileImpl baseProfile = (InspectionProfileImpl)selected.getParentProfile();
             if (baseProfile != null) {
-              baseProfile.getExpandedNodes().setSelectionPaths(myTree.getSelectionPaths());
+              getExpandedNodes(baseProfile).setSelectionPaths(myTree.getSelectionPaths());
             }
-            selected.getExpandedNodes().setSelectionPaths(myTree.getSelectionPaths());
+            getExpandedNodes(selected).setSelectionPaths(myTree.getSelectionPaths());
           }
         }
 
@@ -493,6 +519,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
 
     myTree.addMouseListener(new PopupHandler() {
+      @Override
       public void invokePopup(Component comp, int x, int y) {
         final int[] selectionRows = myTree.getSelectionRows();
         if (selectionRows != null && myTree.getPathForLocation(x, y) != null && Arrays.binarySearch(selectionRows, myTree.getRowForLocation(x, y)) > -1)
@@ -504,6 +531,7 @@ public class SingleInspectionProfilePanel extends JPanel {
 
 
     new TreeSpeedSearch(myTree, new Convertor<TreePath, String>() {
+      @Override
       public String convert(TreePath o) {
         final InspectionConfigTreeNode node = (InspectionConfigTreeNode)o.getLastPathComponent();
         final Descriptor descriptor = node.getDescriptor();
@@ -522,25 +550,27 @@ public class SingleInspectionProfilePanel extends JPanel {
     myTree.addTreeExpansionListener(new TreeExpansionListener() {
 
 
+      @Override
       public void treeCollapsed(TreeExpansionEvent event) {
         InspectionProfileImpl selected = mySelectedProfile;
         final InspectionConfigTreeNode node = (InspectionConfigTreeNode)event.getPath().getLastPathComponent();
         final InspectionProfileImpl parentProfile = (InspectionProfileImpl)selected.getParentProfile();
         if (parentProfile != null) {
-          parentProfile.getExpandedNodes().saveVisibleState(myTree);
+          getExpandedNodes(parentProfile).saveVisibleState(myTree);
         }
-        selected.getExpandedNodes().saveVisibleState(myTree);
+        getExpandedNodes(selected).saveVisibleState(myTree);
       }
 
+      @Override
       public void treeExpanded(TreeExpansionEvent event) {
         InspectionProfileImpl selected = mySelectedProfile;
         if (selected != null) {
           final InspectionConfigTreeNode node = (InspectionConfigTreeNode)event.getPath().getLastPathComponent();
           final InspectionProfileImpl parentProfile = (InspectionProfileImpl)selected.getParentProfile();
           if (parentProfile != null) {
-            parentProfile.getExpandedNodes().expandNode(node);
+            getExpandedNodes(parentProfile).expandNode(node);
           }
-          selected.getExpandedNodes().expandNode(node);
+          getExpandedNodes(selected).expandNode(node);
         }
       }
     });
@@ -559,7 +589,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     severities.add(HighlightSeverity.WARNING);
     severities.add(HighlightSeverity.WEAK_WARNING);
     final Collection<SeverityRegistrar.SeverityBasedTextAttributes> infoTypes =
-      severityRegistrar.getRegisteredHighlightingInfoTypes();
+      SeverityUtil.getRegisteredHighlightingInfoTypes(severityRegistrar);
     for (SeverityRegistrar.SeverityBasedTextAttributes info : infoTypes) {
       severities.add(info.getSeverity());
     }
@@ -769,6 +799,7 @@ public class SingleInspectionProfilePanel extends JPanel {
           }
         };
         chooser.getComboBox().addActionListener(new ActionListener() {
+          @Override
           public void actionPerformed(ActionEvent e) {
             boolean toUpdate = mySelectedProfile.getErrorLevel(key, scope) != chooser.getLevel();
             mySelectedProfile.setErrorLevel(key, chooser.getLevel(), node.isInspectionNode() || node.isByDefault() ? -1 : node.getParent().getIndex(node));
@@ -852,6 +883,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     filterTree(myProfileFilter != null ? myProfileFilter.getFilter() : null);
   }
 
+  @Override
   public Dimension getPreferredSize() {
     return new Dimension(700, 500);
   }
@@ -957,7 +989,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     }
     final InspectionProfile parentProfile = selectedProfile.getParentProfile();
 
-    if (InspectionProfileManager.getInstance().getSchemesManager().isShared(selectedProfile)) {
+    if (((InspectionProfileManagerImpl)InspectionProfileManager.getInstance()).getSchemesManager().isShared(selectedProfile)) {
       if (descriptorsAreChanged()) {
         throw new ConfigurationException("Shared profile cannot be modified. Please do \"Save As...\" first.");
       }
@@ -1023,7 +1055,7 @@ public class SingleInspectionProfilePanel extends JPanel {
       }
       for (int i = 0, toolsSize = tools.size(); i < toolsSize; i++) {
         final ScopeToolState pair = tools.get(i);
-        if (!Comparing.equal(pair.getScope(), descriptors.get(i).getScope())) {
+        if (!Comparing.equal(ScopeToolStateUtil.getScope(pair), descriptors.get(i).getScope())) {
           return true;
         }
       }
@@ -1053,7 +1085,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     super.setVisible(aFlag);
   }
 
-  private void setNewHighlightingLevel(final HighlightDisplayLevel level) {
+  private void setNewHighlightingLevel(@NotNull HighlightDisplayLevel level) {
     final int[] rows = myTree.getSelectionRows();
     final boolean showOptionsAndDescriptorPanels = rows != null && rows.length == 1;
     for (int i = 0; rows != null && i < rows.length; i++) {
@@ -1078,7 +1110,7 @@ public class SingleInspectionProfilePanel extends JPanel {
     repaintTableData();
   }
 
-  private void updateErrorLevelUpInHierarchy(HighlightDisplayLevel level,
+  private void updateErrorLevelUpInHierarchy(@NotNull HighlightDisplayLevel level,
                                              boolean showOptionsAndDescriptorPanels,
                                              InspectionConfigTreeNode node) {
     node.dropCache();
@@ -1095,7 +1127,8 @@ public class SingleInspectionProfilePanel extends JPanel {
   }
 
   private void updateErrorLevel(final InspectionConfigTreeNode child,
-                                final boolean showOptionsAndDescriptorPanels, final HighlightDisplayLevel level) {
+                                final boolean showOptionsAndDescriptorPanels,
+                                @NotNull HighlightDisplayLevel level) {
     final HighlightDisplayKey key = child.getDescriptor().getKey();
     mySelectedProfile.setErrorLevel(key, level, child.isInspectionNode() || child.isByDefault() ? -1 : child.getParent().getIndex(child));
     child.dropCache();
@@ -1104,32 +1137,22 @@ public class SingleInspectionProfilePanel extends JPanel {
     }
   }
 
-  private class LevelSelection implements ActionListener {
-    private final HighlightDisplayLevel myLevel;
-
-    public LevelSelection(HighlightDisplayLevel level) {
-      myLevel = level;
-    }
-
-    public void actionPerformed(ActionEvent e) {
-      setNewHighlightingLevel(myLevel);
-    }
-  }
-
   private class MyFilterComponent extends FilterComponent {
     private MyFilterComponent() {
       super(INSPECTION_FILTER_HISTORY, 10);
-      setHistory(Arrays.asList("\"New in 11\""));
+      setHistory(Arrays.asList("\"New in 12\""));
     }
 
+    @Override
     public void filter() {
       filterTree(getFilter());
     }
 
+    @Override
     protected void onlineFilter() {
       if (mySelectedProfile == null) return;
       final String filter = getFilter();
-      mySelectedProfile.getExpandedNodes().saveVisibleState(myTree);
+      getExpandedNodes(mySelectedProfile).saveVisibleState(myTree);
       fillTreeData(filter, true);
       reloadModel();
       if (filter == null || filter.length() == 0) {
@@ -1145,6 +1168,7 @@ public class SingleInspectionProfilePanel extends JPanel {
       super(SingleInspectionProfilePanel.this.myTree);
     }
 
+    @Override
     protected InspectionProfileImpl getSelectedProfile() {
       return mySelectedProfile;
     }
@@ -1166,6 +1190,7 @@ public class SingleInspectionProfilePanel extends JPanel {
       super(SingleInspectionProfilePanel.this.myTree);
     }
 
+    @Override
     protected InspectionProfileImpl getSelectedProfile() {
       return mySelectedProfile;
     }

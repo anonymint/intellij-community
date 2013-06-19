@@ -73,7 +73,8 @@
   <action id="EditorChooseLookupItemCompleteStatement">
     <keyboard-shortcut first-keystroke="control shift ENTER"/>
   </action>
-  <action id="EditorChooseLookupItemDot"><keyboard-shortcut first-keystroke="control PERIOD"/></action>
+  <action id="EditorChooseLookupItemDot">
+    <keyboard-shortcut first-keystroke="control PERIOD"/></action>
   <action id="EditorCompleteStatement">
     <keyboard-shortcut first-keystroke="control shift ENTER"/>
   </action>
@@ -121,7 +122,6 @@
   <action id="GotoTypeDeclaration">
     <keyboard-shortcut first-keystroke="control shift B"/>
     <mouse-shortcut keystroke="ctrl shift button1"/>
-    <mouse-shortcut keystroke="shift button2"/>
   </action>
   
   <action id="GotoBookmark0">
@@ -243,6 +243,7 @@
   </action>
   <action id="Back">
     <keyboard-shortcut first-keystroke="control alt LEFT"/>
+    <mouse-shortcut keystroke="button4"/>
   </action>
   <action id="EditorScrollDown">
     <keyboard-shortcut first-keystroke="control DOWN"/>
@@ -305,13 +306,6 @@
   <action id="CloseContent">
     <keyboard-shortcut first-keystroke="control F4"/>
   </action>
-  <action id="NextSplitter">
-    <keyboard-shortcut first-keystroke="control TAB"/>
-  </action>
-  <action id="PrevSplitter">
-    <keyboard-shortcut first-keystroke="control shift TAB"/>
-  </action>
-
   <action id="Replace">
     <keyboard-shortcut first-keystroke="control R"/>
   </action>
@@ -573,6 +567,9 @@
   <action id="EditSource">
     <keyboard-shortcut first-keystroke="F4"/>
   </action>
+  <action id="EditSourceInNewWindow">
+    <keyboard-shortcut first-keystroke="shift F4"/>
+  </action>
   <action id="CodeCompletion">
     <keyboard-shortcut first-keystroke="control SPACE"/>
   </action>
@@ -601,6 +598,9 @@
   <action id="ValidateXml"/>
   <action id="ToggleLineBreakpoint">
     <keyboard-shortcut first-keystroke="control F8"/>
+  </action>
+  <action id="ToggleTemporaryLineBreakpoint">
+    <keyboard-shortcut first-keystroke="control shift alt F8"/>
   </action>
   <action id="Debugger.EditTypeSource">
     <keyboard-shortcut first-keystroke="shift F4"/>
@@ -720,6 +720,7 @@
   </action>
   <action id="Forward">
     <keyboard-shortcut first-keystroke="control alt RIGHT"/>
+    <mouse-shortcut keystroke="button5"/>
   </action>
   <action id="CollapseAllRegions">
     <keyboard-shortcut first-keystroke="control shift SUBTRACT"/>
@@ -930,12 +931,9 @@
   <action id="Console.History.Browse"><keyboard-shortcut first-keystroke="control alt E"/></action>
 
   <action id="Console.Jdbc.Execute"><keyboard-shortcut first-keystroke="control ENTER"/></action>
-  <action id="Console.Jdbc.Properties"><keyboard-shortcut first-keystroke="control alt ENTER"/></action>
   <action id="Console.Jdbc.Terminate"><keyboard-shortcut first-keystroke="control alt shift DELETE"/></action>
 
-
   <action id="Console.Jpa.Execute"><keyboard-shortcut first-keystroke="control ENTER"/></action>
-  <action id="Console.Jpa.Properties"><keyboard-shortcut first-keystroke="control alt ENTER"/></action>
   <action id="Console.Jpa.Terminate"><keyboard-shortcut first-keystroke="control alt shift DELETE"/></action>
   <action id="Console.Jpa.GenerateSql"><keyboard-shortcut first-keystroke="control shift ENTER"/></action>
   <action id="Console.Jpa.GenerateDDL"><keyboard-shortcut first-keystroke="control alt shift ENTER"/></action>

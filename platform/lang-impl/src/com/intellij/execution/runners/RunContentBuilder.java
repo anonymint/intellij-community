@@ -19,6 +19,7 @@ import com.intellij.diagnostic.logging.LogConsoleManagerBase;
 import com.intellij.diagnostic.logging.LogFilesManager;
 import com.intellij.diagnostic.logging.OutputFileUtil;
 import com.intellij.execution.*;
+import com.intellij.execution.configurations.ModuleRunProfile;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.impl.ConsoleViewImpl;
@@ -31,8 +32,10 @@ import com.intellij.ide.actions.ContextHelpAction;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.tabs.PinToolwindowTabAction;
 import org.jetbrains.annotations.NonNls;
@@ -50,7 +53,6 @@ public class RunContentBuilder extends LogConsoleManagerBase {
 
   private final ProgramRunner myRunner;
   private final ArrayList<AnAction> myRunnerActions = new ArrayList<AnAction>();
-  private boolean myReuseProhibited = false;
   private ExecutionResult myExecutionResult;
 
   private final LogFilesManager myManager;
@@ -58,6 +60,22 @@ public class RunContentBuilder extends LogConsoleManagerBase {
   private RunnerLayoutUi myUi;
   private final Executor myExecutor;
 
+  public RunContentBuilder(@NotNull Project project,
+                           ProgramRunner runner,
+                           Executor executor,
+                           ExecutionResult executionResult,
+                           @NotNull ExecutionEnvironment environment) {
+    super(project, createSearchScope(project, environment.getRunProfile()));
+    myRunner = runner;
+    myExecutor = executor;
+    myManager = new LogFilesManager(project, this, this);
+    myExecutionResult = executionResult;
+    setEnvironment(environment);
+  }
+
+  /**
+   * @deprecated use {@link #RunContentBuilder(com.intellij.openapi.project.Project, ProgramRunner, com.intellij.execution.Executor, com.intellij.execution.ExecutionResult, ExecutionEnvironment)}
+   */
   public RunContentBuilder(final Project project, final ProgramRunner runner, Executor executor) {
     super(project);
     myRunner = runner;
@@ -65,21 +83,41 @@ public class RunContentBuilder extends LogConsoleManagerBase {
     myManager = new LogFilesManager(project, this, this);
   }
 
+  @NotNull
+  public static GlobalSearchScope createSearchScope(Project project, RunProfile runProfile) {
+    Module[] modules = null;
+    if (runProfile instanceof ModuleRunProfile) {
+      modules = ((ModuleRunProfile)runProfile).getModules();
+    }
+    if (modules == null || modules.length == 0) {
+      return GlobalSearchScope.allScope(project);
+    }
+    else {
+      GlobalSearchScope scope = GlobalSearchScope.moduleRuntimeScope(modules[0], true);
+      for (int idx = 1; idx < modules.length; idx++) {
+        Module module = modules[idx];
+        scope = scope.uniteWith(GlobalSearchScope.moduleRuntimeScope(module, true));
+      }
+      return scope;
+    }
+  }
+
   public ExecutionResult getExecutionResult() {
     return myExecutionResult;
   }
 
+  @Deprecated
   public void setExecutionResult(final ExecutionResult executionResult) {
     myExecutionResult = executionResult;
   }
 
+  @Override
   public void setEnvironment(@NotNull final ExecutionEnvironment env) {
     super.setEnvironment(env);
     final RunProfile profile = env.getRunProfile();
     if (profile instanceof RunConfigurationBase) {
       myManager.registerFileMatcher((RunConfigurationBase)profile);
     }
-    myReuseProhibited = Boolean.TRUE.equals(env.getUserData(RunContentDescriptor.REUSE_CONTENT_PROHIBITED));
   }
 
   public void addAction(@NotNull final AnAction action) {
@@ -110,7 +148,7 @@ public class RunContentBuilder extends LogConsoleManagerBase {
     myUi.getOptions().setMoveToGridActionEnabled(false).setMinimizeActionEnabled(false);
 
     if (ApplicationManager.getApplication().isUnitTestMode()) {
-      return new MyRunContentDescriptor(profile, myExecutionResult, myReuseProhibited, myUi.getComponent(), this);
+      return new MyRunContentDescriptor(profile, myExecutionResult, myUi.getComponent(), this);
     }
 
     if (console != null) {
@@ -125,7 +163,7 @@ public class RunContentBuilder extends LogConsoleManagerBase {
         OutputFileUtil.attachDumpListener((RunConfigurationBase)profile, myExecutionResult.getProcessHandler(), console);
       }
     }
-    MyRunContentDescriptor contentDescriptor = new MyRunContentDescriptor(profile, myExecutionResult, myReuseProhibited, myUi.getComponent(), this);
+    MyRunContentDescriptor contentDescriptor = new MyRunContentDescriptor(profile, myExecutionResult, myUi.getComponent(), this);
     myUi.getOptions().setLeftToolbar(createActionToolbar(contentDescriptor, myUi.getComponent()), ActionPlaces.UNKNOWN);
 
     if (profile instanceof RunConfigurationBase) {
@@ -167,8 +205,7 @@ public class RunContentBuilder extends LogConsoleManagerBase {
   private ActionGroup createActionToolbar(final RunContentDescriptor contentDescriptor, final JComponent component) {
     final DefaultActionGroup actionGroup = new DefaultActionGroup();
 
-    final RestartAction restartAction = new RestartAction(myExecutor, myRunner, getProcessHandler(),
-                                                          RestartAction.RERUN_ICON, contentDescriptor, getEnvironment());
+    final RestartAction restartAction = new RestartAction(myExecutor, myRunner, contentDescriptor, getEnvironment());
     restartAction.registerShortcut(component);
     actionGroup.add(restartAction);
     contentDescriptor.setRestarter(new Runnable() {
@@ -215,6 +252,7 @@ public class RunContentBuilder extends LogConsoleManagerBase {
     return actionGroup;
   }
 
+  @Override
   public ProcessHandler getProcessHandler() {
     return myExecutionResult.getProcessHandler();
   }
@@ -239,18 +277,11 @@ public class RunContentBuilder extends LogConsoleManagerBase {
   }
 
   private static class MyRunContentDescriptor extends RunContentDescriptor {
-    private final boolean myReuseProhibited;
     private final Disposable myAdditionalDisposable;
 
-    public MyRunContentDescriptor(final RunProfile profile, final ExecutionResult executionResult, final boolean reuseProhibited, final JComponent component, @NotNull Disposable additionalDisposable) {
+    public MyRunContentDescriptor(final RunProfile profile, final ExecutionResult executionResult, final JComponent component, @NotNull Disposable additionalDisposable) {
       super(executionResult.getExecutionConsole(), executionResult.getProcessHandler(), component, profile.getName(), profile.getIcon());
-      myReuseProhibited = reuseProhibited;
       myAdditionalDisposable = additionalDisposable;
-    }
-
-    @Override
-    public boolean isContentReuseProhibited() {
-      return myReuseProhibited;
     }
 
     @Override

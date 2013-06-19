@@ -55,7 +55,7 @@ import com.intellij.openapi.util.DimensionService;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
@@ -167,21 +167,6 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       if (o1.equals(myOnTop)) return -1;
       if (o2.equals(myOnTop)) return 1;
       return o1.compareToIgnoreCase(o2);
-    }
-  }
-
-  private static class DialectsComparator implements Comparator<Language> {
-    private final Language myDefault;
-
-    public DialectsComparator(final Language aDefault) {
-      myDefault = aDefault;
-    }
-
-    @Override
-    public int compare(final Language o1, final Language o2) {
-      if (myDefault.equals(o1)) return -1;
-      if (myDefault.equals(o2)) return 1;
-      return o1.getID().compareToIgnoreCase(o2.getID());
     }
   }
 
@@ -603,26 +588,24 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
 
   private void updateDialectsCombo(@Nullable final String lastUsed) {
     final Object source = getSource();
+    ArrayList<Language> items = new ArrayList<Language>(); 
     if (source instanceof LanguageFileType) {
       final Language baseLang = ((LanguageFileType)source).getLanguage();
-      final SortedComboBoxModel<Language> model = new SortedComboBoxModel<Language>(new DialectsComparator(baseLang));
-      model.add(baseLang);
-      model.addAll(LanguageUtil.getLanguageDialects(baseLang));
-      myDialectComboBox.setModel(model);
+      items.add(baseLang);
+      Language[] dialects = LanguageUtil.getLanguageDialects(baseLang);
+      Arrays.sort(dialects, LanguageUtil.LANGUAGE_COMPARATOR);
+      items.addAll(Arrays.asList(dialects));
     }
-    else {
-      myDialectComboBox.setModel(new DefaultComboBoxModel());
-    }
+    myDialectComboBox.setModel(new CollectionComboBoxModel(items));
 
-    final int size = myDialectComboBox.getModel().getSize();
+    final int size = items.size();
     final boolean visible = size > 1;
     myDialectLabel.setVisible(visible);
     myDialectComboBox.setVisible(visible);
     if (visible && (myCurrentFile != null || lastUsed != null)) {
-      final SortedComboBoxModel model = (SortedComboBoxModel)myDialectComboBox.getModel();
       String curLanguage = myCurrentFile != null ? myCurrentFile.getLanguage().toString() : lastUsed;
       for (int i = 0; i < size; ++i) {
-        if (curLanguage.equals(model.get(i).toString())) {
+        if (curLanguage.equals(items.get(i).toString())) {
           myDialectComboBox.setSelectedIndex(i);
           return;
         }
@@ -643,7 +626,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
         myExtensionComboBox.setModel(model);
         myExtensionComboBox.setVisible(true);
         myExtensionLabel.setVisible(true);
-        String fileExt = myCurrentFile != null ? FileUtil.getExtension(myCurrentFile.getName()) : "";
+        String fileExt = myCurrentFile != null ? FileUtilRt.getExtension(myCurrentFile.getName()) : "";
         if (fileExt.length() > 0 && extensions.contains(fileExt)) {
           myExtensionComboBox.setSelectedItem(fileExt);
           return;
@@ -688,6 +671,7 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
     return null;
   }
 
+  @NotNull
   @Override
   protected Action[] createActions() {
     AbstractAction copyPsi = new AbstractAction("Cop&y PSI") {
@@ -977,7 +961,9 @@ public class PsiViewerDialog extends DialogWrapper implements DataProvider, Disp
       BlockTreeNode descriptor = (BlockTreeNode)blockElementsSet.iterator().next();
       PsiElement rootPsi = ((ViewerTreeStructure)myPsiTreeBuilder.getTreeStructure()).getRootPsiElement();
       int blockStart = descriptor.getBlock().getTextRange().getStartOffset();
-      PsiElement currentPsiEl = InjectedLanguageUtil.findElementAtNoCommit(rootPsi.getContainingFile(), blockStart);
+      PsiFile file = rootPsi.getContainingFile();
+      PsiElement currentPsiEl = InjectedLanguageUtil.findElementAtNoCommit(file, blockStart);
+      if (currentPsiEl == null) currentPsiEl = file;
       int blockLength = descriptor.getBlock().getTextRange().getLength();
       while (currentPsiEl.getParent() != null &&
              currentPsiEl.getTextRange().getStartOffset() == blockStart &&

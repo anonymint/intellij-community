@@ -26,10 +26,12 @@ import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.SdkTypeId;
 import com.intellij.openapi.roots.ui.configuration.ModulesConfigurator;
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.ModifiableArtifactModel;
 import com.intellij.projectImport.ProjectImportBuilder;
+import icons.MavenIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.importing.MavenDefaultModifiableModelsProvider;
@@ -67,7 +69,7 @@ public class MavenProjectBuilder extends ProjectImportBuilder<MavenProject> {
   }
 
   public Icon getIcon() {
-    return icons.MavenIcons.MavenLogo;
+    return MavenIcons.MavenLogo;
   }
 
   public void cleanup() {
@@ -102,8 +104,29 @@ public class MavenProjectBuilder extends ProjectImportBuilder<MavenProject> {
     settings.generalSettings = getGeneralSettings();
     settings.importingSettings = getImportingSettings();
 
+    String settingsFile = System.getProperty("idea.maven.import.settings.file");
+    if (!StringUtil.isEmptyOrSpaces(settingsFile)) {
+      settings.generalSettings.setUserSettingsFile(settingsFile.trim());
+    }
+
+    List<String> selectedProfiles = getSelectedProfiles();
+
+    String profilesList = System.getProperty("idea.maven.import.enabled.profiles");
+    if (profilesList != null) {
+      Set<String> selectedProfilesSet = new LinkedHashSet<String>(selectedProfiles);
+
+      for (String profile : StringUtil.split(profilesList, ",")) {
+        String trimmedProfileName = profile.trim();
+        if (!trimmedProfileName.isEmpty()) {
+          selectedProfilesSet.add(trimmedProfileName);
+        }
+      }
+
+      selectedProfiles = new ArrayList<String>(selectedProfilesSet);
+    }
+
     MavenProjectsManager manager = MavenProjectsManager.getInstance(project);
-    manager.addManagedFilesWithProfiles(MavenUtil.collectFiles(getParameters().mySelectedProjects), getSelectedProfiles());
+    manager.addManagedFilesWithProfiles(MavenUtil.collectFiles(getParameters().mySelectedProjects), selectedProfiles);
     manager.waitForReadingCompletion();
 
     boolean isFromUI = model != null;
@@ -112,10 +135,12 @@ public class MavenProjectBuilder extends ProjectImportBuilder<MavenProject> {
                                   : new MavenDefaultModifiableModelsProvider(project));
   }
 
-  public boolean setRootDirectory(final String root) throws ConfigurationException {
+  public boolean setRootDirectory(@Nullable Project projectToUpdate, final String root) throws ConfigurationException {
     getParameters().myFiles = null;
     getParameters().myProfiles.clear();
     getParameters().myMavenProjectTree = null;
+
+    getParameters().myProjectToUpdate = projectToUpdate; // We cannot determinate project in non-EDT thread.
 
     return runConfigurationProcess(ProjectBundle.message("maven.scanning.projects"), new MavenTask() {
       public void run(MavenProgressIndicator indicator) throws MavenProcessCanceledException {

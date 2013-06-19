@@ -112,13 +112,13 @@ public class ReplaceConstructorWithFactoryHandler
     final PsiMethod[] constructors = aClass.getConstructors();
     if (constructors.length > 0) {
       String message =
-              RefactoringBundle.message("class.does.not.have.implicit.default.consructor", aClass.getQualifiedName()) ;
+              RefactoringBundle.message("class.does.not.have.implicit.default.constructor", aClass.getQualifiedName()) ;
       CommonRefactoringUtil.showErrorHint(myProject, editor, message, REFACTORING_NAME, HelpID.REPLACE_CONSTRUCTOR_WITH_FACTORY);
       return;
     }
-    final int answer = Messages.showYesNoCancelDialog(myProject,
-                                                      RefactoringBundle.message("would.you.like.to.replace.default.constructor.of.0.with.factory.method", aClass.getQualifiedName()),
-                                                      REFACTORING_NAME, Messages.getQuestionIcon()
+    final int answer = Messages.showYesNoDialog(myProject,
+                                                RefactoringBundle.message("would.you.like.to.replace.default.constructor.of.0.with.factory.method", aClass.getQualifiedName()),
+                                                REFACTORING_NAME, Messages.getQuestionIcon()
     );
     if (answer != 0) return;
     if (!CommonRefactoringUtil.checkReadOnlyStatus(myProject, aClass)) return;

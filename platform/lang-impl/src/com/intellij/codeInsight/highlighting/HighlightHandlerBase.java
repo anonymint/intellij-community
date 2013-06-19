@@ -37,9 +37,15 @@ public abstract class HighlightHandlerBase {
     findManager.setFindNextModel(model);
   }
 
-  public static String getLineTextErrorStripeTooltip(Document document, int offset) {
+  public static String getLineTextErrorStripeTooltip(Document document, int offset, boolean escape) {
     final int lineNumber = document.getLineNumber(offset);
-    final String lineText = document.getText().substring(document.getLineStartOffset(lineNumber), document.getLineEndOffset(lineNumber));
-    return "  " + StringUtil.escapeXml(lineText.trim()) + "  ";
+    int lineStartOffset = document.getLineStartOffset(lineNumber);
+    int lineEndOffset = document.getLineEndOffset(lineNumber);
+    int lineFragmentEndOffset = Math.min(lineStartOffset + 140, lineEndOffset);
+    String lineText = document.getText().substring(lineStartOffset, lineFragmentEndOffset);
+    if (lineFragmentEndOffset != lineEndOffset) {
+      lineText = lineText.trim() + "...";
+    }
+    return "  " + (escape ? StringUtil.escapeXml(lineText.trim()) : lineText.trim()) + "  ";
   }
 }

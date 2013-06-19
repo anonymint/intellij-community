@@ -517,7 +517,7 @@ public class JavaCompletionUtil {
   }
 
   private static LookupElement highlight(LookupElement decorator) {
-    return PrioritizedLookupElement.withGrouping(
+    return PrioritizedLookupElement.withExplicitProximity(
       LookupElementDecorator.withRenderer(decorator, new LookupElementRenderer<LookupElementDecorator<LookupElement>>() {
         @Override
         public void renderElement(LookupElementDecorator<LookupElement> element, LookupElementPresentation presentation) {
@@ -654,11 +654,11 @@ public class JavaCompletionUtil {
     assert document != null;
     document.replaceString(startOffset, endOffset, name);
 
-    final RangeMarker toDelete = insertTemporary(startOffset + name.length(), document, " ");
+    int newEndOffset = startOffset + name.length();
+    final RangeMarker toDelete = insertTemporary(newEndOffset, document, " ");
 
     documentManager.commitAllDocuments();
 
-    int newEndOffset = endOffset;
     PsiElement element = file.findElementAt(startOffset);
     if (element instanceof PsiIdentifier) {
       PsiElement parent = element.getParent();
@@ -677,7 +677,7 @@ public class JavaCompletionUtil {
           documentManager.doPostponedOperationsAndUnblockDocument(document);
           documentManager.commitDocument(document);
 
-          newElement = CodeInsightUtilBase.findElementInRange(file, rangeMarker.getStartOffset(), rangeMarker.getEndOffset(),
+          newElement = CodeInsightUtilCore.findElementInRange(file, rangeMarker.getStartOffset(), rangeMarker.getEndOffset(),
                                                               PsiJavaCodeReferenceElement.class,
                                                               JavaLanguage.INSTANCE);
           rangeMarker.dispose();
@@ -764,12 +764,14 @@ public class JavaCompletionUtil {
       context.setAddCompletionChar(false);
     }
 
-    final boolean needRightParenth = forceClosingParenthesis || !smart && (CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET || hasTail);
     if (hasTail) {
       hasParams = false;
     }
+    final boolean needRightParenth = forceClosingParenthesis ||
+                                     !smart && (CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET ||
+                                                !hasParams && completionChar != '(');
 
-    PsiDocumentManager.getInstance(context.getProject()).commitDocument(context.getDocument());
+    context.commitDocument();
 
     final CommonCodeStyleSettings styleSettings = context.getCodeStyleSettings();
     final PsiElement elementAt = file.findElementAt(context.getStartOffset());

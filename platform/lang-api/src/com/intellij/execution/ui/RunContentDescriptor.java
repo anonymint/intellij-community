@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import com.intellij.ide.HelpIdProvider;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.Key;
 import com.intellij.ui.content.Content;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
@@ -30,7 +30,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 
 public class RunContentDescriptor implements Disposable {
-  public static final Key<Boolean> REUSE_CONTENT_PROHIBITED = Key.create("ReuseContentProhibited");
   private static final Logger LOG = Logger.getInstance("#com.intellij.execution.ui.RunContentDescriptor");
 
   private ExecutionConsole myExecutionConsole;
@@ -41,6 +40,9 @@ public class RunContentDescriptor implements Disposable {
   private final String myHelpId;
 
   private boolean myActivateToolWindowWhenAdded = true;
+  private long myExecutionId = 0;
+  private Computable<JComponent> myFocusComputable = null;
+  private boolean myAutoFocusContent = false;
 
   /**
    * Used to hack {@link com.intellij.execution.runners.RestartAction}
@@ -150,8 +152,32 @@ public class RunContentDescriptor implements Disposable {
     myActivateToolWindowWhenAdded = activateToolWindowWhenAdded;
   }
 
+  public long getExecutionId() {
+    return myExecutionId;
+  }
+
+  public void setExecutionId(long executionId) {
+    myExecutionId = executionId;
+  }
+
   @Override
   public String toString() {
     return getClass().getName() + "#" + hashCode() + "(" + getDisplayName() + ")";
+  }
+
+  public Computable<JComponent> getPreferredFocusComputable() {
+    return myFocusComputable;
+  }
+
+  public void setFocusComputable(Computable<JComponent> focusComputable) {
+    myFocusComputable = focusComputable;
+  }
+
+  public boolean isAutoFocusContent() {
+    return myAutoFocusContent;
+  }
+
+  public void setAutoFocusContent(boolean autoFocusContent) {
+    myAutoFocusContent = autoFocusContent;
   }
 }

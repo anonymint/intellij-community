@@ -16,7 +16,7 @@
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -74,7 +74,7 @@ public class SplitIfAction extends PsiElementBaseIntentionAction {
   @Override
   public void invoke(@NotNull Project project, Editor editor, @NotNull PsiElement element) throws IncorrectOperationException {
     try {
-      if (!CodeInsightUtilBase.preparePsiElementForWrite(element)) return;
+      if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
 
       PsiJavaToken token = (PsiJavaToken)element;
       LOG.assertTrue(token.getTokenType() == JavaTokenType.ANDAND || token.getTokenType() == JavaTokenType.OROR);
@@ -125,25 +125,28 @@ public class SplitIfAction extends PsiElementBaseIntentionAction {
   }
 
   private static PsiExpression getROperands(PsiPolyadicExpression expression, PsiJavaToken separator) throws IncorrectOperationException {
-    PsiElement next = PsiTreeUtil.skipSiblingsForward(separator.getNextSibling(), PsiWhiteSpace.class, PsiComment.class);
+    PsiElement next = PsiTreeUtil.skipSiblingsForward(separator, PsiWhiteSpace.class, PsiComment.class);
+    final int offsetInParent;
     if (next == null) {
-      throw new IncorrectOperationException("Unable to split '"+expression.getText()+"' at '"+separator+"' (offset "+separator.getStartOffsetInParent()+")");
+      offsetInParent = separator.getStartOffsetInParent() + separator.getTextLength();
+    } else {
+      offsetInParent = next.getStartOffsetInParent();
     }
 
     PsiElementFactory factory = JavaPsiFacade.getInstance(expression.getProject()).getElementFactory();
-    String rOperands = expression.getText().substring(next.getStartOffsetInParent());
+    String rOperands = expression.getText().substring(offsetInParent);
     return factory.createExpressionFromText(rOperands, expression.getParent());
   }
 
   private static PsiExpression getLOperands(PsiPolyadicExpression expression, PsiJavaToken separator) throws IncorrectOperationException {
-    PsiElement next = separator;
-    if (next.getPrevSibling() instanceof PsiWhiteSpace) next = next.getPrevSibling();
-    if (next == null) {
+    PsiElement prev = separator;
+    if (prev.getPrevSibling() instanceof PsiWhiteSpace) prev = prev.getPrevSibling();
+    if (prev == null) {
       throw new IncorrectOperationException("Unable to split '"+expression.getText()+"' left to '"+separator+"' (offset "+separator.getStartOffsetInParent()+")");
     }
 
     PsiElementFactory factory = JavaPsiFacade.getInstance(expression.getProject()).getElementFactory();
-    String rOperands = expression.getText().substring(0, next.getStartOffsetInParent());
+    String rOperands = expression.getText().substring(0, prev.getStartOffsetInParent());
     return factory.createExpressionFromText(rOperands, expression.getParent());
   }
 

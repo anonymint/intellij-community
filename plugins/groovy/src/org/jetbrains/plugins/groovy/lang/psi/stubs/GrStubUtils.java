@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,9 +44,16 @@ import java.util.List;
  */
 public class GrStubUtils {
   private static final Logger LOG = Logger.getInstance(GrStubUtils.class);
+  public static final int TOO_LONG = -1;
 
   public static void writeStringArray(StubOutputStream dataStream, String[] array) throws IOException {
-    dataStream.writeByte(array.length);
+    if (array.length > Byte.MAX_VALUE) {
+      dataStream.writeByte(TOO_LONG);
+      dataStream.writeInt(array.length);
+    }
+    else {
+      dataStream.writeByte(array.length);
+    }
     for (String s : array) {
       LOG.assertTrue(s != null);
       dataStream.writeName(s);
@@ -54,9 +61,12 @@ public class GrStubUtils {
   }
 
   public static String[] readStringArray(StubInputStream dataStream) throws IOException {
-    final byte b = dataStream.readByte();
-    final String[] annNames = new String[b];
-    for (int i = 0; i < b; i++) {
+    int length = dataStream.readByte();
+    if (length == TOO_LONG) {
+      length = dataStream.readInt();
+    }
+    final String[] annNames = new String[length];
+    for (int i = 0; i < length; i++) {
       annNames[i] = dataStream.readName().toString();
     }
     return annNames;
@@ -84,7 +94,7 @@ public class GrStubUtils {
     List<String> annoNames = ContainerUtil.newArrayList();
     final PsiModifierList modifierList = psi.getModifierList();
     if (modifierList instanceof GrModifierList) {
-      for (GrAnnotation annotation : ((GrModifierList)modifierList).getAnnotations()) {
+      for (GrAnnotation annotation : ((GrModifierList)modifierList).getRawAnnotations()) {
         final String name = annotation.getShortName();
         if (StringUtil.isNotEmpty(name)) {
           annoNames.add(name);

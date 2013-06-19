@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -119,16 +119,17 @@ public abstract class DaemonAnalyzerTestCase extends CodeInsightTestCase {
 
       @Override
       @NotNull
-      public InspectionTool[] getInspectionTools(PsiElement element) {
+      public InspectionToolWrapper[] getInspectionTools(PsiElement element) {
         Collection<InspectionToolWrapper> values = myAvailableTools.values();
-        return values.toArray(new InspectionTool[values.size()]);
+        return values.toArray(new InspectionToolWrapper[values.size()]);
       }
 
+      @NotNull
       @Override
-      public List<ToolsImpl> getAllEnabledInspectionTools(Project project) {
-        List<ToolsImpl> result = new ArrayList<ToolsImpl>();
-        for (InspectionProfileEntry entry : getInspectionTools(null)) {
-          result.add(new ToolsImpl(entry, entry.getDefaultLevel(), true));
+      public List<Tools> getAllEnabledInspectionTools(Project project) {
+        List<Tools> result = new ArrayList<Tools>();
+        for (InspectionToolWrapper toolWrapper : getInspectionTools(null)) {
+          result.add(new ToolsImpl(toolWrapper, toolWrapper.getDefaultLevel(), true));
         }
         return result;
       }
@@ -140,12 +141,12 @@ public abstract class DaemonAnalyzerTestCase extends CodeInsightTestCase {
 
       @Override
       public HighlightDisplayLevel getErrorLevel(@NotNull HighlightDisplayKey key, PsiElement element) {
-        final InspectionProfileEntry localInspectionTool = myAvailableTools.get(key.toString());
+        final InspectionToolWrapper localInspectionTool = myAvailableTools.get(key.toString());
         return localInspectionTool != null ? localInspectionTool.getDefaultLevel() : HighlightDisplayLevel.WARNING;
       }
 
       @Override
-      public InspectionTool getInspectionTool(@NotNull String shortName, @NotNull PsiElement element) {
+      public InspectionToolWrapper getInspectionTool(@NotNull String shortName, @NotNull PsiElement element) {
         return myAvailableTools.get(shortName);
       }
     };
@@ -192,7 +193,8 @@ public abstract class DaemonAnalyzerTestCase extends CodeInsightTestCase {
     //((VirtualFilePointerManagerImpl)VirtualFilePointerManager.getInstance()).assertPointersDisposed();
   }
 
-  protected void enableInspectionTool(InspectionProfileEntry tool){
+  protected void enableInspectionTool(@NotNull InspectionProfileEntry tool){
+    assert !(tool instanceof InspectionToolWrapper) : tool;
     InspectionToolWrapper wrapper = InspectionToolRegistrar.wrapTool(tool);
     final String shortName = wrapper.getShortName();
     final HighlightDisplayKey key = HighlightDisplayKey.find(shortName);
@@ -255,10 +257,11 @@ public abstract class DaemonAnalyzerTestCase extends CodeInsightTestCase {
   @NotNull
   @SuppressWarnings("TestMethodWithIncorrectSignature")
   protected HighlightTestInfo testFile(@NonNls @NotNull String... filePath) {
-    return new HighlightTestInfo(getTestRootDisposable(), filePath){
+    return new HighlightTestInfo(getTestRootDisposable(), filePath) {
       @Override
-      public HighlightTestInfo doTest() throws Exception {
-        configureByFiles(projectRoot, filePaths);
+      public HighlightTestInfo doTest() {
+        try { configureByFiles(projectRoot, filePaths); }
+        catch (Exception e) { throw new RuntimeException(e); }
         ExpectedHighlightingData data = new ExpectedHighlightingData(myEditor.getDocument(), checkWarnings, checkWeakWarnings, checkInfos, myFile);
         if (checkSymbolNames) data.checkSymbolNames();
         checkHighlighting(data);
@@ -273,6 +276,11 @@ public abstract class DaemonAnalyzerTestCase extends CodeInsightTestCase {
 
   protected void doTest(@NotNull VirtualFile[] vFile, boolean checkWarnings, boolean checkInfos) throws Exception {
     configureByFiles(null, vFile);
+    doDoTest(checkWarnings, checkInfos);
+  }
+
+  protected void doTest(boolean checkWarnings, boolean checkInfos, String ... files) throws Exception {
+    configureByFiles(null, files);
     doDoTest(checkWarnings, checkInfos);
   }
 

@@ -24,6 +24,7 @@ import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.JDOMExternalizableStringList;
+import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.html.HtmlTag;
 import com.intellij.psi.impl.source.html.dtd.HtmlElementDescriptorImpl;
@@ -43,7 +44,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
@@ -57,12 +57,12 @@ import java.util.StringTokenizer;
 /**
  * @author spleaner
  */
-public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
+public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool implements XmlEntitiesInspection {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.htmlInspections.HtmlUnknownTagInspection");
 
   public JDOMExternalizableStringList myValues;
   public boolean myCustomValuesEnabled = true;
-  @NonNls public static final String TAG_SHORT_NAME = "HtmlUnknownTag";
+  public static final Key<HtmlUnknownTagInspection> TAG_KEY = Key.create(TAG_SHORT_NAME);
 
   public HtmlUnknownTagInspection() {
     this("nobr,noembed,comment,noscript,embed,script");
@@ -72,18 +72,21 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
     myValues = reparseProperties(defaultValues);
   }
 
+  @Override
   @Nls
   @NotNull
   public String getDisplayName() {
     return XmlBundle.message("html.inspections.unknown.tag");
   }
 
+  @Override
   @NonNls
   @NotNull
   public String getShortName() {
     return TAG_SHORT_NAME;
   }
 
+  @Override
   @Nullable
   public JComponent createOptionsPanel() {
     final JPanel result = new JPanel(new BorderLayout());
@@ -93,6 +96,7 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
 
     final FieldPanel additionalAttributesPanel = new FieldPanel(null, getPanelTitle(), null, null);
     additionalAttributesPanel.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         final Document document = e.getDocument();
         try {
@@ -110,6 +114,7 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
     final JCheckBox checkBox = new JCheckBox(getCheckboxTitle());
     checkBox.setSelected(myCustomValuesEnabled);
     checkBox.addActionListener(new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         final boolean b = checkBox.isSelected();
         if (b != myCustomValuesEnabled) {
@@ -180,7 +185,7 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
     return myValues.contains(value.toLowerCase());
   }
 
-  public void addCustomPropertyName(@NotNull final String text) {
+  public void addEntry(@NotNull final String text) {
     final String s = text.trim().toLowerCase();
     if (!isCustomValue(s)) {
       myValues.add(s);
@@ -206,6 +211,7 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
     return HtmlUtil.SVG_NAMESPACE.equals(ns) || HtmlUtil.MATH_ML_NAMESPACE.endsWith(ns);
   }
 
+  @Override
   protected void checkTag(@NotNull final XmlTag tag, @NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
     if (!(tag instanceof HtmlTag) || !XmlHighlightVisitor.shouldBeValidated(tag) || isInSpecialHtml5Namespace(tag)) {
       return;
@@ -229,7 +235,7 @@ public class HtmlUnknownTagInspection extends HtmlLocalInspectionTool {
 
       if (!isCustomValuesEnabled() || !isCustomValue(name)) {
         final AddCustomTagOrAttributeIntentionAction action =
-          new AddCustomTagOrAttributeIntentionAction(getShortName(), name, XmlEntitiesInspection.UNKNOWN_TAG);
+          new AddCustomTagOrAttributeIntentionAction(TAG_KEY, name, XmlBundle.message("add.custom.html.tag", name));
 
         // todo: support "element is not allowed" message for html5
         // some tags in html5 cannot be found in xhtml5.xsd if they are located in incorrect context, so they get any-element descriptor (ex. "canvas: tag)

@@ -36,6 +36,12 @@ public class DefaultExecutionResult implements ExecutionResult {
   private AnAction[] myRestartActions;
   private final List<AnAction> myStopActions = new ArrayList<AnAction>();
 
+  public DefaultExecutionResult() {
+    myConsole = null;
+    myProcessHandler = null;
+    myActions = AnAction.EMPTY_ARRAY;
+  }
+
   public DefaultExecutionResult(final ExecutionConsole console, @NotNull final ProcessHandler processHandler) {
     this(console, processHandler, AnAction.EMPTY_ARRAY);
   }
@@ -46,10 +52,12 @@ public class DefaultExecutionResult implements ExecutionResult {
     myActions = actions;
   }
 
+  @Override
   public ExecutionConsole getExecutionConsole() {
     return myConsole;
   }
 
+  @Override
   public AnAction[] getActions() {
     return myActions;
   }
@@ -70,15 +78,20 @@ public class DefaultExecutionResult implements ExecutionResult {
     myStopActions.add(action);
   }
 
-  @NotNull 
+  @NotNull
   public AnAction[] getAdditionalStopActions() {
     return myStopActions.toArray(new AnAction[myStopActions.size()]);
   }
 
+  @Override
   public ProcessHandler getProcessHandler() {
     return myProcessHandler;
   }
 
+  /**
+   * @deprecated use {@link com.intellij.execution.actions.StopProcessAction}.
+   * Will be removed in IDEA 14
+   */
   public static class StopAction extends AnAction implements DumbAware {
     private final ProcessHandler myProcessHandler;
 
@@ -88,6 +101,7 @@ public class DefaultExecutionResult implements ExecutionResult {
       myProcessHandler = processHandler;
     }
 
+    @Override
     public void actionPerformed(final AnActionEvent e) {
       if(myProcessHandler.detachIsDefault()) {
         myProcessHandler.detachProcess();
@@ -97,6 +111,7 @@ public class DefaultExecutionResult implements ExecutionResult {
       }
     }
 
+    @Override
     public void update(final AnActionEvent event) {
       event.getPresentation().setEnabled(!myProcessHandler.isProcessTerminating() && !myProcessHandler.isProcessTerminated());
     }

@@ -17,8 +17,7 @@ package com.intellij.openapi.diff.impl;
 
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.DataProvider;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diff.DiffContent;
 import com.intellij.openapi.diff.impl.highlighting.FragmentSide;
 import com.intellij.openapi.diff.impl.util.LabeledEditor;
@@ -33,6 +32,8 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
+import com.intellij.openapi.keymap.Keymap;
+import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.IJSwingUtilities;
 import com.intellij.util.ui.ScrollUtil;
@@ -45,6 +46,7 @@ import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.MouseEvent;
 
 public class DiffSideView {
   private final JComponent MOCK_COMPONENT = new JPanel();
@@ -157,19 +159,34 @@ public class DiffSideView {
 
     private final EditorMouseAdapter myMouseListener = new EditorMouseAdapter() {
       public void mouseReleased(EditorMouseEvent e) {
-        if (!isInMyArea(e)) return;
+        if (!isEventHandled(e.getMouseEvent()) || !isInMyArea(e)) {
+          return;
+        }
         OpenFileDescriptor descriptor = getOpenFileDescriptor(e);
-        if (descriptor == null) return;
+        if (descriptor == null) {
+          return;
+        }
         myContainer.showSource(descriptor);
       }
     };
+
+    private static boolean isEventHandled(MouseEvent e) {
+      Keymap activeKeymap = KeymapManager.getInstance().getActiveKeymap();
+      Shortcut[] shortcuts = activeKeymap.getShortcuts(IdeActions.ACTION_GOTO_DECLARATION);
+      for (Shortcut shortcut : shortcuts) {
+        if (shortcut instanceof MouseShortcut) {
+          return ((MouseShortcut)shortcut).getButton() == e.getButton() && ((MouseShortcut)shortcut).getModifiers() == e.getModifiersEx();
+        }
+      }
+      return false;
+    }
 
     private OpenFileDescriptor getOpenFileDescriptor(EditorMouseEvent e) {
       int offset = myEditor.logicalPositionToOffset(myEditor.xyToLogicalPosition(e.getMouseEvent().getPoint()));
       return myContent.getOpenFileDescriptor(offset);
     }
 
-    private boolean isInMyArea(EditorMouseEvent e) {
+    private static boolean isInMyArea(EditorMouseEvent e) {
       return e.getArea() == EditorMouseEventArea.LINE_NUMBERS_AREA;
     }
 
@@ -194,7 +211,9 @@ public class DiffSideView {
     public static void install(DiffContent content, EditorSource source, DiffSidesContainer container) {
       final Editor editor = source.getEditor();
       Project project = container.getProject();
-      if (project == null) return;
+      if (project == null || editor == null) {
+        return;
+      }
       final MouseLineNumberListener listener = new MouseLineNumberListener(content, editor, container, project);
       editor.addEditorMouseListener(listener.myMouseListener);
       editor.addEditorMouseMotionListener(listener.myMouseMotionListener);

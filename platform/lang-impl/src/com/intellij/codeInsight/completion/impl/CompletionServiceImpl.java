@@ -142,6 +142,9 @@ public class CompletionServiceImpl extends CompletionService{
 
     @Override
     public void stopHere() {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Completion stopped\n" + DebugUtil.currentStackTrace());
+      }
       super.stopHere();
       if (myOriginal != null) {
         myOriginal.stopHere();
@@ -246,7 +249,12 @@ public class CompletionServiceImpl extends CompletionService{
         sorter = sorter.withClassifier(CompletionSorterImpl.weighingFactory(new RealPrefixMatchingWeigher(location)));
       }
       else if ("stats".equals(id)) {
-        sorter = sorter.withClassifier(CompletionSorterImpl.weighingFactory(new StatisticsWeigher.LookupStatisticsWeigher(location)));
+        sorter = sorter.withClassifier(new ClassifierFactory<LookupElement>("stats") {
+          @Override
+          public Classifier<LookupElement> createClassifier(Classifier<LookupElement> next) {
+            return new StatisticsWeigher.LookupStatisticsWeigher(location, next);
+          }
+        });
       }
       else {
         sorter = sorter.weigh(new LookupElementWeigher(id, true, false) {
@@ -261,7 +269,7 @@ public class CompletionServiceImpl extends CompletionService{
     return sorter.withClassifier("priority", true, new ClassifierFactory<LookupElement>("liftShorter") {
       @Override
       public Classifier<LookupElement> createClassifier(final Classifier<LookupElement> next) {
-        return new LiftShorterItemsClassifier(next, new LiftShorterItemsClassifier.LiftingCondition(), false);
+        return new LiftShorterItemsClassifier("liftShorter", next, new LiftShorterItemsClassifier.LiftingCondition(), false);
       }
     });
   }

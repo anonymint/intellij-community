@@ -18,6 +18,7 @@ package com.intellij.psi;
 
 import com.intellij.lang.Language;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.util.PsiUtilCore;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,13 +49,14 @@ public class PsiInvalidElementAccessException extends RuntimeException {
   }
 
   private static String getMessageWithReason(@Nullable PsiElement element, @Nullable String message) {
-    return (element != null ? "Element: " + element.getClass() + " because: " + reason(element) : "Unknown psi element") +
+    return (element == null ? "Unknown psi element" : "Element: " + element.getClass() + " because: " + reason(element)) +
           (message == null ? "" : "; " + message);
   }
 
   @NonNls
   @NotNull
   private static String reason(@NotNull PsiElement root){
+    if (root == PsiUtilCore.NULL_PSI_ELEMENT) return "NULL_PSI_ELEMENT";
     PsiElement element = root instanceof PsiFile ? root : root.getParent();
     if (element == null) return "parent is null";
     while (element != null && !(element instanceof PsiFile) && element.getParent() != null) {
@@ -65,7 +67,13 @@ public class PsiInvalidElementAccessException extends RuntimeException {
     FileViewProvider provider = file.getViewProvider();
     VirtualFile vFile = provider.getVirtualFile();
     if (!vFile.isValid()) return vFile+" is invalid";
-    if (!provider.isPhysical()) return "non-physical provider"; // "dummy" file
+    if (!provider.isPhysical()) {
+      PsiElement context = file.getContext();
+      if (context != null && !context.isValid()) {
+        return "invalid context: " + reason(context);
+      }
+      return "non-physical provider: " + provider; // "dummy" file?
+    }
     PsiManager manager = file.getManager();
     if (manager.getProject().isDisposed()) return "project is disposed";
     Language language = file.getLanguage();

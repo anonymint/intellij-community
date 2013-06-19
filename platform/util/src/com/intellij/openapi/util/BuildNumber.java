@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,22 +13,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/*
- * @author max
- */
 package com.intellij.openapi.util;
 
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
 
+/**
+ * @author max
+ */
 public class BuildNumber implements Comparable<BuildNumber> {
   private static final String BUILD_NUMBER = "__BUILD_NUMBER__";
+  private static final String STAR = "*";
+  private static final String SNAPSHOT = "SNAPSHOT";
+  private static final String FALLBACK_VERSION = "999.SNAPSHOT";
+
   private static final int TOP_BASELINE_VERSION = fromFile().getBaselineVersion();
 
   private final String myProductCode;
@@ -42,7 +46,7 @@ public class BuildNumber implements Comparable<BuildNumber> {
   }
 
   public String asString() {
-    return asString(true); 
+    return asString(true);
   }
 
   public String asStringWithoutProductCode() {
@@ -51,10 +55,9 @@ public class BuildNumber implements Comparable<BuildNumber> {
 
   private String asString(boolean includeProductCode) {
     StringBuilder builder = new StringBuilder();
-    if (includeProductCode) {
-      if (!StringUtil.isEmpty(myProductCode)) {
-        builder.append(myProductCode).append('-');
-      }
+
+    if (includeProductCode && !StringUtil.isEmpty(myProductCode)) {
+      builder.append(myProductCode).append('-');
     }
 
     builder.append(myBaselineVersion).append('.');
@@ -63,7 +66,7 @@ public class BuildNumber implements Comparable<BuildNumber> {
       builder.append(myBuildNumber);
     }
     else {
-      builder.append("SNAPSHOT");
+      builder.append(SNAPSHOT);
     }
 
     return builder.toString();
@@ -103,7 +106,7 @@ public class BuildNumber implements Comparable<BuildNumber> {
         code = code.substring(baselineVersionSeparator + 1);
       }
       catch (NumberFormatException e) {
-        throw new RuntimeException("Unparseable version number: " + version + "; plugin name: " + name);
+        throw new RuntimeException("Invalid version number: " + version + "; plugin name: " + name);
       }
 
       buildNumber = parseBuildNumber(version, code, name);
@@ -123,29 +126,33 @@ public class BuildNumber implements Comparable<BuildNumber> {
   }
 
   private static int parseBuildNumber(String version, String code, String name) {
-    if ("SNAPSHOT".equals(code) || BUILD_NUMBER.equals(code)) {
+    if (SNAPSHOT.equals(code) || STAR.equals(code) || BUILD_NUMBER.equals(code)) {
       return Integer.MAX_VALUE;
     }
     try {
       return Integer.parseInt(code);
     }
     catch (NumberFormatException e) {
-      throw new RuntimeException("Unparseable version number: " + version +"; plugin name: " + name);
+      throw new RuntimeException("Invalid version number: " + version + "; plugin name: " + name);
     }
   }
 
-  public static BuildNumber fromFile() {
-    String text = "999.SNAPSHOT";
+  private static BuildNumber fromFile() {
     try {
       final String homePath = PathManager.getHomePath();
       final File buildTxtFile = FileUtil.findFirstThatExist(homePath + "/build.txt", homePath + "/community/build.txt");
       if (buildTxtFile != null) {
-        text = FileUtil.loadFile(buildTxtFile).trim();
+        String text = FileUtil.loadFile(buildTxtFile).trim();
+        return fromString(text);
       }
     }
     catch (IOException ignored) { }
 
-    return fromString(text);
+    return fallback();
+  }
+
+  public static BuildNumber fallback() {
+    return fromString(FALLBACK_VERSION);
   }
 
   @Override
@@ -153,7 +160,8 @@ public class BuildNumber implements Comparable<BuildNumber> {
     return asString();
   }
 
-  public int compareTo(BuildNumber o) {
+  @Override
+  public int compareTo(@NotNull BuildNumber o) {
     if (myBaselineVersion == o.myBaselineVersion) return myBuildNumber - o.myBuildNumber;
     return myBaselineVersion - o.myBaselineVersion;
   }
@@ -197,6 +205,7 @@ public class BuildNumber implements Comparable<BuildNumber> {
     if (bn == Integer.MAX_VALUE) {
       return TOP_BASELINE_VERSION; // SNAPSHOTS
     }
+
     if (bn >= 10000) {
       return 88; // Maia, 9x builds
     }

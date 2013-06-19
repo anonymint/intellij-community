@@ -95,6 +95,8 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
 
   private volatile MavenServerProgressIndicator myCurrentIndicator;
 
+  private MavenWorkspaceMap myWorkspaceMap;
+
   public Maven3ServerEmbedderImpl(MavenServerSettings settings) throws RemoteException {
     File mavenHome = settings.getMavenHome();
     if (mavenHome != null) {
@@ -167,7 +169,7 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
                                     mySystemProperties,
                                     FieldAccessor.<Properties>get(cliRequestClass, cliRequest, "userProperties"));
 
-    myLocalRepository = createLocalRepository(settings.getSnapshotUpdatePolicy());
+    myLocalRepository = createLocalRepository();
   }
 
   private static Settings buildSettings(SettingsBuilder builder,
@@ -188,6 +190,8 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
     catch (SettingsBuildingException e) {
       Maven3ServerGlobals.getLogger().info(e);
     }
+
+    result.setOffline(settings.isOffline());
 
     if (settings.getLocalRepository() != null) {
       result.setLocalRepository(settings.getLocalRepository().getPath());
@@ -218,7 +222,7 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
       }
   }
 
-  private ArtifactRepository createLocalRepository(MavenServerSettings.UpdatePolicy snapshotUpdatePolicy) {
+  private ArtifactRepository createLocalRepository() {
     try {
       return getComponent(RepositorySystem.class).createLocalRepository(new File(myMavenSettings.getLocalRepository()));
     }
@@ -254,6 +258,8 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
       ((CustomMaven3ArtifactResolver)getComponent(ArtifactResolver.class)).customize(workspaceMap, failOnUnresolvedDependency);
       ((CustomMaven3RepositoryMetadataManager)getComponent(RepositoryMetadataManager.class)).customize(workspaceMap);
       //((CustomMaven3WagonManager)getComponent(WagonManager.class)).customize(failOnUnresolvedDependency);
+
+      myWorkspaceMap = workspaceMap;
 
       setConsoleAndIndicator(console, new MavenServerProgressIndicatorWrapper(indicator));
     }
@@ -343,6 +349,10 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
           RepositorySystemSession repositorySession = getComponent(LegacySupport.class).getRepositorySession();
           if (repositorySession instanceof DefaultRepositorySystemSession) {
             ((DefaultRepositorySystemSession)repositorySession).setTransferListener(new TransferListenerAdapter(myCurrentIndicator));
+
+            if (myWorkspaceMap != null) {
+              ((DefaultRepositorySystemSession)repositorySession).setWorkspaceReader(new Maven3WorkspaceReader(myWorkspaceMap));
+            }
           }
 
           ArtifactResolutionResult result = resolver.resolve(resolutionRequest);
@@ -379,6 +389,9 @@ public class Maven3ServerEmbedderImpl extends MavenRemoteObject implements Maven
       getComponent(MavenExecutionRequestPopulator.class).populateDefaults(result);
 
       result.setSystemProperties(mySystemProperties);
+
+      result.setActiveProfiles(activeProfiles);
+      result.setInactiveProfiles(inactiveProfiles);
 
       return result;
     }

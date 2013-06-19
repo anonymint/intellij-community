@@ -30,56 +30,57 @@ import org.jetbrains.annotations.NotNull;
  * @author max
  */
 public class DummyEntryPointsTool extends FilteringInspectionTool {
-  private RefEntryPointFilter myFilter;
-  private final UnusedDeclarationInspection myOwner;
+  private static final RefEntryPointFilter myFilter = new RefEntryPointFilter();
   private QuickFixAction[] myQuickFixActions;
 
-  public DummyEntryPointsTool(UnusedDeclarationInspection owner) {
-    myOwner = owner;
+  public DummyEntryPointsTool(@NotNull UnusedDeclarationInspection owner) {
+    initialize(owner.getContext());
   }
 
+  @Override
   public RefFilter getFilter() {
-    if (myFilter == null) {
-      myFilter = new RefEntryPointFilter();
-    }
     return myFilter;
   }
 
+  @Override
   public void runInspection(@NotNull AnalysisScope scope, @NotNull final InspectionManager manager) {}
 
   @Override
-  public void exportResults(@NotNull Element parentNode, RefEntity refEntity) {
+  public void exportResults(@NotNull Element parentNode, @NotNull RefEntity refEntity) {
   }
 
+  @Override
   @NotNull
-  public JobDescriptor[] getJobDescriptors(GlobalInspectionContext globalInspectionContext) {
-    return new JobDescriptor[0];
+  public JobDescriptor[] getJobDescriptors(@NotNull GlobalInspectionContext globalInspectionContext) {
+    return JobDescriptor.EMPTY_ARRAY;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return InspectionsBundle.message("inspection.dead.code.entry.points.display.name");
   }
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return "";
   }
 
+  @Override
   @NotNull
   public String getShortName() {
     return "";
   }
 
+  @Override
+  @NotNull
   public HTMLComposerImpl getComposer() {
     return new DeadHTMLComposer(this);
   }
 
-  public GlobalInspectionContextImpl getContext() {
-    return myOwner.getContext();
-  }
-
-  public QuickFixAction[] getQuickFixes(final RefEntity[] refElements) {
+  @Override
+  public QuickFixAction[] getQuickFixes(@NotNull final RefEntity[] refElements) {
     if (myQuickFixActions == null) {
       myQuickFixActions = new QuickFixAction[]{new MoveEntriesToSuspicious()};
     }
@@ -91,6 +92,7 @@ public class DummyEntryPointsTool extends FilteringInspectionTool {
       super(InspectionsBundle.message("inspection.dead.code.remove.from.entry.point.quickfix"), null, null, DummyEntryPointsTool.this);
     }
 
+    @Override
     protected boolean applyFix(RefElement[] refElements) {
       final EntryPointsManager entryPointsManager =
         getContext().getExtension(GlobalJavaInspectionContextImpl.CONTEXT).getEntryPointsManager(getContext().getRefManager());

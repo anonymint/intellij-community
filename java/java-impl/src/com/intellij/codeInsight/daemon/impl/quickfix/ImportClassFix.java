@@ -32,9 +32,9 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
-public class ImportClassFix extends ImportClassFixBase<PsiJavaCodeReferenceElement> {
+public class ImportClassFix extends ImportClassFixBase<PsiJavaCodeReferenceElement, PsiJavaCodeReferenceElement> {
   public ImportClassFix(@NotNull PsiJavaCodeReferenceElement element) {
-    super(element);
+    super(element, element);
   }
 
   @Override
@@ -107,8 +107,9 @@ public class ImportClassFix extends ImportClassFixBase<PsiJavaCodeReferenceEleme
     return super.getRequiredMemberName(reference);
   }
 
+  @NotNull
   @Override
-  protected List<PsiClass> filterByContext(List<PsiClass> candidates, PsiJavaCodeReferenceElement ref) {
+  protected List<PsiClass> filterByContext(@NotNull List<PsiClass> candidates, @NotNull PsiJavaCodeReferenceElement ref) {
     PsiElement typeElement = ref.getParent();
     if (typeElement instanceof PsiTypeElement) {
       PsiElement var = typeElement.getParent();

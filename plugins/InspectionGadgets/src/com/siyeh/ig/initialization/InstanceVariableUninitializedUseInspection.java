@@ -68,25 +68,23 @@ public class InstanceVariableUninitializedUseInspection extends BaseInspection {
   @Override
   @NotNull
   public String getDisplayName() {
-    return InspectionGadgetsBundle.message(
-      "instance.variable.used.before.initialized.display.name");
+    return InspectionGadgetsBundle.message("instance.variable.used.before.initialized.display.name");
   }
 
   @Override
   @NotNull
   public String buildErrorString(Object... infos) {
-    return InspectionGadgetsBundle.message(
-      "instance.variable.used.before.initialized.problem.descriptor");
+    return InspectionGadgetsBundle.message("instance.variable.used.before.initialized.problem.descriptor");
   }
 
   @Override
-  public void readSettings(Element element) throws InvalidDataException {
+  public void readSettings(@NotNull Element element) throws InvalidDataException {
     super.readSettings(element);
     parseString(annotationNamesString, annotationNames);
   }
 
   @Override
-  public void writeSettings(Element element) throws WriteExternalException {
+  public void writeSettings(@NotNull Element element) throws WriteExternalException {
     annotationNamesString = formatString(annotationNames);
     super.writeSettings(element);
   }
@@ -97,8 +95,7 @@ public class InstanceVariableUninitializedUseInspection extends BaseInspection {
 
     final JPanel annotationsPanel = SpecialAnnotationsUtil.createSpecialAnnotationsListControl(
       annotationNames, InspectionGadgetsBundle.message("ignore.if.annotated.by"));
-    final CheckBox checkBox = new CheckBox(InspectionGadgetsBundle.message(
-      "primitive.fields.ignore.option"), this, "m_ignorePrimitives");
+    final CheckBox checkBox = new CheckBox(InspectionGadgetsBundle.message("primitive.fields.ignore.option"), this, "m_ignorePrimitives");
 
     final GridBagConstraints constraints = new GridBagConstraints();
     constraints.gridx = 0;
@@ -172,8 +169,7 @@ public class InstanceVariableUninitializedUseInspection extends BaseInspection {
       }
     }
 
-    private boolean isInitializedInInitializer(@NotNull PsiField field,
-      UninitializedReadCollector uninitializedReadsCollector) {
+    private boolean isInitializedInInitializer(@NotNull PsiField field, UninitializedReadCollector uninitializedReadsCollector) {
       final PsiClass aClass = field.getContainingClass();
       if (aClass == null) {
         return false;

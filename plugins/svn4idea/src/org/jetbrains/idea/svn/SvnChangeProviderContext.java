@@ -222,20 +222,22 @@ class SvnChangeProviderContext implements StatusReceiver {
                SvnVcs.svnStatusIs(status, SVNStatusType.STATUS_REPLACED) ||
                propStatus == SVNStatusType.STATUS_MODIFIED ||
                propStatus == SVNStatusType.STATUS_CONFLICTED) {
-        myChangelistBuilder.processChangeInList(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status.getRevision()),
+        myChangelistBuilder.processChangeInList(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status),
                             CurrentContentRevision.create(filePath), fStatus, status), changeListNameFromStatus(status), SvnVcs.getKey());
         checkSwitched(filePath, myChangelistBuilder, status, fStatus);
       }
       else if (SvnVcs.svnStatusIs(status, SVNStatusType.STATUS_DELETED)) {
         myChangelistBuilder.processChangeInList(
-          createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status.getRevision()), null, fStatus, status),
+          createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status), null, fStatus, status),
           changeListNameFromStatus(status), SvnVcs.getKey());
       }
       else if (SvnVcs.svnStatusIs(status, SVNStatusType.STATUS_MISSING)) {
         myChangelistBuilder.processLocallyDeletedFile(createLocallyDeletedChange(filePath, status));
       }
       else if (SvnVcs.svnStatusIs(status, SVNStatusType.STATUS_IGNORED)) {
-        myChangelistBuilder.processIgnoredFile(filePath.getVirtualFile());
+        if (!myVcs.isWcRoot(filePath)) {
+          myChangelistBuilder.processIgnoredFile(filePath.getVirtualFile());
+        }
       }
       else if (status.isCopied()) {
         //
@@ -243,11 +245,11 @@ class SvnChangeProviderContext implements StatusReceiver {
       else if ((fStatus == FileStatus.NOT_CHANGED || fStatus == FileStatus.SWITCHED) && statusType != SVNStatusType.STATUS_NONE) {
         VirtualFile file = filePath.getVirtualFile();
         if (file != null && FileDocumentManager.getInstance().isFileModified(file)) {
-          myChangelistBuilder.processChangeInList(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status.getRevision()),
+          myChangelistBuilder.processChangeInList(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status),
                                                    CurrentContentRevision.create(filePath), FileStatus.MODIFIED, status), changeListNameFromStatus(status),
                                                   SvnVcs.getKey());
         } else if (status.getTreeConflict() != null) {
-          myChangelistBuilder.processChange(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status.getRevision()),
+          myChangelistBuilder.processChange(createChange(SvnContentRevision.createBaseRevision(myVcs, filePath, status),
                                                    CurrentContentRevision.create(filePath), FileStatus.MODIFIED, status), SvnVcs.getKey());
         }
         checkSwitched(filePath, myChangelistBuilder, status, fStatus);
@@ -307,19 +309,15 @@ class SvnChangeProviderContext implements StatusReceiver {
     if (parentPath == null) {
       return;
     }
-    File svnSubdirectory = new File(parentPath.getIOFile(), SvnUtil.SVN_ADMIN_DIR_NAME);
-    LocalFileSystem localFileSystem = LocalFileSystem.getInstance();
-    VirtualFile file = localFileSystem.refreshAndFindFileByIoFile(svnSubdirectory);
-    if (file != null) {
-      localFileSystem.refreshAndFindFileByIoFile(new File(svnSubdirectory, SvnUtil.ENTRIES_FILE_NAME));
-    }
+    refreshDotSvnAndEntries(parentPath);
     if (filePath.isDirectory()) {
-      svnSubdirectory = new File(filePath.getPath(), SvnUtil.SVN_ADMIN_DIR_NAME);
-      file = localFileSystem.refreshAndFindFileByIoFile(svnSubdirectory);
-      if (file != null) {
-        localFileSystem.refreshAndFindFileByIoFile(new File(svnSubdirectory, SvnUtil.ENTRIES_FILE_NAME));
-      }
+      refreshDotSvnAndEntries(filePath);
     }
+  }
+
+  private static void refreshDotSvnAndEntries(FilePath filePath) {
+    final File svn = new File(filePath.getPath(), SvnUtil.SVN_ADMIN_DIR_NAME);
+    LocalFileSystem.getInstance().refreshIoFiles(Arrays.asList(svn, new File(svn, SvnUtil.ENTRIES_FILE_NAME)), true, false, null);
   }
 
   // seems here we can only have a tree conflict; which can be marked on either path (?)

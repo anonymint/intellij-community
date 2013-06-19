@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,14 @@
  */
 package com.intellij.ui;
 
+import com.intellij.Patches;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.util.containers.WeakHashMap;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.awt.*;
 import java.util.Map;
 
@@ -28,6 +31,8 @@ import java.util.Map;
  * @author Konstantin Bulenkov
  */
 public class ScreenUtil {
+  public static final String DISPOSE_TEMPORARY = "dispose.temporary";
+
   @Nullable private static final Map<GraphicsConfiguration, Pair<Insets, Long>> ourInsetsCache;
   static {
     final boolean useCache = SystemInfo.isXWindow && !GraphicsEnvironment.isHeadless();
@@ -37,31 +42,46 @@ public class ScreenUtil {
 
   private ScreenUtil() { }
 
-  public static boolean isVisible(Rectangle bounds) {
-    final Rectangle intersection = getScreenBounds().intersection(bounds);
-    final int sq1 = intersection.width * intersection.height;
-    final int sq2 = bounds.width * bounds.height;
-    if (sq1 == 0 || sq2 == 0) return false;
-    return (double)sq1 / (double)sq2 > 0.1;
+  public static boolean isVisible(@NotNull Rectangle bounds) {
+    if (bounds.isEmpty()) return false;
+    Rectangle[] allScreenBounds = getAllScreenBounds();
+    for (Rectangle screenBounds : allScreenBounds) {
+      final Rectangle intersection = screenBounds.intersection(bounds);
+      if (intersection.isEmpty()) continue;
+      final int sq1 = intersection.width * intersection.height;
+      final int sq2 = bounds.width * bounds.height;
+      return (double)sq1 / (double)sq2 > 0.1;
+    }
+    return false;
   }
 
-  public static Rectangle getScreenBounds() {
-    Rectangle screenBounds = new Rectangle();
+  public static Rectangle getMainScreenBounds() {
+    GraphicsConfiguration graphicsConfiguration =
+      GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration();
+    Rectangle bounds = graphicsConfiguration.getBounds();
+    applyInsets(bounds, getScreenInsets(graphicsConfiguration));
+    return bounds;
+  }
+
+  private static Rectangle[] getAllScreenBounds() {
     final GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
     final GraphicsDevice[] devices = env.getScreenDevices();
-    for (final GraphicsDevice device : devices) {
-      screenBounds = screenBounds.union(device.getDefaultConfiguration().getBounds());
+    Rectangle[] result = new Rectangle[devices.length];
+    for (int i = 0; i < devices.length; i++) {
+      GraphicsDevice device = devices[i];
+      GraphicsConfiguration configuration = device.getDefaultConfiguration();
+      result[i] = new Rectangle(configuration.getBounds());
+      applyInsets(result[i], getScreenInsets(configuration));
     }
-    return screenBounds;
+    return result;
   }
 
-  public static Rectangle getScreenRectangle(Point p) {
+  public static Rectangle getScreenRectangle(@NotNull Point p) {
     double distance = -1;
     Rectangle answer = null;
 
-    for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
-      GraphicsConfiguration config = device.getDefaultConfiguration();
-      final Rectangle rect = applyInsets(config.getBounds(), getScreenInsets(config));
+    Rectangle[] allScreenBounds = getAllScreenBounds();
+    for (Rectangle rect : allScreenBounds) {
       if (rect.contains(p)) {
         return rect;
       }
@@ -80,22 +100,52 @@ public class ScreenUtil {
     return answer;
   }
 
+  public static GraphicsDevice getScreenDevice(Rectangle bounds) {
+    GraphicsDevice candidate = null;
+    int maxIntersection = 0;
+
+    for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+      GraphicsConfiguration config = device.getDefaultConfiguration();
+      final Rectangle rect = config.getBounds();
+      Rectangle intersection = rect.intersection(bounds);
+      if (intersection.isEmpty()) {
+        continue;
+      }
+      if (intersection.width * intersection.height > maxIntersection) {
+        maxIntersection = intersection.width * intersection.height;
+        candidate = device;
+      }
+    }
+
+    return candidate;
+  }
+
+  /**
+   * Method removeNotify (and then addNotify) will be invoked for all components when main frame switches between states "Normal" <-> "FullScreen".
+   * In this case we shouldn't call Disposer  in removeNotify and/or release some resources that we won't initialize again in addNotify (e.g. listeners).
+   */
+  public static boolean isStandardAddRemoveNotify(Component component) {
+    JRootPane rootPane = findMainRootPane(component);
+    return rootPane == null || rootPane.getClientProperty(DISPOSE_TEMPORARY) == null;
+  }
+
+  private static JRootPane findMainRootPane(Component component) {
+    while (component != null) {
+      Container parent = component.getParent();
+      if (parent == null) {
+        return component instanceof RootPaneContainer ? ((RootPaneContainer)component).getRootPane() : null;
+      }
+      component = parent;
+    }
+    return null;
+  }
+
   private static Rectangle applyInsets(Rectangle rect, Insets i) {
     if (i == null) {
       return rect;
     }
 
     return new Rectangle(rect.x + i.left, rect.y + i.top, rect.width - (i.left + i.right), rect.height - (i.top + i.bottom));
-  }
-
-  private static Insets fixGlobalInsets(Rectangle rect, Insets i) {
-    if (i == null) {
-      //noinspection ConstantConditions
-      return i;
-    }
-    int top = i.top > rect.y ? i.top - rect.y : i.top;
-    int left = i.left > rect.x ? i.left - rect.x : i.left;
-    return new Insets(top, left, i.bottom, i.right);
   }
 
   public static Insets getScreenInsets(final GraphicsConfiguration gc) {
@@ -115,11 +165,11 @@ public class ScreenUtil {
   }
 
   private static Insets calcInsets(GraphicsConfiguration gc) {
-    Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(gc);
-    if (SystemInfo.isXWindow && GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices().length > 1) {
-      return fixGlobalInsets(gc.getBounds(), insets);
+    if (Patches.SUN_BUG_ID_9000030 && GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices().length > 1) {
+      return new Insets(0, 0, 0, 0);
     }
-    return insets;
+
+    return Toolkit.getDefaultToolkit().getScreenInsets(gc);
   }
 
   public static Rectangle getScreenRectangle(int x, int y) {

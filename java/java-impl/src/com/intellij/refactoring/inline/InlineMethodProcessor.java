@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@
 package com.intellij.refactoring.inline;
 
 import com.intellij.codeInsight.ChangeContextUtil;
-import com.intellij.codeInsight.daemon.impl.analysis.HighlightUtil;
 import com.intellij.history.LocalHistory;
 import com.intellij.history.LocalHistoryAction;
 import com.intellij.lang.Language;
+import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.lang.refactoring.InlineHandler;
 import com.intellij.openapi.diagnostic.Logger;
@@ -52,7 +52,6 @@ import com.intellij.refactoring.rename.RenameJavaVariableProcessor;
 import com.intellij.refactoring.util.*;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
-import com.intellij.usageView.UsageViewUtil;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.HashMap;
@@ -111,7 +110,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
     myFactory = JavaPsiFacade.getInstance(myManager.getProject()).getElementFactory();
     myCodeStyleManager = CodeStyleManager.getInstance(myProject);
     myJavaCodeStyle = JavaCodeStyleManager.getInstance(myProject);
-    myDescriptiveName = UsageViewUtil.getDescriptiveName(myMethod);
+    myDescriptiveName = DescriptiveNameUtil.getDescriptiveName(myMethod);
   }
 
   protected String getCommandName() {
@@ -220,7 +219,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
       }
 
       @Override
-      public void inlineUsage(UsageInfo usage, PsiElement referenced) {
+      public void inlineUsage(@NotNull UsageInfo usage, @NotNull PsiElement referenced) {
         if (usage instanceof NonCodeUsageInfo) return;
 
         throw new UnsupportedOperationException(
@@ -434,7 +433,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
             } else if (element instanceof PsiImportStaticReferenceElement) {
               imports2Delete.add(PsiTreeUtil.getParentOfType(element, PsiImportStaticStatement.class));
             }
-            else {
+            else if (JavaLanguage.INSTANCE != element.getLanguage()) {
               GenericInlineHandler.inlineReference(usage, myMethod, myInliners);
             }
           }
@@ -621,7 +620,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
       }
     }
 
-    
+
     PsiClass thisClass = myMethod.getContainingClass();
     PsiExpression thisAccessExpr;
     if (thisVar != null) {
@@ -968,8 +967,8 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
       for (PsiReference ref : refs) {
         final PsiJavaCodeReferenceElement javaRef = (PsiJavaCodeReferenceElement)ref;
         if (initializer instanceof PsiThisExpression && ((PsiThisExpression)initializer).getQualifier() == null) {
-          final PsiClass varThisClass = RefactoringUtil.getThisClass(variable);
-          if (RefactoringUtil.getThisClass(javaRef) != varThisClass) {
+          final PsiClass varThisClass = RefactoringChangeUtil.getThisClass(variable);
+          if (RefactoringChangeUtil.getThisClass(javaRef) != varThisClass) {
             initializer = JavaPsiFacade.getInstance(myManager.getProject()).getElementFactory().createExpressionFromText(varThisClass.getName() + ".this", variable);
           }
         }
@@ -1028,6 +1027,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
       initializer.accept(canAllLocalsBeDeclaredFinal);
       if (!canAllLocalsBeDeclaredFinal.success) return false;
     }
+    if (initializer instanceof PsiMethodReferenceExpression) return true;
     if (initializer instanceof PsiReferenceExpression) {
       PsiVariable refVar = (PsiVariable)((PsiReferenceExpression)initializer).resolve();
       if (refVar == null) {
@@ -1437,7 +1437,7 @@ public class InlineMethodProcessor extends BaseRefactoringProcessor {
     if (methodBody.getStatements().length > 1) {
       PsiExpression expr = PsiTreeUtil.getParentOfType(element, PsiExpression.class);
       while (expr != null) {
-        if (HighlightUtil.isSuperOrThisMethodCall(expr)) {
+        if (RefactoringChangeUtil.isSuperOrThisMethodCall(expr)) {
           return "Inline cannot be applied to multiline method in constructor call";
         }
         expr = PsiTreeUtil.getParentOfType(expr, PsiExpression.class, true);

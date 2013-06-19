@@ -35,7 +35,7 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.*;
-import com.intellij.openapi.vcs.changes.actions.ShowDiffAction;
+import com.intellij.openapi.vcs.changes.actions.DiffExtendUIFactory;
 import com.intellij.openapi.vcs.checkin.*;
 import com.intellij.openapi.vcs.impl.CheckinHandlersManager;
 import com.intellij.openapi.vcs.ui.CommitMessage;
@@ -63,6 +63,7 @@ import java.util.List;
  */
 public class CommitChangeListDialog extends DialogWrapper implements CheckinProjectPanel, TypeSafeDataProvider {
   private final static String outCommitHelpId = "reference.dialogs.vcs.commit";
+  private static final int LAYOUT_VERSION = 2;
   private final CommitContext myCommitContext;
   private final CommitMessage myCommitMessageArea;
   private Splitter mySplitter;
@@ -82,7 +83,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
   private final Alarm myOKButtonUpdateAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
   private String myLastKnownComment = "";
   private final boolean myAllOfDefaultChangeListChangesIncluded;
-  @NonNls private static final String SPLITTER_PROPORTION_OPTION = "CommitChangeListDialog.SPLITTER_PROPORTION_";
+  @NonNls private static final String SPLITTER_PROPORTION_OPTION = "CommitChangeListDialog.SPLITTER_PROPORTION_" + LAYOUT_VERSION;
   private final Action[] myExecutorActions;
   private final boolean myShowVcsCommit;
   private final Map<AbstractVcs, JPanel> myPerVcsOptionsPanels = new HashMap<AbstractVcs, JPanel>();
@@ -103,7 +104,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
   private String myHelpId;
   
   private SplitterWithSecondHideable myDetailsSplitter;
-  private static final String DETAILS_SPLITTER_PROPORTION_OPTION = "CommitChangeListDialog.DETAILS_SPLITTER_PROPORTION_OPTION_";
+  private static final String DETAILS_SPLITTER_PROPORTION_OPTION = "CommitChangeListDialog.DETAILS_SPLITTER_PROPORTION_" + LAYOUT_VERSION;
   private static final String DETAILS_SHOW_OPTION = "CommitChangeListDialog.DETAILS_SHOW_OPTION_";
   private JPanel myDetailsPanel;
   private final FileAndDocumentListenersForShortDiff myListenersForShortDiff;
@@ -260,7 +261,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
       myBrowser = browser;
       myBrowserExtender = browser;
     } else {
-      MultipleChangeListBrowser browser = new MultipleChangeListBrowser(project, changeLists, changes, initialSelection, true, true,
+      MultipleChangeListBrowser browser = new MultipleChangeListBrowser(project, changeLists, changes, getDisposable(), initialSelection, true, true,
                                                                         new Runnable() {
                                                                           public void run() {
                                                                             updateWarning();
@@ -323,7 +324,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
         updateOnListSelection();
       }
     });
-    myBrowser.setDiffExtendUIFactory(new ShowDiffAction.DiffExtendUIFactory() {
+    myBrowser.setDiffExtendUIFactory(new DiffExtendUIFactory() {
       public List<? extends AnAction> createActions(final Change change) {
         return myBrowser.createDiffActions(change);
       }
@@ -598,11 +599,13 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
     }
   }
 
+  @NotNull
   @Override
   protected Action getOKAction() {
     return new CommitAction();
   }
 
+  @NotNull
   protected Action[] createActions() {
     final List<Action> actions = new ArrayList<Action>();
 
@@ -658,6 +661,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
       final DefaultListCleaner defaultListCleaner = new DefaultListCleaner();
       runBeforeCommitHandlers(new Runnable() {
         public void run() {
+          boolean success = false;
           try {
             final boolean completed = ProgressManager.getInstance().runProcessWithProgressSynchronously(
               new Runnable() {
@@ -671,6 +675,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
                 handler.checkinSuccessful();
               }
 
+              success = true;
               defaultListCleaner.clean();
               close(OK_EXIT_CODE);
             }
@@ -684,6 +689,16 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
 
             for (CheckinHandler handler : myHandlers) {
               handler.checkinFailed(Arrays.asList(new VcsException(e)));
+            }
+          }
+          finally {
+            if (myResultHandler != null) {
+              if (success) {
+                myResultHandler.onSuccess(getCommitMessage());
+              }
+              else {
+                myResultHandler.onFailure();
+              }
             }
           }
         }
@@ -902,7 +917,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
     void clean() {
       if (myToClean) {
         final ChangeListManager clManager = ChangeListManager.getInstance(myProject);
-        clManager.editComment(myLastSelectedListName, "");
+        clManager.editComment(VcsBundle.message("changes.default.changlist.name"), "");
       }
     }
   }
@@ -964,14 +979,13 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
 
     rootPane.add(mySplitter, BorderLayout.CENTER);
 
-    JComponent browserHeader = myBrowser.getHeaderPanel();
-    myBrowser.remove(browserHeader);
-    rootPane.add(browserHeader, BorderLayout.NORTH);
-
-    JPanel infoPanel = new JPanel(new BorderLayout());
     myChangesInfoCalculator = new ChangeInfoCalculator();
     myLegend = new CommitLegendPanel(myChangesInfoCalculator);
-    infoPanel.add(myLegend.getComponent(), BorderLayout.NORTH);
+    JPanel legendPanel = new JPanel(new BorderLayout());
+    legendPanel.add(myLegend.getComponent(), BorderLayout.EAST);
+    myBrowser.getBottomPanel().add(legendPanel, BorderLayout.SOUTH);
+
+    JPanel infoPanel = new JPanel(new BorderLayout());
     infoPanel.add(myAdditionalOptionsPanel, BorderLayout.CENTER);
     rootPane.add(infoPanel, BorderLayout.EAST);
     infoPanel.setBorder(IdeBorderFactory.createEmptyBorder(0, 10, 0, 0));
@@ -1044,7 +1058,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
         //
       }
     } else {
-      mySplitter.setProportion(0.8f);
+      mySplitter.setProportion(0.5f);
     }
   }
 
@@ -1210,7 +1224,7 @@ public class CommitChangeListDialog extends DialogWrapper implements CheckinProj
 
   @NonNls
   protected String getDimensionServiceKey() {
-    return "CommitChangelistDialog";
+    return "CommitChangelistDialog" + LAYOUT_VERSION;
   }
   
   public JComponent getPreferredFocusedComponent() {

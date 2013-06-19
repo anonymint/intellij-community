@@ -15,6 +15,7 @@
  */
 package com.intellij.refactoring.rename.inplace;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
@@ -26,6 +27,7 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
+import com.intellij.refactoring.RefactoringSettings;
 import com.intellij.ui.components.JBList;
 import org.jetbrains.annotations.NonNls;
 
@@ -51,9 +53,14 @@ abstract class RenameChooser {
   }
 
   protected abstract void runRenameTemplate(Collection<Pair<PsiElement, TextRange>> stringUsages);
-  
+
   public void showChooser(final Collection<PsiReference> refs,
                           final Collection<Pair<PsiElement, TextRange>> stringUsages) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      runRenameTemplate(
+        RefactoringSettings.getInstance().RENAME_SEARCH_IN_COMMENTS_FOR_FILE ? stringUsages : new ArrayList<Pair<PsiElement, TextRange>>());
+      return;
+    }
 
     final DefaultListModel model = new DefaultListModel();
     model.addElement(CODE_OCCURRENCES);
@@ -61,6 +68,7 @@ abstract class RenameChooser {
     final JList list = new JBList(model);
 
     list.addListSelectionListener(new ListSelectionListener() {
+      @Override
       public void valueChanged(final ListSelectionEvent e) {
         final String selectedValue = (String)list.getSelectedValue();
         if (selectedValue == null) return;
@@ -95,6 +103,7 @@ abstract class RenameChooser {
       .setResizable(false)
       .setRequestFocus(true)
       .setItemChoosenCallback(new Runnable() {
+        @Override
         public void run() {
           runRenameTemplate(ALL_OCCURRENCES.equals(list.getSelectedValue()) ? stringUsages : new ArrayList<Pair<PsiElement, TextRange>>());
         }

@@ -16,13 +16,16 @@
 package com.intellij.codeInspection.htmlInspections;
 
 import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.InspectionsBundle;
-import com.intellij.codeInspection.XmlSuppressableInspectionTool;
 import com.intellij.codeInspection.XmlInspectionGroupNames;
+import com.intellij.codeInspection.XmlSuppressableInspectionTool;
 import com.intellij.codeInspection.ex.UnfairLocalInspectionTool;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Key;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.FieldPanel;
+import com.intellij.xml.XmlBundle;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -42,24 +45,28 @@ public class RequiredAttributesInspection extends XmlSuppressableInspectionTool 
   public String myAdditionalRequiredHtmlAttributes = "";
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.htmlInspections.RequiredAttributesInspection");
-  @NonNls public static final String SHORT_NAME = "RequiredAttributes";
+  @NonNls public static final Key<InspectionProfileEntry> SHORT_NAME_KEY = Key.create(REQUIRED_ATTRIBUTES_SHORT_NAME);
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return XmlInspectionGroupNames.HTML_INSPECTIONS;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return InspectionsBundle.message("inspection.required.attributes.display.name");
   }
 
+  @Override
   @NotNull
   @NonNls
   public String getShortName() {
-    return SHORT_NAME;
+    return REQUIRED_ATTRIBUTES_SHORT_NAME;
   }
 
+  @Override
   @Nullable
   public JComponent createOptionsPanel() {
     JPanel panel = new JPanel(new BorderLayout());
@@ -69,6 +76,7 @@ public class RequiredAttributesInspection extends XmlSuppressableInspectionTool 
 
     panel.add(additionalAttributesPanel, BorderLayout.NORTH);
     additionalAttributesPanel.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       protected void textChanged(DocumentEvent e) {
         final Document document = e.getDocument();
         try {
@@ -86,18 +94,31 @@ public class RequiredAttributesInspection extends XmlSuppressableInspectionTool 
     return panel;
   }
 
-  public IntentionAction getIntentionAction(String name, int type) {
-    return new AddHtmlTagOrAttributeToCustomsIntention(getShortName(), name, type);
+  public IntentionAction getIntentionAction(String name) {
+    return new AddHtmlTagOrAttributeToCustomsIntention(SHORT_NAME_KEY, name, XmlBundle.message("add.optional.html.attribute", name));
   }
 
-  public String getAdditionalEntries(int type) {
+  @Override
+  public String getAdditionalEntries() {
     return myAdditionalRequiredHtmlAttributes;
   }
 
-  public void setAdditionalEntries(int type, String additionalEntries) {
-    myAdditionalRequiredHtmlAttributes = additionalEntries;
+  @Override
+  public void addEntry(String text) {
+    myAdditionalRequiredHtmlAttributes = appendName(getAdditionalEntries(), text);
   }
 
+  private static String appendName(String toAppend, String text) {
+    if (toAppend.length() > 0) {
+      toAppend += "," + text;
+    }
+    else {
+      toAppend = text;
+    }
+    return toAppend;
+  }
+
+  @Override
   public boolean isEnabledByDefault() {
     return true;
   }

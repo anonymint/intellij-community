@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,10 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/*
- * @author max
- */
 package com.intellij.psi.impl.source.tree;
 
 import com.intellij.lang.ASTNode;
@@ -25,17 +21,21 @@ import com.intellij.psi.PsiComment;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.util.text.CharArrayCharSequence;
+import com.intellij.util.text.StringFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+/**
+ * @author max
+ */
 public class AstBufferUtil {
-  private AstBufferUtil() {}
+  private AstBufferUtil() { }
 
   public static int toBuffer(@NotNull ASTNode element, @Nullable char[] buffer, int offset) {
     return toBuffer(element, buffer, offset, false);
   }
 
-  public static int toBuffer(@NotNull final ASTNode element, @Nullable final char[] buffer, int offset, final boolean skipWhitespaceAndComments) {
+  public static int toBuffer(@NotNull ASTNode element, @Nullable char[] buffer, int offset, boolean skipWhitespaceAndComments) {
     BufferVisitor visitor = new BufferVisitor(skipWhitespaceAndComments, skipWhitespaceAndComments, offset, buffer);
     ((TreeElement)element).acceptTree(visitor);
     return visitor.end;
@@ -45,7 +45,7 @@ public class AstBufferUtil {
     int length = toBuffer(element, null, 0, true);
     char[] buffer = new char[length];
     toBuffer(element, buffer, 0, true);
-    return new String(buffer);
+    return StringFactory.createShared(buffer);
   }
 
   public static class BufferVisitor extends RecursiveTreeElementWalkingVisitor {

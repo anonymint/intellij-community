@@ -26,7 +26,6 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.TextFieldCompletionProvider;
 import com.intellij.util.TextFieldCompletionProviderDumbAware;
 import org.jetbrains.annotations.NotNull;
@@ -68,6 +67,7 @@ public class MvcRunTargetDialog extends DialogWrapper {
     init();
   }
 
+  @NotNull
   @Override
   protected Action[] createLeftSideActions() {
     boolean hasOneSupportedModule = false;
@@ -81,7 +81,7 @@ public class MvcRunTargetDialog extends DialogWrapper {
     }
 
     if (hasOneSupportedModule) {
-      myInteractiveRunAction = new DialogWrapperAction("&Run Interactive Console") {
+      myInteractiveRunAction = new DialogWrapperAction("&Start Grails Console in Interactive Mode") {
         @Override
         protected void doAction(ActionEvent e) {
           myFramework.runInteractiveConsole(getSelectedModule());
@@ -147,7 +147,8 @@ public class MvcRunTargetDialog extends DialogWrapper {
     return (String)myTargetField.getEditor().getItem();
   }
 
-  public String[] getTargetArguments() {
+  @NotNull
+  public String getTargetArguments() {
     String text = getSelectedText();
 
     text = text.trim();
@@ -155,12 +156,7 @@ public class MvcRunTargetDialog extends DialogWrapper {
       text = text.substring(GRAILS_PREFIX.length());
     }
 
-    Iterable<String> iterable = StringUtil.tokenize(text, " ");
-    ArrayList<String> args = new ArrayList<String>();
-    for (String s : iterable) {
-      args.add(s);
-    }
-    return ArrayUtil.toStringArray(args);
+    return text;
   }
 
   protected JComponent createCenterPanel() {

@@ -27,12 +27,11 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Function;
-import com.intellij.util.SmartList;
 import com.intellij.util.containers.ArrayListSet;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
-import gnu.trove.THashMap;
 import gnu.trove.THashSet;
+import gnu.trove.TObjectHashingStrategy;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -64,19 +63,19 @@ public class MavenProjectsTree {
   private volatile List<String> myIgnoredFilesPatterns = new ArrayList<String>();
   private volatile Pattern myIgnoredFilesPatternsCache;
 
-  private Set<String> myExplicitProfiles = new THashSet<String>();
-  private final Set<String> myTemporarilyRemovedExplicitProfiles = new THashSet<String>();
+  private Set<String> myExplicitProfiles = new HashSet<String>();
+  private final Set<String> myTemporarilyRemovedExplicitProfiles = new HashSet<String>();
 
   private final List<MavenProject> myRootProjects = new ArrayList<MavenProject>();
 
-  private final Map<MavenProject, MavenProjectTimestamp> myTimestamps = new THashMap<MavenProject, MavenProjectTimestamp>();
+  private final Map<MavenProject, MavenProjectTimestamp> myTimestamps = new HashMap<MavenProject, MavenProjectTimestamp>();
   private final MavenWorkspaceMap myWorkspaceMap = new MavenWorkspaceMap();
-  private final Map<MavenId, MavenProject> myMavenIdToProjectMapping = new THashMap<MavenId, MavenProject>();
-  private final Map<VirtualFile, MavenProject> myVirtualFileToProjectMapping = new THashMap<VirtualFile, MavenProject>();
-  private final Map<MavenProject, List<MavenProject>> myAggregatorToModuleMapping = new THashMap<MavenProject, List<MavenProject>>();
-  private final Map<MavenProject, MavenProject> myModuleToAggregatorMapping = new THashMap<MavenProject, MavenProject>();
+  private final Map<MavenId, MavenProject> myMavenIdToProjectMapping = new HashMap<MavenId, MavenProject>();
+  private final Map<VirtualFile, MavenProject> myVirtualFileToProjectMapping = new HashMap<VirtualFile, MavenProject>();
+  private final Map<MavenProject, List<MavenProject>> myAggregatorToModuleMapping = new HashMap<MavenProject, List<MavenProject>>();
+  private final Map<MavenProject, MavenProject> myModuleToAggregatorMapping = new HashMap<MavenProject, MavenProject>();
 
-  private final List<Listener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<Listener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private final MavenProjectReaderProjectLocator myProjectLocator = new MavenProjectReaderProjectLocator() {
     public VirtualFile findProjectFile(MavenId coordinates) {
@@ -102,6 +101,11 @@ public class MavenProjectsTree {
           }
         });
         result.myRootProjects.addAll(readProjectsRecursively(in, result));
+      }
+      catch (IOException e) {
+        in.close();
+        file.delete();
+        throw e;
       }
       catch (Throwable e) {
         throw new IOException(e);
@@ -515,9 +519,11 @@ public class MavenProjectsTree {
     process.setText2("");
 
     List<MavenProject> prevModules = getModules(mavenProject);
-    Set<MavenProject> prevInheritors = isNew
-                                       ? new THashSet<MavenProject>()
-                                       : findInheritors(mavenProject);
+
+    Set<MavenProject> prevInheritors = new HashSet<MavenProject>();
+    if (!isNew) {
+      prevInheritors.addAll(findInheritors(mavenProject));
+    }
 
     MavenProjectTimestamp timestamp = calculateTimestamp(mavenProject, explicitProfiles, generalSettings);
     boolean isChanged = force || !timestamp.equals(myTimestamps.get(mavenProject));
@@ -623,9 +629,9 @@ public class MavenProjectsTree {
       }
     }
 
-    Set<MavenProject> allInheritors = findInheritors(mavenProject);
-    allInheritors.addAll(prevInheritors);
-    for (MavenProject each : allInheritors) {
+    prevInheritors.addAll(findInheritors(mavenProject));
+
+    for (MavenProject each : prevInheritors) {
       doUpdate(each,
                findAggregator(each),
                false,
@@ -869,7 +875,8 @@ public class MavenProjectsTree {
     if (config == null) {
       return Collections.emptySet();
     }
-    final List<String> customNonFilteredExtensions = MavenJDOMUtil.findChildrenValuesByPath(config, "nonFilteredFileExtensions", "nonFilteredFileExtension");
+    final List<String> customNonFilteredExtensions =
+      MavenJDOMUtil.findChildrenValuesByPath(config, "nonFilteredFileExtensions", "nonFilteredFileExtension");
     if (customNonFilteredExtensions.isEmpty()) {
       return Collections.emptySet();
     }
@@ -916,7 +923,7 @@ public class MavenProjectsTree {
         updateCrc(crc, mavenProject.getDirectory());
         updateCrc(crc, MavenFilteredPropertyPsiReferenceProvider.getDelimitersPattern(mavenProject).pattern());
         updateCrc(crc, mavenProject.getModelMap().hashCode());
-        updateCrc(crc, mavenProject.getResources().hashCode());
+        updateCrc(crc, mavenProject.getResources().hashCode() + 1); // @todo remove '+1' after 01.05.2013 (when 12.0.1 become out of date)
         updateCrc(crc, mavenProject.getTestResources().hashCode());
         updateCrc(crc, getFilterExclusions(mavenProject).hashCode());
         updateCrc(crc, mavenProject.getProperties().hashCode());
@@ -926,7 +933,9 @@ public class MavenProjectsTree {
           updateCrc(crc, file.lastModified());
         }
 
-        updateCrc(crc, getEscapeString(mavenProject));
+        Element pluginConfiguration = mavenProject.getPluginConfiguration("org.apache.maven.plugins", "maven-resources-plugin");
+        updateCrc(crc, MavenJDOMUtil.findChildValueByPath(pluginConfiguration, "escapeString"));
+        updateCrc(crc, MavenJDOMUtil.findChildValueByPath(pluginConfiguration, "escapeWindowsPaths"));
       }
 
       return (int)crc.getValue();
@@ -935,13 +944,6 @@ public class MavenProjectsTree {
       readUnlock();
     }
   }
-
-  public static String getEscapeString(MavenProject mavenProject) {
-    return MavenJDOMUtil.findChildValueByPath(
-      mavenProject.getPluginConfiguration("org.apache.maven.plugins", "maven-resources-plugin"), "escapeString", "\\"
-    );
-  }
-
 
   public List<VirtualFile> getRootProjectsFiles() {
     return MavenUtil.collectFiles(getRootProjects());
@@ -1102,26 +1104,54 @@ public class MavenProjectsTree {
     return findProject(project.getParentId());
   }
 
-  public Set<MavenProject> findInheritors(MavenProject project) {
-    Set<MavenProject> result = new THashSet<MavenProject>();
-    MavenId id = project.getMavenId();
+  public Collection<MavenProject> findInheritors(MavenProject project) {
+    readLock();
+    try {
+      List<MavenProject> result = null;
+      MavenId id = project.getMavenId();
 
-    for (MavenProject each : getProjects()) {
-      if (each == project) continue;
-      if (id.equals(each.getParentId())) result.add(each);
+      for (MavenProject each : myVirtualFileToProjectMapping.values()) {
+        if (each == project) continue;
+        if (id.equals(each.getParentId())) {
+          if (result == null) result = new ArrayList<MavenProject>();
+          result.add(each);
+        }
+      }
+
+      return result == null ? Collections.<MavenProject>emptyList() : result;
     }
-    return result;
+    finally {
+      readUnlock();
+    }
   }
 
-  public List<MavenProject> getDependentProjects(MavenProject project) {
-    List<MavenProject> result = new SmartList<MavenProject>();
-    for (MavenProject eachProject : getProjects()) {
-      if (eachProject == project) continue;
-      if (!eachProject.findDependencies(project).isEmpty()) {
-        result.add(eachProject);
+  public List<MavenProject> getDependentProjects(Collection<MavenProject> projects) {
+    readLock();
+    try {
+      List<MavenProject> result = null;
+
+      Set<MavenCoordinate> projectIds = new THashSet<MavenCoordinate>(new MavenCoordinateHashCodeStrategy());
+
+      for (MavenProject project : projects) {
+        projectIds.add(project.getMavenId());
       }
+
+      for (MavenProject project : myVirtualFileToProjectMapping.values()) {
+        for (MavenArtifact dep : project.getDependencies()) {
+          if (projectIds.contains(dep)) {
+            if (result == null) result = new ArrayList<MavenProject>();
+
+            result.add(project);
+            break;
+          }
+        }
+      }
+
+      return result == null ? Collections.<MavenProject>emptyList() : result;
     }
-    return result;
+    finally {
+      readUnlock();
+    }
   }
 
   public void resolve(@NotNull Project project,
@@ -1205,7 +1235,6 @@ public class MavenProjectsTree {
 
                             Pair<Boolean, MavenProjectChanges> resolveResult = mavenProject.resolveFolders(embedder,
                                                                                                            importingSettings,
-                                                                                                           new MavenProjectReader(),
                                                                                                            console);
                             if (resolveResult.first) {
                               fireFoldersResolved(Pair.create(mavenProject, resolveResult.second));
@@ -1214,7 +1243,8 @@ public class MavenProjectsTree {
                         });
   }
 
-  public MavenArtifactDownloader.DownloadResult downloadSourcesAndJavadocs(@NotNull Collection<MavenProject> projects,
+  public MavenArtifactDownloader.DownloadResult downloadSourcesAndJavadocs(@NotNull Project project,
+                                                                           @NotNull Collection<MavenProject> projects,
                                                                            @Nullable Collection<MavenArtifact> artifacts,
                                                                            boolean downloadSources,
                                                                            boolean downloadDocs,
@@ -1227,7 +1257,7 @@ public class MavenProjectsTree {
 
     try {
       MavenArtifactDownloader.DownloadResult result =
-        MavenArtifactDownloader.download(this, projects, artifacts, downloadSources, downloadDocs, embedder, process);
+        MavenArtifactDownloader.download(project, this, projects, artifacts, downloadSources, downloadDocs, embedder, process);
 
       for (MavenProject each : projects) {
         fireArtifactsDownloaded(each);
@@ -1520,6 +1550,22 @@ public class MavenProjectsTree {
     }
 
     public void artifactsDownloaded(MavenProject project) {
+    }
+  }
+
+  private static class MavenCoordinateHashCodeStrategy implements TObjectHashingStrategy<MavenCoordinate> {
+
+    @Override
+    public int computeHashCode(MavenCoordinate object) {
+      String artifactId = object.getArtifactId();
+      return artifactId == null ? 0 : artifactId.hashCode();
+    }
+
+    @Override
+    public boolean equals(MavenCoordinate o1, MavenCoordinate o2) {
+      return Comparing.equal(o1.getArtifactId(), o2.getArtifactId())
+        && Comparing.equal(o1.getVersion(), o2.getVersion())
+        && Comparing.equal(o1.getGroupId(), o2.getGroupId());
     }
   }
 }

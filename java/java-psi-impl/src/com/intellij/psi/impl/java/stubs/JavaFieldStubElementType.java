@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,24 +117,25 @@ public abstract class JavaFieldStubElementType extends JavaStubElementType<PsiFi
   }
 
   @Override
-  public void serialize(final PsiFieldStub stub, final StubOutputStream dataStream) throws IOException {
+  public void serialize(@NotNull final PsiFieldStub stub, @NotNull final StubOutputStream dataStream) throws IOException {
     dataStream.writeName(stub.getName());
     TypeInfo.writeTYPE(dataStream, stub.getType(false));
     dataStream.writeName(stub.getInitializerText());
     dataStream.writeByte(((PsiFieldStubImpl)stub).getFlags());
   }
 
+  @NotNull
   @Override
-  public PsiFieldStub deserialize(final StubInputStream dataStream, final StubElement parentStub) throws IOException {
+  public PsiFieldStub deserialize(@NotNull final StubInputStream dataStream, final StubElement parentStub) throws IOException {
     final StringRef name = dataStream.readName();
-    final TypeInfo type = TypeInfo.readTYPE(dataStream, parentStub);
+    final TypeInfo type = TypeInfo.readTYPE(dataStream);
     final StringRef initializerText = dataStream.readName();
     final byte flags = dataStream.readByte();
     return new PsiFieldStubImpl(parentStub, name, type, initializerText, flags);
   }
 
   @Override
-  public void indexStub(final PsiFieldStub stub, final IndexSink sink) {
+  public void indexStub(@NotNull final PsiFieldStub stub, @NotNull final IndexSink sink) {
     final String name = stub.getName();
     if (name != null) {
       sink.occurrence(JavaStubIndexKeys.FIELDS, name);

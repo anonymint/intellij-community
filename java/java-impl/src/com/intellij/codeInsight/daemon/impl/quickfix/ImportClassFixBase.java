@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.CodeInsightSettings;
 import com.intellij.codeInsight.CodeInsightUtil;
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.completion.JavaCompletionUtil;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzerSettings;
@@ -44,12 +44,14 @@ import com.intellij.psi.search.PsiShortNamesCache;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.containers.ContainerUtil;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -57,32 +59,49 @@ import java.util.regex.PatternSyntaxException;
 /**
  * @author peter
  */
-public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> implements HintAction, HighPriorityAction {
-  private final T myRef;
+public abstract class ImportClassFixBase<T extends PsiElement, R extends PsiReference> implements HintAction, HighPriorityAction {
+  @NotNull
+  private final T myElement;
+  @NotNull
+  private final R myRef;
 
-  protected ImportClassFixBase(@NotNull T ref) {
+  protected ImportClassFixBase(@NotNull T elem, @NotNull R ref) {
+    myElement = elem;
     myRef = ref;
   }
 
   @Override
   public boolean isAvailable(@NotNull Project project, Editor editor, @NotNull PsiFile file) {
-    if (!myRef.isValid()) {
+    if (!myElement.isValid()) {
       return false;
     }
+
+    PsiElement parent = myElement.getParent();
+    if (parent instanceof PsiNewExpression && ((PsiNewExpression)parent).getQualifier() != null) {
+      return false;
+    }
+
     PsiManager manager = file.getManager();
     return manager.isInProject(file) && !getClassesToImport().isEmpty();
   }
 
   @Nullable
-  protected abstract String getReferenceName(@NotNull T reference);
-  protected abstract PsiElement getReferenceNameElement(@NotNull T reference);
-  protected abstract boolean hasTypeParameters(@NotNull T reference);
+  protected abstract String getReferenceName(@NotNull R reference);
+  protected abstract PsiElement getReferenceNameElement(@NotNull R reference);
+  protected abstract boolean hasTypeParameters(@NotNull R reference);
 
   @NotNull
   public List<PsiClass> getClassesToImport() {
-    PsiShortNamesCache cache = PsiShortNamesCache.getInstance(myRef.getProject());
+    if (myRef instanceof PsiJavaReference) {
+      JavaResolveResult result = ((PsiJavaReference)myRef).advancedResolve(true);
+      PsiElement element = result.getElement();
+      // already imported
+      // can happen when e.g. class name happened to be in a method position
+      if (element instanceof PsiClass && result.isValidResult()) return Collections.emptyList();
+    }
+    PsiShortNamesCache cache = PsiShortNamesCache.getInstance(myElement.getProject());
     String name = getReferenceName(myRef);
-    GlobalSearchScope scope = myRef.getResolveScope();
+    GlobalSearchScope scope = myElement.getResolveScope();
     if (name == null) {
       return Collections.emptyList();
     }
@@ -90,7 +109,7 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     PsiClass[] classes = cache.getClassesByName(name, scope);
     if (classes.length == 0) return Collections.emptyList();
     List<PsiClass> classList = new ArrayList<PsiClass>(classes.length);
-    boolean isAnnotationReference = myRef.getParent() instanceof PsiAnnotation;
+    boolean isAnnotationReference = myElement.getParent() instanceof PsiAnnotation;
     for (PsiClass aClass : classes) {
       if (isAnnotationReference && !aClass.isAnnotationType()) continue;
       if (JavaCompletionUtil.isInExcludedPackage(aClass, false)) continue;
@@ -99,26 +118,26 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
       if (qName != null) { //filter local classes
         if (qName.indexOf('.') == -1) continue; //do not show classes from default package)
         if (qName.endsWith(name)) {
-          if (isAccessible(aClass, myRef)) {
+          if (isAccessible(aClass, myElement)) {
             classList.add(aClass);
           }
         }
       }
     }
 
-    final String memberName = getRequiredMemberName(myRef);
+    final String memberName = getRequiredMemberName(myElement);
     if (memberName != null) {
       List<PsiClass> filtered = ContainerUtil.findAll(classList, new Condition<PsiClass>() {
         @Override
         public boolean value(PsiClass psiClass) {
           PsiField field = psiClass.findFieldByName(memberName, true);
-          if (field != null && field.hasModifierProperty(PsiModifier.STATIC) && isAccessible(field, myRef)) return true;
+          if (field != null && field.hasModifierProperty(PsiModifier.STATIC) && isAccessible(field, myElement)) return true;
 
           PsiClass inner = psiClass.findInnerClassByName(memberName, true);
-          if (inner != null && isAccessible(inner, myRef)) return true;
+          if (inner != null && isAccessible(inner, myElement)) return true;
 
           for (PsiMethod method : psiClass.findMethodsByName(memberName, true)) {
-            if (method.hasModifierProperty(PsiModifier.STATIC) && isAccessible(method, myRef)) return true;
+            if (method.hasModifierProperty(PsiModifier.STATIC) && isAccessible(method, myElement)) return true;
           }
           return false;
         }
@@ -128,12 +147,36 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
       }
     }
 
-    List<PsiClass> filtered = filterByContext(classList, myRef);
+    List<PsiClass> filtered = filterByContext(classList, myElement);
     if (!filtered.isEmpty()) {
       classList = filtered;
     }
 
+    filterAlreadyImportedButUnresolved(classList);
     return classList;
+  }
+
+  private void filterAlreadyImportedButUnresolved(@NotNull List<PsiClass> list) {
+    PsiElement element = myRef.getElement();
+    PsiFile containingFile = element == null ? null : element.getContainingFile();
+    if (!(containingFile instanceof PsiJavaFile)) return;
+    PsiJavaFile javaFile = (PsiJavaFile)containingFile;
+    PsiImportList importList = javaFile.getImportList();
+    PsiImportStatementBase[] importStatements = importList == null ? PsiImportStatementBase.EMPTY_ARRAY : importList.getAllImportStatements();
+    Set<String> importedNames = new THashSet<String>(importStatements.length);
+    for (PsiImportStatementBase statement : importStatements) {
+      PsiJavaCodeReferenceElement ref = statement.getImportReference();
+      String name = ref == null ? null : ref.getReferenceName();
+      if (name != null && ref.resolve() == null) importedNames.add(name);
+    }
+
+    for (int i = list.size() - 1; i >= 0; i--) {
+      PsiClass aClass = list.get(i);
+      String className = aClass.getName();
+      if (className != null && importedNames.contains(className)) {
+        list.remove(i);
+      }
+    }
   }
 
   @Nullable
@@ -141,7 +184,8 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     return null;
   }
 
-  protected List<PsiClass> filterByContext(List<PsiClass> candidates, T ref) {
+  @NotNull
+  protected List<PsiClass> filterByContext(@NotNull List<PsiClass> candidates, @NotNull T ref) {
     return candidates;
   }
 
@@ -173,7 +217,7 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     if (classesToImport.isEmpty()) return Result.POPUP_NOT_SHOWN;
 
     try {
-      String name = getQualifiedName(myRef);
+      String name = getQualifiedName(myElement);
       if (name != null) {
         Pattern pattern = Pattern.compile(DaemonCodeAnalyzerSettings.getInstance().NO_AUTO_IMPORT_PATTERN);
         Matcher matcher = pattern.matcher(name);
@@ -185,12 +229,12 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     catch (PatternSyntaxException e) {
       //ignore
     }
-    final PsiFile psiFile = myRef.getContainingFile();
+    final PsiFile psiFile = myElement.getContainingFile();
     if (classesToImport.size() > 1) {
       reduceSuggestedClassesBasedOnDependencyRuleViolation(psiFile, classesToImport);
     }
     PsiClass[] classes = classesToImport.toArray(new PsiClass[classesToImport.size()]);
-    final Project project = myRef.getProject();
+    final Project project = myElement.getProject();
     CodeInsightUtil.sortIdenticalShortNameClasses(classes, myRef);
 
     final QuestionAction action = createAddImportAction(classes, project, editor);
@@ -220,12 +264,20 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     if (allowPopup && canImportHere) {
       String hintText = ShowAutoImportPass.getMessage(classes.length > 1, classes[0].getQualifiedName());
       if (!ApplicationManager.getApplication().isUnitTestMode() && !HintManager.getInstance().hasShownHintsThatWillHideByOtherHint(true)) {
-        HintManager.getInstance().showQuestionHint(editor, hintText, myRef.getTextOffset(),
-                                                                      myRef.getTextRange().getEndOffset(), action);
+        HintManager.getInstance().showQuestionHint(editor, hintText, getStartOffset(myElement, myRef),
+                                                   getEndOffset(myElement, myRef), action);
       }
       return Result.POPUP_SHOWN;
     }
     return Result.POPUP_NOT_SHOWN;
+  }
+
+  protected int getStartOffset(T element, R ref) {
+    return element.getTextOffset();
+  }
+
+  protected int getEndOffset(T element, R ref) {
+    return element.getTextRange().getEndOffset();
   }
 
   private static boolean autoImportWillInsertUnexpectedCharacters(PsiClass aClass) {
@@ -239,10 +291,10 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
            !hasUnresolvedImportWhichCanImport(psiFile, exampleClassName);
   }
 
-  protected abstract boolean isQualified(T reference);
+  protected abstract boolean isQualified(R reference);
 
   @Override
-  public boolean showHint(final Editor editor) {
+  public boolean showHint(@NotNull final Editor editor) {
     if (isQualified(myRef)) {
       return false;
     }
@@ -284,7 +336,7 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
     }
   }
 
-  private boolean isCaretNearRef(@NotNull Editor editor, @NotNull T ref) {
+  private boolean isCaretNearRef(@NotNull Editor editor, @NotNull R ref) {
     PsiElement nameElement = getReferenceNameElement(ref);
     if (nameElement == null) return false;
     TextRange range = nameElement.getTextRange();
@@ -295,7 +347,7 @@ public abstract class ImportClassFixBase<T extends PsiElement & PsiReference> im
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
     ApplicationManager.getApplication().runWriteAction(new Runnable() {
       @Override
       public void run() {

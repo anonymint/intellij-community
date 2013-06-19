@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,14 @@
 package com.intellij.psi;
 
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.regex.Pattern;
+
+import static com.intellij.util.ObjectUtils.notNull;
 
 /**
  * Service for validating and parsing Java identifiers.
@@ -67,17 +70,12 @@ public abstract class PsiNameHelper {
 
   @NotNull
   public static String getShortClassName(@NotNull String referenceText) {
-    return getShortClassName(referenceText, true);
-  }
+    int lessPos = referenceText.length(), bracesBalance = 0, i;
 
-  private static String getShortClassName(String referenceText, boolean removeWhitespace) {
-    int lessPos = referenceText.length();
-    int bracesBalance = 0;
-    int i;
     loop:
     for (i = referenceText.length() - 1; i >= 0; i--) {
-      final char aChar = referenceText.charAt(i);
-      switch (aChar) {
+      char ch = referenceText.charAt(i);
+      switch (ch) {
         case ')':
         case '>':
           bracesBalance++;
@@ -91,40 +89,61 @@ public abstract class PsiNameHelper {
 
         case '@':
         case '.':
-          if (bracesBalance == 0) break loop;
+          if (bracesBalance <= 0) break loop;
           break;
 
         default:
-          if (bracesBalance == 0 && removeWhitespace && !Character.isWhitespace(aChar) && !Character.isJavaIdentifierPart(aChar)) {
-            return getShortClassName(removeWhitespace(referenceText), false);
+          if (Character.isWhitespace(ch) && bracesBalance <= 0) {
+            for (int j = i + 1; j < lessPos; j++) {
+              if (!Character.isWhitespace(referenceText.charAt(j))) break loop;
+            }
+            lessPos = i;
           }
       }
     }
+
     String sub = referenceText.substring(i + 1, lessPos).trim();
     return sub.length() == referenceText.length() ? sub : new String(sub);
   }
 
-  public static String getPresentableText(PsiJavaCodeReferenceElement ref) {
-    final String referenceName = ref.getReferenceName();
-
-    PsiType[] typeParameters = ref.getTypeParameters();
-    return getPresentableText(referenceName, typeParameters);
+  @NotNull
+  public static String getPresentableText(@NotNull PsiJavaCodeReferenceElement ref) {
+    String name = ref.getReferenceName();
+    PsiAnnotation[] annotations = PsiTreeUtil.getChildrenOfType(ref, PsiAnnotation.class);
+    return getPresentableText(name, notNull(annotations, PsiAnnotation.EMPTY_ARRAY), ref.getTypeParameters());
   }
 
-  public static String getPresentableText(final String referenceName, final PsiType[] typeParameters) {
+  @NotNull
+  public static String getPresentableText(@Nullable String refName, @NotNull PsiAnnotation[] annotations, @NotNull PsiType[] typeParameters) {
+    if (typeParameters.length == 0 && annotations.length == 0) {
+      return refName != null ? refName : "";
+    }
+
+    StringBuilder buffer = new StringBuilder();
+
+    if (annotations.length > 0) {
+      for (PsiAnnotation annotation : annotations) {
+        buffer.append(annotation.getText()).append(' ');
+      }
+    }
+
+    buffer.append(refName);
+
     if (typeParameters.length > 0) {
-      StringBuilder buffer = new StringBuilder();
-      buffer.append(referenceName);
       buffer.append("<");
       for (int i = 0; i < typeParameters.length; i++) {
         buffer.append(typeParameters[i].getPresentableText());
         if (i < typeParameters.length - 1) buffer.append(", ");
       }
       buffer.append(">");
-      return buffer.toString();
     }
 
-    return referenceName != null ? referenceName : "";
+    return buffer.toString();
+  }
+
+  /** deprecated use {@link #getPresentableText(String, PsiAnnotation[], PsiType[])} (to remove in IDEA 13) */
+  public static String getPresentableText(@Nullable String referenceName, @NotNull PsiType[] typeParameters) {
+    return getPresentableText(referenceName, PsiAnnotation.EMPTY_ARRAY, typeParameters);
   }
 
   @NotNull
@@ -167,7 +186,7 @@ public abstract class PsiNameHelper {
    * <code>["List&lt;String&gt","Integer"]</code>
    *
    * @param referenceText the text of the reference to calculate type parameters for.
-   * @return the calculated array of type parameters. 
+   * @return the calculated array of type parameters.
    */
   public static String[] getClassParametersText(String referenceText) {
     if (referenceText.indexOf('<') < 0) return ArrayUtil.EMPTY_STRING_ARRAY;

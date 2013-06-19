@@ -30,10 +30,7 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.*;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.breakpoints.XBreakpointProperties;
@@ -44,6 +41,7 @@ import com.intellij.xdebugger.ui.DebuggerColors;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.awt.*;
 import java.awt.dnd.DragSource;
 import java.io.File;
@@ -106,23 +104,27 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     return VirtualFileManager.getInstance().findFileByUrl(getFileUrl());
   }
 
+  @Override
   @NotNull
   public XLineBreakpointType<P> getType() {
     return myType;
   }
 
+  @Override
   public int getLine() {
     return myState.getLine();
   }
 
+  @Override
   public String getFileUrl() {
     return myState.getFileUrl();
   }
 
+  @Override
   public String getPresentableFilePath() {
     String url = getFileUrl();
     if (url != null && LocalFileSystem.PROTOCOL.equals(VirtualFileManager.extractProtocol(url))) {
-      return FileUtil.toSystemDependentName(VfsUtil.urlToPath(url));
+      return FileUtil.toSystemDependentName(VfsUtilCore.urlToPath(url));
     }
     return url != null ? url : "";
   }
@@ -139,9 +141,11 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     return myHighlighter;
   }
 
+  @Override
   public XSourcePosition getSourcePosition() {
     if (mySourcePosition == null) {
       new ReadAction() {
+        @Override
         protected void run(final Result result) {
           mySourcePosition = XSourcePositionImpl.create(getFile(), getLine());
         }
@@ -150,10 +154,12 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     return mySourcePosition;
   }
 
+  @Override
   public boolean isValid() {
     return myHighlighter != null && myHighlighter.isValid();
   }
 
+  @Override
   public void dispose() {
     removeHighlighter();
     myDisposed = true;
@@ -169,6 +175,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   @Override
   protected GutterDraggableObject createBreakpointDraggableObject() {
     return new GutterDraggableObject() {
+      @Override
       public boolean copy(int line, VirtualFile file) {
         if (canMoveTo(line, file)) {
           setFileUrl(file.getUrl());
@@ -178,6 +185,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
         return false;
       }
 
+      @Override
       public Cursor getCursor(int line) {
         return canMoveTo(line, getFile()) ? DragSource.DefaultMoveDrop : DragSource.DefaultMoveNoDrop;
       }
@@ -211,7 +219,31 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
     }
   }
 
+  @Override
+  public boolean isTemporary() {
+    return myState.isTemporary();
+  }
+
+  @Override
+  public void setTemporary(boolean temporary) {
+    if (isTemporary() != temporary) {
+      myState.setTemporary(temporary);
+      fireBreakpointChanged();
+    }
+  }
+
+  @Override
   protected List<? extends AnAction> getAdditionalPopupMenuActions(final XDebugSession session) {
     return getType().getAdditionalPopupMenuActions(this, session);
+  }
+
+  @Override
+  protected void updateIcon() {
+    final Icon icon = calculateSpecialIcon();
+    if (icon != null) {
+      setIcon(icon);
+      return;
+    }
+    setIcon(isTemporary() ? myType.getTemporaryIcon() : myType.getEnabledIcon());
   }
 }

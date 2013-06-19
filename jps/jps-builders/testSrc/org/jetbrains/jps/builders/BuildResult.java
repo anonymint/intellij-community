@@ -18,11 +18,13 @@ package org.jetbrains.jps.builders;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Function;
 import junit.framework.Assert;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.incremental.MessageHandler;
 import org.jetbrains.jps.incremental.messages.BuildMessage;
 import org.jetbrains.jps.incremental.messages.DoneSomethingNotification;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -30,11 +32,13 @@ import java.util.List;
 */
 public class BuildResult implements MessageHandler {
   private final List<BuildMessage> myErrorMessages;
+  private final List<BuildMessage> myWarnMessages;
   private final List<BuildMessage> myInfoMessages;
   private boolean myUpToDate = true;
 
   public BuildResult() {
     myErrorMessages = new ArrayList<BuildMessage>();
+    myWarnMessages = new ArrayList<BuildMessage>();
     myInfoMessages = new ArrayList<BuildMessage>();
   }
 
@@ -43,6 +47,9 @@ public class BuildResult implements MessageHandler {
     if (msg.getKind() == BuildMessage.Kind.ERROR) {
       myErrorMessages.add(msg);
       myUpToDate = false;
+    }
+    else if (msg.getKind() == BuildMessage.Kind.WARNING) {
+      myWarnMessages.add(msg);
     }
     else {
       myInfoMessages.add(msg);
@@ -68,5 +75,15 @@ public class BuildResult implements MessageHandler {
     final Function<BuildMessage,String> toStringFunction = StringUtil.createToStringFunction(BuildMessage.class);
     Assert.assertTrue("Build failed. \nErrors:\n" + StringUtil.join(myErrorMessages, toStringFunction, "\n") +
                       "\nInfo messages:\n" + StringUtil.join(myInfoMessages, toStringFunction, "\n"), isSuccessful());
+  }
+
+  @NotNull
+  public List<BuildMessage> getErrorMessages() {
+    return Collections.unmodifiableList(myErrorMessages);
+  }
+
+  @NotNull
+  public List<BuildMessage> getWarnMessages() {
+    return myWarnMessages;
   }
 }

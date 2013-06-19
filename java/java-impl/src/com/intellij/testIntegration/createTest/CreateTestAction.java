@@ -16,15 +16,21 @@
 package com.intellij.testIntegration.createTest;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ContentEntry;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.roots.SourceFolder;
+import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -33,7 +39,13 @@ import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public class CreateTestAction extends PsiElementBaseIntentionAction {
+
+  private static final String CREATE_TEST_IN_THE_SAME_ROOT = "create.test.in.the.same.root";
+
   @NotNull
   public String getText() {
     return CodeInsightBundle.message("intention.create.test");
@@ -69,7 +81,7 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
 
     if (psiClass == null) return false;
 
-    Module srcModule = ModuleUtil.findModuleForPsiElement(psiClass);
+    Module srcModule = ModuleUtilCore.findModuleForPsiElement(psiClass);
     if (srcModule == null) return false;
 
     if (psiClass.isAnnotationType() ||
@@ -90,14 +102,25 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
 
   @Override
   public void invoke(final @NotNull Project project, Editor editor, @NotNull PsiElement element) throws IncorrectOperationException {
-    if (!CodeInsightUtilBase.preparePsiElementForWrite(element)) return;
-    final Module srcModule = ModuleUtil.findModuleForPsiElement(element);
+    if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
+    final Module srcModule = ModuleUtilCore.findModuleForPsiElement(element);
     final PsiClass srcClass = getContainingClass(element);
 
     if (srcClass == null) return;
 
     PsiDirectory srcDir = element.getContainingFile().getContainingDirectory();
     PsiPackage srcPackage = JavaDirectoryService.getInstance().getPackage(srcDir);
+
+    final PropertiesComponent propertiesComponent = PropertiesComponent.getInstance();
+    final HashSet<VirtualFile> testFolders = new HashSet<VirtualFile>();
+    checkForTestRoots(srcModule, testFolders);
+    if (testFolders.isEmpty() && !propertiesComponent.getBoolean(CREATE_TEST_IN_THE_SAME_ROOT, false)) {
+      if (Messages.showOkCancelDialog(project, "Create test in the same source root?", "No Test Roots Found", Messages.getQuestionIcon()) != DialogWrapper.OK_EXIT_CODE) {
+        return;
+      }
+
+      propertiesComponent.setValue(CREATE_TEST_IN_THE_SAME_ROOT, String.valueOf(true));
+    }
 
     final CreateTestDialog d = new CreateTestDialog(project,
                                                     getText(),
@@ -115,6 +138,35 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
         generator.generateTest(project, d);
       }
     }, CodeInsightBundle.message("intention.create.test"), this);
+  }
+
+  protected static void checkForTestRoots(Module srcModule, Set<VirtualFile> testFolders) {
+    checkForTestRoots(srcModule, testFolders, new HashSet<Module>());
+  }
+
+  private static void checkForTestRoots(final Module srcModule, final Set<VirtualFile> testFolders, final Set<Module> processed) {
+    final boolean isFirst = processed.isEmpty();
+    if (!processed.add(srcModule)) return;
+
+    final ContentEntry[] entries = ModuleRootManager.getInstance(srcModule).getContentEntries();
+    for (ContentEntry entry : entries) {
+      for (SourceFolder sourceFolder : entry.getSourceFolders()) {
+        if (sourceFolder.isTestSource()) {
+          final VirtualFile sourceFolderFile = sourceFolder.getFile();
+          if (sourceFolderFile != null) {
+            testFolders.add(sourceFolderFile);
+          }
+        }
+      }
+    }
+    if (isFirst && !testFolders.isEmpty()) return;
+
+    final HashSet<Module> modules = new HashSet<Module>();
+    ModuleUtilCore.collectModulesDependsOn(srcModule, modules);
+    for (Module module : modules) {
+
+      checkForTestRoots(module, testFolders, processed);
+    }
   }
 
   @Nullable

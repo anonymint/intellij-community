@@ -23,7 +23,10 @@ import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.impl.local.FileWatcher;
-import org.jetbrains.idea.svn.*;
+import org.jetbrains.idea.svn.RootUrlInfo;
+import org.jetbrains.idea.svn.Svn17TestCase;
+import org.jetbrains.idea.svn.SvnFileUrlMapping;
+import org.jetbrains.idea.svn.SvnVcs;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -115,9 +118,10 @@ public class SvnExternalCommitNoticedTest extends Svn17TestCase {
     final String branchUrl = prepareBranchesStructure();
     final SubTree tree = new SubTree(myWorkingCopyDir);
 
-    verify(runSvn("switch", branchUrl + "/root/source/s1.txt", tree.myS1File.getPath()));
-    verify(runSvn("switch", branchUrl + "/root/target", tree.myTargetDir.getPath()));
+    runInAndVerifyIgnoreOutput("switch", branchUrl + "/root/source/s1.txt", tree.myS1File.getPath());
+    runInAndVerifyIgnoreOutput("switch", branchUrl + "/root/target", tree.myTargetDir.getPath());
 
+    sleep(50);
     myWorkingCopyDir.refresh(false, true);
     imitateEvent(myWorkingCopyDir);
     // no dirty scope externally provided! just VFS refresh
@@ -135,8 +139,7 @@ public class SvnExternalCommitNoticedTest extends Svn17TestCase {
     final String branchUrl = prepareBranchesStructure();
     final SubTree tree = new SubTree(myWorkingCopyDir);
 
-    SvnConfiguration.getInstance(myProject).DETECT_NESTED_COPIES = true;
-    myVcs.invokeRefreshSvnRoots(false);
+    myVcs.invokeRefreshSvnRoots();
     clManager.ensureUpToDate(false);
     clManager.ensureUpToDate(false);
     SvnFileUrlMapping workingCopies = myVcs.getSvnFileUrlMapping();
@@ -144,7 +147,7 @@ public class SvnExternalCommitNoticedTest extends Svn17TestCase {
     Assert.assertEquals(1, infos.size());
     Assert.assertEquals(myRepoUrl + "/trunk", infos.get(0).getAbsoluteUrl());
 
-    verify(runSvn("switch", branchUrl, myWorkingCopyDir.getPath()));
+    runInAndVerifyIgnoreOutput("switch", branchUrl, myWorkingCopyDir.getPath());
 
     myWorkingCopyDir.refresh(false, true);
     imitateEvent(myWorkingCopyDir);
@@ -184,8 +187,8 @@ public class SvnExternalCommitNoticedTest extends Svn17TestCase {
       //
     }
 
-    verify(runSvn("ci", "-m", "test", sourceDir.getPath()));
-    verify(runSvn("ci", "-m", "test", externalDir.getPath()));
+    runInAndVerifyIgnoreOutput("ci", "-m", "test", sourceDir.getPath());
+    runInAndVerifyIgnoreOutput("ci", "-m", "test", externalDir.getPath());
 
     myWorkingCopyDir.refresh(false, true);
     final LocalFileSystem lfs = LocalFileSystem.getInstance();

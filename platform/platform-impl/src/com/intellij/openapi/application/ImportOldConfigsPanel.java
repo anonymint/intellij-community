@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,14 +47,6 @@ public class ImportOldConfigsPanel extends JDialog {
   private JRadioButton myRbImportAuto;
   private final File myGuessedOldConfig;
   private final ConfigImportSettings mySettings;
-
-  public ImportOldConfigsPanel(final File guessedOldConfig, final Frame owner, ConfigImportSettings settings) {
-    super(owner, true);
-    myGuessedOldConfig = guessedOldConfig;
-    mySettings = settings;
-
-    init();
-  }
 
   public ImportOldConfigsPanel(final File guessedOldConfig, ConfigImportSettings settings) {
     super((Dialog) null, true);
@@ -136,21 +128,18 @@ public class ImportOldConfigsPanel extends JDialog {
     setTitle(ApplicationBundle.message("title.complete.installation"));
 
     update();
+
     pack();
-
-    Dimension parentSize = Toolkit.getDefaultToolkit().getScreenSize();
-    Dimension ownSize = getPreferredSize();
-
-    setLocation((parentSize.width - ownSize.width) / 2, (parentSize.height - ownSize.height) / 2);
+    setLocationRelativeTo(null);
   }
 
   @Nullable
   private static String findPreviousInstallationWindows(String productName) {
-      String programFiles = System.getenv("ProgramFiles");
+    String programFiles = System.getenv("ProgramFiles");
     if (programFiles != null) {
       File jetbrainsHome = new File(programFiles, "JetBrains");
-      if (jetbrainsHome.isDirectory()) {
-        final File[] files = jetbrainsHome.listFiles();
+      File[] files = jetbrainsHome.isDirectory() ? jetbrainsHome.listFiles() : null;
+      if (files != null) {
         String latestVersion = null;
         File latestFile = null;
         for (File file : files) {
@@ -242,6 +231,4 @@ public class ImportOldConfigsPanel extends JDialog {
     ImportOldConfigsPanel dlg = new ImportOldConfigsPanel(null, new ConfigImportSettings());
     dlg.setVisible(true);
   }
-
-
 }

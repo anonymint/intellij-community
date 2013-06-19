@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.wm.StatusBar;
+import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.UI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
@@ -152,15 +153,13 @@ public class LinkLabel extends JLabel {
         if (lineY >= getSize().height) {
           lineY = getSize().height - 1;
         }
+
         if (getHorizontalAlignment() == LEFT) {
           UIUtil.drawLine(g, x + shiftX, lineY, x + getFontMetrics(getFont()).stringWidth(getText()) + shiftX, lineY);
-        }
-        else {
+        } else {
           UIUtil.drawLine(g, getWidth() - 1 - getFontMetrics(getFont()).stringWidth(getText()) + shiftX, lineY,
                           getWidth() - 1 + shiftX, lineY);
         }
-      }
-      else {
       }
 
       if (myPaintDefaultIcon) {
@@ -185,7 +184,8 @@ public class LinkLabel extends JLabel {
 
   public void removeNotify() {
     super.removeNotify();
-    disableUnderline();
+    if (ScreenUtil.isStandardAddRemoveNotify(this))
+      disableUnderline();
   }
 
   private void setActive(boolean isActive) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,13 @@ import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementPresentation
 import com.intellij.codeInsight.lookup.PsiTypeLookupItem
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager
+import com.intellij.psi.statistics.StatisticsManager
+import com.intellij.psi.statistics.impl.StatisticsManagerImpl
+import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.plugins.groovy.GroovyFileType
+import org.jetbrains.plugins.groovy.codeStyle.GrReferenceAdjuster
 import org.jetbrains.plugins.groovy.codeStyle.GroovyCodeStyleSettings
+import org.jetbrains.plugins.groovy.lang.psi.api.types.GrCodeReferenceElement
 import org.jetbrains.plugins.groovy.util.TestUtils
 /**
  * @author Maxim.Medvedev
@@ -99,7 +104,7 @@ public class GroovyCompletionTest extends GroovyCompletionTestBase {
   }
 
   public void testNamedParametersForConstructorCall() {
-    doVariantableTest("hahaha", "hohoho", "hashCode");
+    doVariantableTest("hahaha", "hohoho");
   }
 
   public void testUnfinishedMethodTypeParameter() {
@@ -127,6 +132,14 @@ public class GroovyCompletionTest extends GroovyCompletionTestBase {
 
   public void testTypeParameterCompletion() {
     myFixture.testCompletionVariants(getTestName(false) + ".groovy", "put", "putAll");
+  }
+
+  public void testCompleteTypeParameter() {
+    doVariantableTest('''\
+class Foo<A, B> {
+    public <C, D> void foo(<caret>)
+}
+''', '', CompletionType.BASIC, CompletionResult.contain, 'A', 'B', 'C', 'D')
   }
 
   public void testCatchClauseParameter() {
@@ -629,6 +642,10 @@ class A {
     myFixture.checkResult "List<String> l = new ArrayList<>(<caret>)"
   }
 
+  public void testFinishByClosingBracket() {
+    doCompletionTest "int o1, o2; array[o<caret>", "int o1, o2; array[o1]<caret>", "]", CompletionType.BASIC
+  }
+
   public void testAfterNewWithInner() {
     myFixture.addClass """class Zzoo {
         static class Impl {}
@@ -1103,13 +1120,28 @@ class X {
 public class KeyVO {
   { this.fo<caret>x }
   static void foo() {}
+  static void foox() {}
 }
 """);
     myFixture.complete(CompletionType.BASIC, 1)
-    assert !myFixture.lookupElementStrings
-    myFixture.complete(CompletionType.BASIC, 2)
-    assertOrderedEquals(myFixture.lookupElementStrings, ["foo"])
+    assertOrderedEquals(myFixture.lookupElementStrings, ['foo', 'foox'])
   }
+
+  public void testPreferInstanceMethodViaInstanceSecond() {
+    myFixture.configureByText("a.groovy", """
+public class KeyVO {
+  { this.fo<caret>x }
+  static void foo() {}
+  static void foox() {}
+
+  void fooy() {}
+  void fooz() {}
+}
+""");
+    myFixture.complete(CompletionType.BASIC, 1)
+    assertOrderedEquals(myFixture.lookupElementStrings, ['fooy', 'fooz'])
+  }
+
 
   public void testNoRepeatingModifiers() {
     myFixture.configureByText 'a.groovy', 'class A { public static <caret> }'
@@ -1119,9 +1151,11 @@ public class KeyVO {
     assert 'final' in myFixture.lookupElementStrings
   }
 
-  public void testSpaceTail() {
-    checkCompletion 'class A <caret> ArrayList {}', ' ', 'class A extends <caret> ArrayList {}'
-    checkCompletion 'class A <caret> ArrayList {}', '\n', 'class A extends<caret> ArrayList {}'
+  public void testSpaceTail1() {
+    checkCompletion 'class A ex<caret> ArrayList {}', ' ', 'class A extends <caret> ArrayList {}'
+  }
+
+  public void testSpaceTail3() {
     checkSingleItemCompletion 'class Foo impl<caret> {}', 'class Foo implements <caret> {}'
   }
 
@@ -1624,5 +1658,169 @@ def b = new boolea<caret>
 ''', '''\
 def b = new boolean<caret>
 ''')
+  }
+
+  void testCompleteSameNameClassFromOtherPackage() {
+    myFixture.addClass('''\
+package foo;
+public class Myclass{}
+''')
+    myFixture.addClass('''\
+package bar;
+public class Myclass{}
+''')
+
+    myFixture.configureByText('test.groovy', '''\
+package bar
+
+print new foo.My<caret>class()
+''')
+
+    final atCaret = myFixture.file.findElementAt(myFixture.editor.caretModel.offset)
+    final ref = PsiTreeUtil.getParentOfType(atCaret, GrCodeReferenceElement)
+    GrReferenceAdjuster.shortenReference(ref)
+
+    myFixture.checkResult('''\
+package bar
+
+print new foo.Myclass()
+''')
+  }
+
+  public void "test def before assignment"() {
+    assert doContainsTest("def", """
+void foo() {
+  <caret> = baz
+}""")
+  }
+
+  public void testAliasAnnotation() {
+    myFixture.addClass '''\
+package groovy.transform;
+
+@java.lang.annotation.Documented
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.ANNOTATION_TYPE, ElementType.TYPE})
+public @interface AnnotationCollector {
+    String processor() default "org.codehaus.groovy.transform.AnnotationCollectorTransform";
+    Class[] value() default {};
+}
+'''
+
+    doVariantableTest('''\
+import groovy.transform.AnnotationCollector
+
+@interface Bar {
+    int xxx()
+}
+
+@interface Foo {
+    int yyy()
+}
+
+@Foo @Bar
+@AnnotationCollector()
+@interface Alias1 {}
+
+@Alias1(<caret>)
+class Baz {}''', '', CompletionType.BASIC, CompletionResult.contain, 'xxx', 'yyy')
+  }
+
+  public void "test honor statistics"() {
+    ((StatisticsManagerImpl)StatisticsManager.instance).enableStatistics(testRootDisposable)
+
+    myFixture.addClass("class Foo { Object getMessage() {} }; class Bar extends Foo { Object getMessages(); }")
+    configure "b = new Bar();\nb.mes<caret>"
+    def items = myFixture.completeBasic()
+    myFixture.assertPreferredCompletionItems 0, "messages", "message"
+    myFixture.lookup.currentItem = items[1]
+    myFixture.type('\n\nb.mes')
+    myFixture.completeBasic()
+    myFixture.assertPreferredCompletionItems 0, "message", "messages"
+  }
+
+  void testFieldCompletionFromJavaClass() {
+    myFixture.addClass("""\
+class Base {
+    static public Base foo;
+}
+
+class Inheritor extends Base {
+    static public Inheritor foo;
+}
+""")
+
+    doVariantableTest('Inheritor.fo<caret>','', CompletionType.BASIC, CompletionResult.equal, 'foo', 'forName', 'forName')
+  }
+
+  void testBinding1() {
+   doCompletionTest('''\
+aaa = 5
+print aa<caret>
+''', '''\
+aaa = 5
+print aaa<caret>
+''', CompletionType.BASIC)
+  }
+
+  void testBinding2() {
+    doCompletionTest('''\
+def foo() {
+  aaa = 5
+}
+print aa<caret>
+''', '''\
+def foo() {
+  aaa = 5
+}
+print aaa<caret>
+''', CompletionType.BASIC)
+  }
+
+
+  void testBinding3() {
+    doVariantableTest('''\
+def x() {
+  aaa = 5
+}
+
+aaaa = 6
+print aa<caret>
+''', CompletionType.BASIC, 'aaa', 'aaaa')
+  }
+
+  void testCompleteRefInLValue() {
+    myFixture.addClass('''\
+public class Util {
+    public int CONST = 4;
+}
+''')
+    doVariantableTest('''\
+def foo(Util util) {
+  util.CONS<caret>T = 3
+}
+''', '', CompletionType.BASIC, CompletionResult.contain, 'CONST')
+  }
+
+  void testInnerClassOfAnonymous() {
+    doCompletionTest(
+      '''
+        def r = new Runnable() {
+          void run() {
+            Data data = new <caret>
+          }
+
+          private static class Data {}
+        }
+      ''',
+      '''
+        def r = new Runnable() {
+          void run() {
+            Data data = new Data()<caret>
+          }
+
+          private static class Data {}
+        }
+      ''', CompletionType.SMART)
   }
 }

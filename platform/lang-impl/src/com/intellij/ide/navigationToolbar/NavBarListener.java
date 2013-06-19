@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.ide.navigationToolbar;
 import com.intellij.ProjectTopics;
 import com.intellij.ide.actions.CopyAction;
 import com.intellij.ide.actions.CutAction;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.application.ApplicationManager;
@@ -30,14 +31,17 @@ import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vcs.FileStatusListener;
 import com.intellij.openapi.vcs.FileStatusManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.problems.WolfTheProblemSolver;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiTreeChangeEvent;
 import com.intellij.psi.PsiTreeChangeListener;
+import com.intellij.ui.ListScrollingUtil;
 import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 
@@ -57,6 +61,7 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
   private static final String LISTENER = "NavBarListener";
   private static final String BUS = "NavBarMessageBus";
   private final NavBarPanel myPanel;
+  private boolean shouldFocusEditor = false;
 
   static void subscribeTo(NavBarPanel panel) {
     if (panel.getClientProperty(LISTENER) != null) {
@@ -135,7 +140,13 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
     }
   }
 
+  @Override
   public void focusGained(final FocusEvent e) {
+    if (e.getOppositeComponent() == null && shouldFocusEditor) {
+      shouldFocusEditor = false;
+      ToolWindowManager.getInstance(myPanel.getProject()).activateEditorComponent();
+      return;
+    }
     myPanel.updateItems();
     final List<NavBarItem> items = myPanel.getItems();
     if (!myPanel.isInFloatingMode() && items.size() > 0) {
@@ -145,17 +156,31 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
     }
   }
 
+  @Override
   public void focusLost(final FocusEvent e) {
     if (myPanel.getProject().isDisposed()) {
       myPanel.setContextComponent(null);
       myPanel.hideHint();
       return;
     }
+    final DialogWrapper dialog = DialogWrapper.findInstance(e.getOppositeComponent());
+    shouldFocusEditor =  dialog != null;
+    if (dialog != null) {
+      Disposer.register(dialog.getDisposable(), new Disposable() {
+        @Override
+        public void dispose() {
+          if (dialog.getExitCode() == DialogWrapper.CANCEL_EXIT_CODE) {
+            shouldFocusEditor = false;
+          }
+        }
+      });
+    }
 
     // required invokeLater since in current call sequence KeyboardFocusManager is not initialized yet
     // but future focused component
     //noinspection SSBasedInspection
     SwingUtilities.invokeLater(new Runnable() {
+      @Override
       public void run() {
         processFocusLost(e);
       }
@@ -205,22 +230,27 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
     rebuildUI();
   }
 
+  @Override
   public void childAdded(@NotNull PsiTreeChangeEvent event) {
     updateModel();
   }
 
+  @Override
   public void childReplaced(@NotNull PsiTreeChangeEvent event) {
     updateModel();
   }
 
+  @Override
   public void childMoved(@NotNull PsiTreeChangeEvent event) {
     updateModel();
   }
 
+  @Override
   public void childrenChanged(@NotNull PsiTreeChangeEvent event) {
     updateModel();
   }
 
+  @Override
   public void propertyChanged(@NotNull final PsiTreeChangeEvent event) {
     updateModel();
   }
@@ -274,7 +304,8 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
   private static boolean shouldSkipAction(AnAction action) {
     return action instanceof PopupAction
            || action instanceof CopyAction
-           || action instanceof CutAction;
+           || action instanceof CutAction
+           || action instanceof ListScrollingUtil.ListScrollAction;
   }
 
   @Override
@@ -290,6 +321,7 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
       myPanel.moveDown();
       //noinspection SSBasedInspection
       SwingUtilities.invokeLater(new Runnable() {
+        @Override
         public void run() {
           try {
             final Robot robot = new Robot();
@@ -312,7 +344,7 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
   }
 
   @Override
-  public void fileOpened(final FileEditorManager manager, final VirtualFile file) {
+  public void fileOpened(@NotNull final FileEditorManager manager, @NotNull final VirtualFile file) {
     ApplicationManager.getApplication().invokeLater(new Runnable() {
       @Override
       public void run() {
@@ -371,8 +403,8 @@ public class NavBarListener extends WolfTheProblemSolver.ProblemListener
   public void childRemoved(@NotNull PsiTreeChangeEvent event) {}
 
   @Override
-  public void fileClosed(FileEditorManager source, VirtualFile file) {}
+  public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {}
 
   @Override
-  public void selectionChanged(FileEditorManagerEvent event) {}
+  public void selectionChanged(@NotNull FileEditorManagerEvent event) {}
 }

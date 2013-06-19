@@ -87,6 +87,7 @@ public class Facet<C extends FacetConfiguration> extends UserDataHolderBase impl
   public void disposeFacet() {
   }
 
+  @Override
   public final void dispose() {
     assert !isDisposed;
     isDisposed = true;
@@ -114,4 +115,8 @@ public class Facet<C extends FacetConfiguration> extends UserDataHolderBase impl
     myName = name;
   }
 
+  @Override
+  public String toString() {
+    return getName() + " (" + getModule().getName() + ")";
+  }
 }

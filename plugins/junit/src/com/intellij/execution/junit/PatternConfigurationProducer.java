@@ -16,15 +16,19 @@
 
 package com.intellij.execution.junit;
 
+import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.JavaRunConfigurationExtensionManager;
 import com.intellij.execution.Location;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.actions.ConfigurationContext;
+import com.intellij.execution.configurations.ModuleBasedConfiguration;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import org.jetbrains.annotations.NotNull;
@@ -47,12 +51,27 @@ public class PatternConfigurationProducer extends JUnitConfigurationProducer {
     RunnerAndConfigurationSettings settings = cloneTemplateConfiguration(project, context);
     final JUnitConfiguration configuration = (JUnitConfiguration)settings.getConfiguration();
     final JUnitConfiguration.Data data = configuration.getPersistentData();
-    data.getPatterns().addAll(classes);
+    data.setPatterns(classes);
     data.TEST_OBJECT = JUnitConfiguration.TEST_PATTERN;
     data.setScope(setupPackageConfiguration(context, project, configuration, data.getScope()));
     configuration.setGeneratedName();
     JavaRunConfigurationExtensionManager.getInstance().extendCreatedConfiguration(configuration, location);
     return settings;
+  }
+
+  @Override
+  protected Module findModule(ModuleBasedConfiguration configuration, Module contextModule) {
+    final Set<String> patterns = ((JUnitConfiguration)configuration).getPersistentData().getPatterns();
+    return findModule(configuration, contextModule, patterns);
+  }
+
+  public static Module findModule(ModuleBasedConfiguration configuration, Module contextModule, Set<String> patterns) {
+    return JavaExecutionUtil.findModule(contextModule, patterns, configuration.getProject(), new Condition<PsiClass>() {
+      @Override
+      public boolean value(PsiClass psiClass) {
+        return JUnitUtil.isTestClass(psiClass);
+      }
+    });
   }
 
   static Set<PsiMember> collectTestMembers(PsiElement[] psiElements) {

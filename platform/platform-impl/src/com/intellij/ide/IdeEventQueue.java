@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
  */
 package com.intellij.ide;
 
-
 import com.intellij.Patches;
 import com.intellij.ide.dnd.DnDManager;
 import com.intellij.ide.dnd.DnDManagerImpl;
+import com.intellij.ide.plugins.PluginManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
@@ -26,11 +26,11 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.impl.ApplicationImpl;
+import com.intellij.openapi.diagnostic.FrequentEventDetector;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.keymap.impl.IdeKeyEventDispatcher;
 import com.intellij.openapi.keymap.impl.IdeMouseEventDispatcher;
 import com.intellij.openapi.keymap.impl.KeyState;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.ExpirableRunnable;
@@ -55,13 +55,12 @@ import java.beans.PropertyChangeListener;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
-
+import java.util.List;
 
 /**
  * @author Vladimir Kondratyev
  * @author Anton Katilin
  */
-
 public class IdeEventQueue extends EventQueue {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.IdeEventQueue");
 
@@ -70,9 +69,9 @@ public class IdeEventQueue extends EventQueue {
    */
   private final Object myLock = new Object();
 
-  private final ArrayList<Runnable> myIdleListeners = new ArrayList<Runnable>(2);
+  private final List<Runnable> myIdleListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
-  private final ArrayList<Runnable> myActivityListeners = new ArrayList<Runnable>(2);
+  private final List<Runnable> myActivityListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private final Alarm myIdleRequestsAlarm = new Alarm();
 
@@ -317,13 +316,26 @@ public class IdeEventQueue extends EventQueue {
     myEventCount = evCount;
   }
 
-
   public AWTEvent getTrueCurrentEvent() {
     return myCurrentEvent;
   }
 
   @Override
-  public void dispatchEvent(final AWTEvent e) {
+  public void dispatchEvent(AWTEvent e) {
+    if (SystemInfo.isXWindow && e instanceof MouseEvent && ((MouseEvent)e).getButton() > 3) {
+      MouseEvent src = (MouseEvent)e;
+      if (src.getButton() < 6) {//Convert these events(buttons 4&5 in are produced by touchpad, they must be converted to horizontal scrolling events
+        e = new MouseWheelEvent(src.getComponent(), src.getID(), src.getWhen(),
+                                src.getModifiers() | InputEvent.SHIFT_DOWN_MASK, src.getX(), src.getY(),
+                                0, false, MouseWheelEvent.WHEEL_UNIT_SCROLL, src.getClickCount(), src.getButton() == 4 ? -1 : 1);
+      }
+      else {
+        //Here we "shift" events with buttons 6 and 7 to similar events with buttons 4 and 5
+        //See java.awt.InputEvent#BUTTON_DOWN_MASK, 1<<14 is 4th physical button, 1<<15 is 5th.
+        e = new MouseEvent(src.getComponent(), src.getID(), src.getWhen(), src.getModifiers() | (1 << 8 + src.getButton()),
+                           src.getX(), src.getY(), 1, src.isPopupTrigger(), src.getButton() - 2);
+      }
+    }
     boolean wasInputEvent = myIsInInputEvent;
     myIsInInputEvent = e instanceof InputEvent || e instanceof InputMethodEvent || e instanceof WindowEvent || e instanceof ActionEvent;
     AWTEvent oldEvent = myCurrentEvent;
@@ -332,12 +344,9 @@ public class IdeEventQueue extends EventQueue {
     try {
       _dispatchEvent(e, false);
     }
-    catch (ProcessCanceledException pce) {
-      throw pce;
-    }
-    catch (Throwable exc) {
-      if (!myToolkitBugsProcessor.process(exc)) {
-        LOG.error("Error during dispatching of " + e, exc);
+    catch (Throwable t) {
+      if (!myToolkitBugsProcessor.process(t)) {
+        PluginManager.processException(t);
       }
     }
     finally {
@@ -485,12 +494,24 @@ public class IdeEventQueue extends EventQueue {
       }
     }
     else if (e instanceof MouseEvent) {
-      if (((MouseEvent)e).getButton() != 0) {
-        setLastClickEvent((MouseEvent)e);
+      MouseEvent me = (MouseEvent)e;
+      if (myMouseEventDispatcher.patchClickCount(me) && me.getID() == MouseEvent.MOUSE_CLICKED) {
+        final MouseEvent toDispatch =
+          new MouseEvent(me.getComponent(), me.getID(), System.currentTimeMillis(), me.getModifiers(), me.getX(), me.getY(), 1,
+                         me.isPopupTrigger(), me.getButton());
+        SwingUtilities.invokeLater(new Runnable() {
+          @Override
+          public void run() {
+            dispatchEvent(toDispatch);
+          }
+        });
+      }
+      if (me.getButton() != 0) {
+        setLastClickEvent(me);
       } else if (lastClickEvent != null && Math.abs(System.currentTimeMillis() - lastClickTime) > 200){
         setLastClickEvent(null);//Obsolete event
       }
-      if (!myMouseEventDispatcher.dispatchMouseEvent((MouseEvent)e)) {
+      if (!myMouseEventDispatcher.dispatchMouseEvent(me)) {
         defaultDispatchEvent(e);
       }
     }
@@ -640,29 +661,26 @@ public class IdeEventQueue extends EventQueue {
   }
 
   private static boolean processAppActivationEvents(AWTEvent e) {
-    final Application app = ApplicationManager.getApplication();
+    Application app = ApplicationManager.getApplication();
     if (!(app instanceof ApplicationImpl)) return false;
-
     ApplicationImpl appImpl = (ApplicationImpl)app;
 
-    boolean consumed = false;
     if (e instanceof WindowEvent) {
       WindowEvent we = (WindowEvent)e;
       if (we.getID() == WindowEvent.WINDOW_GAINED_FOCUS && we.getWindow() != null) {
         if (we.getOppositeWindow() == null && !appImpl.isActive()) {
-          consumed = appImpl.tryToApplyActivationState(true, we.getWindow());
+          appImpl.tryToApplyActivationState(true, we.getWindow());
         }
       }
       else if (we.getID() == WindowEvent.WINDOW_LOST_FOCUS && we.getWindow() != null) {
         if (we.getOppositeWindow() == null && appImpl.isActive()) {
-          consumed = appImpl.tryToApplyActivationState(false, we.getWindow());
+          appImpl.tryToApplyActivationState(false, we.getWindow());
         }
       }
     }
 
     return false;
   }
-
 
   private void defaultDispatchEvent(final AWTEvent e) {
     try {
@@ -672,14 +690,12 @@ public class IdeEventQueue extends EventQueue {
 
       super.dispatchEvent(e);
     }
-    catch (ProcessCanceledException pce) {
-      throw pce;
-    }
-    catch (Throwable exc) {
-      if (!myToolkitBugsProcessor.process(exc)) {
-        LOG.error("Error during dispatching of " + e, exc);
+    catch (Throwable t) {
+      if (!myToolkitBugsProcessor.process(t)) {
+        PluginManager.processException(t);
       }
-    } finally {
+    }
+    finally {
       myDispatchingFocusEvent = false;
     }
   }
@@ -875,11 +891,11 @@ public class IdeEventQueue extends EventQueue {
           myWaiterScheduled = false;
         }
         else {
-          Application app = ApplicationManager.getApplication();
-          if (app == null ||
+          if (ApplicationManager.getApplication() == null ||
+              UISettings.getInstance() == null ||
               !SystemInfo.isWindows ||
               !Registry.is("actionSystem.win.suppressAlt") ||
-              !UISettings.getInstance().HIDE_TOOL_STRIPES) {
+              !(UISettings.getInstance().HIDE_TOOL_STRIPES || UISettings.getInstance().PRESENTATION_MODE)) {
             return !dispatch;
           }
 
@@ -933,5 +949,12 @@ public class IdeEventQueue extends EventQueue {
         myInputMethodLock--;
       }
     });
+  }
+
+  private final FrequentEventDetector myFrequentEventDetector = new FrequentEventDetector(1009, 100);
+  @Override
+  public void postEvent(AWTEvent theEvent) {
+    myFrequentEventDetector.eventHappened();
+    super.postEvent(theEvent);
   }
 }

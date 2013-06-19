@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -125,14 +125,18 @@ public abstract class TokenSets {
 
   public static final TokenSet STRING_LITERALS = TokenSet.create(
       mSTRING_LITERAL,
-      mREGEX_CONTENT,
-      mDOLLAR_SLASH_REGEX_CONTENT,
       mGSTRING_LITERAL,
-      mGSTRING_CONTENT,
       mGSTRING_BEGIN,
+      mGSTRING_CONTENT,
       mGSTRING_END,
       mREGEX_LITERAL,
-      mDOLLAR_SLASH_REGEX_LITERAL
+      mREGEX_BEGIN,
+      mREGEX_CONTENT,
+      mREGEX_END,
+      mDOLLAR_SLASH_REGEX_LITERAL,
+      mDOLLAR_SLASH_REGEX_BEGIN,
+      mDOLLAR_SLASH_REGEX_CONTENT,
+      mDOLLAR_SLASH_REGEX_END
   );
 
   public static final TokenSet FOR_IN_DELIMITERS = TokenSet.create(kIN, mCOLON);
@@ -164,6 +168,12 @@ public abstract class TokenSets {
                                                                mMOD, mPLUS, mSTAR, mSTAR_STAR, mNOT_EQUAL, mCOMPARE_TO, mLAND, kINSTANCEOF,
                                                                COMPOSITE_LSHIFT_SIGN, COMPOSITE_RSHIFT_SIGN, COMPOSITE_TRIPLE_SHIFT_SIGN,
                                                                mREGEX_FIND, mREGEX_MATCH, mRANGE_INCLUSIVE, mRANGE_EXCLUSIVE);
+
+  public static final TokenSet BINARY_EXPRESSIONS = TokenSet.create(ADDITIVE_EXPRESSION, MULTIPLICATIVE_EXPRESSION, POWER_EXPRESSION,
+                                                                    POWER_EXPRESSION_SIMPLE, LOGICAL_OR_EXPRESSION, LOGICAL_AND_EXPRESSION,
+                                                                    INCLUSIVE_OR_EXPRESSION, EXCLUSIVE_OR_EXPRESSION, AND_EXPRESSION,
+                                                                    REGEX_FIND_EXPRESSION, REGEX_MATCH_EXPRESSION, EQUALITY_EXPRESSION,
+                                                                    RELATIONAL_EXPRESSION, SHIFT_EXPRESSION, RANGE_EXPRESSION);
 
   public static final TokenSet DOTS = TokenSet.create(mSPREAD_DOT, mOPTIONAL_DOT, mMEMBER_POINTER, mDOT);
 
@@ -203,4 +213,6 @@ public abstract class TokenSets {
 
   public static final TokenSet SHIFT_SIGNS = TokenSet.create(COMPOSITE_LSHIFT_SIGN, COMPOSITE_RSHIFT_SIGN, COMPOSITE_TRIPLE_SHIFT_SIGN);
   public static final TokenSet CODE_REFERENCE_ELEMENT_NAME_TOKENS = TokenSet.create(mIDENT, kDEF,  kIN, kAS);
+
+  public static final TokenSet BLOCK_SET = TokenSet.create(CLOSABLE_BLOCK, BLOCK_STATEMENT, CONSTRUCTOR_BODY, OPEN_BLOCK, ENUM_BODY, CLASS_BODY);
 }

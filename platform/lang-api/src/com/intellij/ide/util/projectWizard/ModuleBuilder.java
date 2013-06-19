@@ -47,7 +47,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-public abstract class ModuleBuilder extends ProjectBuilder{
+public abstract class ModuleBuilder extends AbstractModuleBuilder {
   private static final ExtensionPointName<ModuleBuilderFactory> EP_NAME = ExtensionPointName.create("com.intellij.moduleBuilder");
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.util.projectWizard.ModuleBuilder");
@@ -57,6 +57,7 @@ public abstract class ModuleBuilder extends ProjectBuilder{
   private String myContentEntryPath;
   private final Set<ModuleConfigurationUpdater> myUpdaters = new HashSet<ModuleConfigurationUpdater>();
   private final EventDispatcher<ModuleBuilderListener> myDispatcher = EventDispatcher.create(ModuleBuilderListener.class);
+  private Map<String, Boolean> myAvailableFrameworks;
 
   public static List<ModuleBuilder> getAllBuilders() {
     final ArrayList<ModuleBuilder> result = new ArrayList<ModuleBuilder>();
@@ -78,23 +79,71 @@ public abstract class ModuleBuilder extends ProjectBuilder{
     return myName;
   }
 
+  @Override
   @Nullable
   public String getBuilderId() {
     ModuleType moduleType = getModuleType();
     return moduleType == null ? null : moduleType.getId();
   }
 
+  @Override
   public ModuleWizardStep[] createWizardSteps(WizardContext wizardContext, ModulesProvider modulesProvider) {
     ModuleType moduleType = getModuleType();
     return moduleType == null ? ModuleWizardStep.EMPTY_ARRAY : moduleType.createWizardSteps(wizardContext, this, modulesProvider);
   }
 
+  /**
+   * Typically delegates to ModuleType (e.g. JavaModuleType) that is more generic than ModuleBuilder
+   *
+   * @param settingsStep step to be modified
+   * @return callback ({@link com.intellij.ide.util.projectWizard.ModuleWizardStep#validate()}
+   *         and {@link com.intellij.ide.util.projectWizard.ModuleWizardStep#updateDataModel()}
+   *         will be invoked)
+   */
+  @Override
   @Nullable
   public ModuleWizardStep modifySettingsStep(SettingsStep settingsStep) {
     ModuleType type = getModuleType();
-    return type == null ? null : type.modifySettingsStep(settingsStep, this);
+    if (type == null) {
+      return null;
+    }
+    else {
+      final ModuleWizardStep step = type.modifySettingsStep(settingsStep, this);
+      final List<WizardInputField> fields = getAdditionalFields();
+      for (WizardInputField field : fields) {
+        field.addToSettings(settingsStep);
+      }
+      return new ModuleWizardStep() {
+        @Override
+        public JComponent getComponent() {
+          return null;
+        }
+
+        @Override
+        public void updateDataModel() {
+          if (step != null) {
+            step.updateDataModel();
+          }
+        }
+
+        @Override
+        public boolean validate() throws ConfigurationException {
+          for (WizardInputField field : fields) {
+            if (!field.validate()) {
+              return false;
+            }
+          }
+          return step == null || step.validate();
+        }
+      };
+    }
   }
 
+  protected List<WizardInputField> getAdditionalFields() {
+    return Collections.emptyList();
+  }
+
+  @Override
   public void setName(String name) {
     myName = acceptParameter(name);
   }
@@ -107,6 +156,7 @@ public abstract class ModuleBuilder extends ProjectBuilder{
     myUpdaters.add(updater);
   }
 
+  @Override
   public void setModuleFilePath(@NonNls String path) {
     myModuleFilePath = acceptParameter(path);
   }
@@ -124,6 +174,7 @@ public abstract class ModuleBuilder extends ProjectBuilder{
     return myContentEntryPath;
   }
 
+  @Override
   public void setContentEntryPath(String moduleRootPath) {
     final String path = acceptParameter(moduleRootPath);
     if (path != null) {
@@ -308,6 +359,14 @@ public abstract class ModuleBuilder extends ProjectBuilder{
 
   public Sdk getModuleJdk() {
     return myJdk;
+  }
+
+  public Map<String, Boolean> getAvailableFrameworks() {
+    return myAvailableFrameworks;
+  }
+
+  public void setAvailableFrameworks(Map<String, Boolean> availableFrameworks) {
+    myAvailableFrameworks = availableFrameworks;
   }
 
   public static abstract class ModuleConfigurationUpdater {

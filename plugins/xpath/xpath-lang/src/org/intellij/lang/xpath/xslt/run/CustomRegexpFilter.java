@@ -29,6 +29,7 @@ import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.util.io.URLUtil;
 
 import java.io.File;
 import java.net.MalformedURLException;
@@ -224,7 +225,7 @@ public class CustomRegexpFilter implements Filter {
 
     VirtualFile file;
     // try to interpret the filename as URL
-    if (fileName.indexOf("://") != -1) {
+    if (URLUtil.containsScheme(fileName)) {
       try {
         file = VfsUtil.findFileByURL(new URL(fileName));
       } catch (MalformedURLException e) {
@@ -243,8 +244,9 @@ public class CustomRegexpFilter implements Filter {
       final Document document = FileDocumentManager.getInstance().getDocument(file);
 
       final int start = document.getLineStartOffset(line);
+      final int max = document.getLineEndOffset(line);
       final int tabSize = CodeStyleSettingsManager.getInstance(myProject).getCurrentSettings().getTabSize(fileType);
-      column = EditorUtil.calcColumnNumber(null, document.getCharsSequence(), start, start + column, tabSize);
+      column = EditorUtil.calcColumnNumber(null, document.getCharsSequence(), start, Math.min(start + column, max), tabSize);
     }
     return new OpenFileHyperlinkInfo(myProject, file, line, column);
   }

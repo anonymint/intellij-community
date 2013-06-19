@@ -22,7 +22,9 @@
  */
 package com.intellij.lang.injection;
 
+import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NotNullLazyKey;
@@ -83,4 +85,11 @@ public abstract class InjectedLanguageManager {
   public abstract List<Pair<PsiElement, TextRange>> getInjectedPsiFiles(@NotNull PsiElement host);
 
   public abstract void dropFileCaches(@NotNull PsiFile file);
+
+  public abstract PsiFile getTopLevelFile(@NotNull PsiElement element);
+
+  @NotNull
+  public abstract List<DocumentWindow> getCachedInjectedDocuments(@NotNull PsiFile hostPsiFile);
+
+  public abstract void startRunInjectors(@NotNull Document hostDocument, boolean synchronously);
 }

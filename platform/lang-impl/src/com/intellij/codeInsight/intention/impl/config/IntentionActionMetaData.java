@@ -25,6 +25,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.lang.UrlClassLoader;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,6 +36,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
@@ -152,17 +156,21 @@ public final class IntentionActionMetaData {
     }
     if (urls.isEmpty()) {
       String[] children;
+      Exception cause = null;
       try {
-        children = new File(descriptionDirectory.toURI()).list();
+        URI uri = descriptionDirectory.toURI();
+        children = uri.isOpaque()? null : ObjectUtils.notNull(new File(uri).list(), ArrayUtil.EMPTY_STRING_ARRAY);
       }
       catch (URISyntaxException e) {
+        cause = e;
         children = null;
       }
       catch (IllegalArgumentException e) {
+        cause = e;
         children = null;
       }
-      LOG.error("URLs not found for prefix: '"+prefix+"', suffix: '"+suffix+"'; in directory: '"+descriptionDirectory+"'; directory contents: "+
-                (children == null ? null : Arrays.asList(children)));
+      LOG.error("URLs not found for available file types and prefix: '"+prefix+"', suffix: '"+suffix+"';" +
+                " in directory: '"+descriptionDirectory+ "'" + (children == null? "" : "; directory contents: "+ Arrays.asList(children)), cause);
       return new TextDescriptor[0];
     }
     return urls.toArray(new TextDescriptor[urls.size()]);
@@ -178,7 +186,7 @@ public final class IntentionActionMetaData {
     if (pageURL != null) {
       try {
         final String url = pageURL.toExternalForm();
-        return new URL(url.substring(0, url.lastIndexOf('/')));
+        return UrlClassLoader.internProtocol(new URL(url.substring(0, url.lastIndexOf('/'))));
       }
       catch (MalformedURLException e) {
         LOG.error(e);

@@ -76,7 +76,7 @@ public class WholeFileLocalInspectionsPassFactory extends AbstractProjectCompone
       }
 
       @Override
-      public void profileActivated(Profile oldProfile, Profile profile) {
+      public void profileActivated(@NotNull Profile oldProfile, Profile profile) {
         myFileTools.clear();
       }
     };
@@ -122,7 +122,9 @@ public class WholeFileLocalInspectionsPassFactory extends AbstractProjectCompone
                               boolean onTheFly,
                               @NotNull ProgressIndicator indicator,
                               @NotNull InspectionManagerEx iManager,
-                              boolean inVisibleRange, boolean checkDumbAwareness, List<LocalInspectionToolWrapper> wrappers) {
+                              boolean inVisibleRange,
+                              boolean checkDumbAwareness,
+                              @NotNull List<LocalInspectionToolWrapper> wrappers) {
         // already inspected in LIP
       }
     };

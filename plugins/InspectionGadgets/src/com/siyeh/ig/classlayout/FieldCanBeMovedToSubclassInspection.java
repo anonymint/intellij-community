@@ -39,11 +39,12 @@ public class FieldCanBeMovedToSubclassInspection extends BaseGlobalInspection {
     //return InspectionGadgetsBundle.message("field.can.be.moved.so.subclass.display.name");
   }
 
+  @Override
   @Nullable
   public CommonProblemDescriptor[] checkElement(
-    RefEntity refEntity, AnalysisScope analysisScope,
-    InspectionManager inspectionManager,
-    GlobalInspectionContext globalInspectionContext) {
+    @NotNull RefEntity refEntity, @NotNull AnalysisScope analysisScope,
+    @NotNull InspectionManager inspectionManager,
+    @NotNull GlobalInspectionContext globalInspectionContext) {
     if (!(refEntity instanceof RefField)) {
       return null;
     }

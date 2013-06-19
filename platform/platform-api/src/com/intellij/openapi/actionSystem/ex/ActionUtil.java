@@ -15,14 +15,17 @@
  */
 package com.intellij.openapi.actionSystem.ex;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.application.ApplicationNamesInfo;
-import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,17 +57,27 @@ public class ActionUtil {
       return;
     }
 
-    String message;
-    final String beAvailableUntil = " available while " + ApplicationNamesInfo.getInstance().getProductName() + " is updating indices";
-    if (actionNames.isEmpty()) {
-      message = "This action is not" + beAvailableUntil;
-    } else if (actionNames.size() == 1) {
-      message = "'" + actionNames.get(0) + "' action is not" + beAvailableUntil;
-    } else {
-      message = "None of the following actions are" + beAvailableUntil + ": " + StringUtil.join(actionNames, ", ");
-    }
+    DumbService.getInstance(project).showDumbModeNotification(getActionUnavailableMessage(actionNames));
+  }
 
-    DumbService.getInstance(project).showDumbModeNotification(message);
+  @NotNull
+  public static String getActionUnavailableMessage(@NotNull List<String> actionNames) {
+      String message;
+      final String beAvailableUntil = " available while " + ApplicationNamesInfo.getInstance().getProductName() + " is updating indices";
+      if (actionNames.isEmpty()) {
+        message = "This action is not" + beAvailableUntil;
+      } else if (actionNames.size() == 1) {
+        message = "'" + actionNames.get(0) + "' action is not" + beAvailableUntil;
+      } else {
+        message = "None of the following actions are" + beAvailableUntil + ": " + StringUtil.join(actionNames, ", ");
+      }
+      return message;
+  }
+
+  @NotNull
+  public static String getUnavailableMessage(@NotNull String action, boolean plural) {
+    return action + (plural ? " are" : " is")
+           + " not available while " + ApplicationNamesInfo.getInstance().getProductName() + " is updating indices";
   }
 
   /**
@@ -143,5 +156,15 @@ public class ActionUtil {
 
     return true;
   }
+
+  public static void performActionDumbAware(AnAction action, AnActionEvent e) {
+    try {
+      action.actionPerformed(e);
+    }
+    catch (IndexNotReadyException e1) {
+      showDumbModeWarning(e);
+    }
+  }
+
 
 }

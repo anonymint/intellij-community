@@ -16,6 +16,7 @@
 
 package com.intellij;
 
+import com.intellij.openapi.util.SystemInfo;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -30,8 +31,6 @@ import java.util.ResourceBundle;
  */
 @SuppressWarnings("MethodOverridesStaticMethodOfSuperclass")
 public class CommonBundle extends BundleBase {
-  public static boolean assertKeyIsFound = false;
-
   @NonNls private static final String BUNDLE = "messages.CommonBundle";
   private static Reference<ResourceBundle> ourBundle;
 
@@ -42,6 +41,7 @@ public class CommonBundle extends BundleBase {
     return message(getCommonBundle(), key, params);
   }
 
+  @NotNull
   private static ResourceBundle getCommonBundle() {
     ResourceBundle bundle = null;
     if (ourBundle != null) bundle = ourBundle.get();
@@ -120,5 +120,21 @@ public class CommonBundle extends BundleBase {
 
   public static String getApplyButtonText() {
     return message("button.apply");
+  }
+
+  public static String settingsTitle() {
+    return SystemInfo.isMac ? message("title.settings.mac") : message("title.settings");
+  }
+
+  public static String settingsAction() {
+    return SystemInfo.isMac ? message("action.settings.mac") : message("action.settings");
+  }
+
+  public static String settingsActionDescription() {
+    return SystemInfo.isMac ? message("action.settings.description.mac") : message("action.settings.description");
+  }
+
+  public static String settingsActionPath() {
+    return SystemInfo.isMac ? message("action.settings.path.mac") : message("action.settings.path");
   }
 }

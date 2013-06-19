@@ -107,7 +107,7 @@ public abstract class SingleRowLayoutStrategy {
     }
 
     public int getMoreRectAxisSize() {
-      return AllIcons.General.MoreTabs.getIconWidth() + 2 + 6;
+      return AllIcons.General.MoreTabs.getIconWidth() + 15;
     }
 
     public int getToFitLength(final SingleRowPassInfo data) {
@@ -145,7 +145,7 @@ public abstract class SingleRowLayoutStrategy {
 
     @Override
     public boolean drawPartialOverflowTabs() {
-      return true;
+      return false;
     }
 
     @Override

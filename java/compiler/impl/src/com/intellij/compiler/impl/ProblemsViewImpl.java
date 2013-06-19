@@ -16,6 +16,7 @@
 package com.intellij.compiler.impl;
 
 import com.intellij.compiler.ProblemsView;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.errorTreeView.ErrorTreeElement;
 import com.intellij.ide.errorTreeView.ErrorViewStructure;
 import com.intellij.ide.errorTreeView.GroupingElement;
@@ -69,7 +70,8 @@ public class ProblemsViewImpl extends ProblemsView{
         if (project.isDisposed()) {
           return;
         }
-        final ToolWindow tw = wm.registerToolWindow(PROBLEMS_TOOLWINDOW_ID, false, ToolWindowAnchor.BOTTOM, project);
+        final ToolWindow tw = wm.registerToolWindow(PROBLEMS_TOOLWINDOW_ID, false, ToolWindowAnchor.BOTTOM, project, true);
+        tw.setIcon(AllIcons.Toolwindows.Problems);
         final Content content = ContentFactory.SERVICE.getInstance().createContent(myPanel, "", false);
         // todo: setup content?
         tw.getContentManager().addContent(content);

@@ -33,7 +33,6 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.impl.JavaAwareProjectJdkTableImpl;
-import com.intellij.openapi.projectRoots.impl.JavaSdkImpl;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.roots.impl.libraries.ProjectLibraryTable;
 import com.intellij.openapi.roots.libraries.Library;
@@ -45,17 +44,13 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.IdeaTestUtil;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.PathUtil;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.idea.maven.execution.*;
 import org.jetbrains.idea.maven.model.MavenArtifact;
-import org.jetbrains.idea.maven.project.MavenArtifactDownloader;
-import org.jetbrains.idea.maven.project.MavenProject;
-import org.jetbrains.idea.maven.project.MavenProjectsManager;
-import org.jetbrains.idea.maven.project.MavenProjectsTree;
+import org.jetbrains.idea.maven.project.*;
 
 import javax.swing.*;
 import java.io.File;
@@ -116,7 +111,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
       expectedRoots[i] = VfsUtil.pathToUrl(expectedRoots[i]);
     }
 
-    assertUnorderedElementsAreEqual(actual, expectedRoots);
+    assertUnorderedPathsAreEqual(actual, Arrays.asList(expectedRoots));
   }
 
   protected void assertSources(String moduleName, String... expectedSources) {
@@ -155,7 +150,7 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
       actual.add(folderUrl);
     }
 
-    assertUnorderedElementsAreEqual(actual, expected);
+    assertUnorderedPathsAreEqual(actual, Arrays.asList(expected));
   }
 
   protected void assertModuleOutput(String moduleName, String output, String testOutput) {
@@ -211,9 +206,9 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
 
   private void assertModuleLibDepPath(LibraryOrderEntry lib, OrderRootType type, List<String> paths) {
     if (paths == null) return;
-    assertUnorderedElementsAreEqual(lib.getRootUrls(type), ArrayUtil.toStringArray(paths));
+    assertUnorderedPathsAreEqual(Arrays.asList(lib.getRootUrls(type)), paths);
     // also check the library because it may contain slight different set of urls (e.g. with duplicates)
-    assertUnorderedElementsAreEqual(lib.getLibrary().getUrls(type), ArrayUtil.toStringArray(paths));
+    assertUnorderedPathsAreEqual(Arrays.asList(lib.getLibrary().getUrls(type)), paths);
   }
 
   protected void assertModuleLibDepScope(String moduleName, String depName, DependencyScope scope) {
@@ -533,7 +528,8 @@ public abstract class MavenImportingTestCase extends MavenTestCase {
           modules.add(getModule(each));
         }
         if (useJps()) {
-          MavenProjectsManager.getInstance(myProject).generateBuildConfiguration(false);
+          new MavenResourceCompilerConfigurationGenerator(myProject, MavenProjectsManager.getInstance(myProject).getProjectsTreeForTests())
+            .generateBuildConfiguration(false);
         }
       }
     });

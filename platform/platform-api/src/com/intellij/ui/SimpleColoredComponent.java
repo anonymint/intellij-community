@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.TIntIntHashMap;
 import org.intellij.lang.annotations.JdkConstants;
@@ -49,9 +48,12 @@ import java.util.Locale;
  */
 @SuppressWarnings({"NonPrivateFieldAccessedInSynchronizedContext", "FieldAccessedSynchronizedAndUnsynchronized", "UnusedDeclaration"})
 public class SimpleColoredComponent extends JComponent implements Accessible {
+  private static final boolean isOracleRetina = UIUtil.isRetina() && SystemInfo.isOracleJvm;
+
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.SimpleColoredComponent");
 
-  public static final Color STYLE_SEARCH_MATCH_BACKGROUND = new Color(250, 250, 250, 140);
+  public static final Color SHADOW_COLOR = new JBColor(new Color(250, 250, 250, 140), Gray._0.withAlpha(50));
+  public static final Color STYLE_SEARCH_MATCH_BACKGROUND = SHADOW_COLOR; //api compatibility
   public static final int   FRAGMENT_ICON                 = -2;
 
   private final ArrayList<String>               myFragments;
@@ -145,13 +147,13 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
     _append(fragment, attributes, isMainText);
     revalidateAndRepaint();
   }
-  
+
   private synchronized void _append(@NotNull final String fragment, @NotNull final SimpleTextAttributes attributes, boolean isMainText) {
     myFragments.add(fragment);
     myAttributes.add(attributes);
     if (isMainText) {
       myMainTextLastIndex = myFragments.size() - 1;
-    }    
+    }
   }
 
   private void revalidateAndRepaint() {
@@ -182,7 +184,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
     final int alignIndex = myFragments.size()-1;
     myFixedWidths.put(alignIndex, width);
   }
-  
+
   public void setTextAlign(@JdkConstants.HorizontalAlignment int align) {
     myTextAlign = align;
   }
@@ -364,6 +366,10 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
       height += insets.top + insets.bottom;
     }
 
+    if (isOracleRetina) {
+      width++; //todo[kb] remove when IDEA-108760 will be fixed
+    }
+
     return new Dimension(width, height);
   }
 
@@ -407,7 +413,9 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
     }
 
     Font font = getFont();
-    LOG.assertTrue(font != null);
+    if (font == null) {
+      font = UIUtil.getLabelFont();
+    }
 
     int baseSize = font.getSize();
     boolean wasSmaller = false;
@@ -444,7 +452,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
     label.setIcon(myIcon);
 
     if (myFragments.size() > 0) {
-      final StringBuilder text = StringBuilderSpinAllocator.alloc();
+      final StringBuilder text = new StringBuilder();
       text.append("<html><body style=\"white-space:nowrap\">");
 
       for (int i = 0; i < myFragments.size(); i++) {
@@ -461,7 +469,6 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
 
       text.append("</body></html>");
       label.setText(text.toString());
-      StringBuilderSpinAllocator.dispose(text);
     }
 
     return label;
@@ -590,7 +597,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
     }
 
     final List<Object[]> searchMatches = new ArrayList<Object[]>();
-    
+
     UIUtil.applyRenderingHints(g);
     applyAdditionalHints(g);
     final Font ownFont = getFont();
@@ -634,7 +641,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
 
       if (!attributes.isSearchMatch()) {
         if (shouldDrawMacShadow()) {
-          g.setColor(STYLE_SEARCH_MATCH_BACKGROUND);
+          g.setColor(SHADOW_COLOR);
           g.drawString(fragment, offset, textBaseline + 1);
         }
 
@@ -701,11 +708,11 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
       g.setFont((Font) info[4]);
 
       if (shouldDrawMacShadow()) {
-        g.setColor(new Color(250, 250, 250, 140));
+        g.setColor(SHADOW_COLOR);
         g.drawString((String) info[3], (Integer) info[0], (Integer) info[2] + 1);
       }
 
-      g.setColor(Gray._50);
+      g.setColor(new JBColor(Gray._50, Gray._0));
       g.drawString((String) info[3], (Integer) info[0], (Integer) info[2]);
     }
     return offset;
@@ -743,7 +750,7 @@ public class SimpleColoredComponent extends JComponent implements Accessible {
   protected boolean shouldDrawBackground() {
     return false;
   }
-  
+
   protected void paintIcon(Graphics g, Icon icon, int offset) {
     icon.paintIcon(this, g, offset, (getHeight() - icon.getIconHeight()) / 2);
   }

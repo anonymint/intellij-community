@@ -23,6 +23,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.Nullable;
 
@@ -36,44 +37,49 @@ public class JavaEditorTextProviderImpl implements EditorTextProvider {
   public TextWithImports getEditorText(PsiElement elementAtCaret) {
     String result = null;
     PsiElement element = findExpression(elementAtCaret);
-    if (element != null) {
-      if (element instanceof PsiReferenceExpression) {
-        final PsiReferenceExpression reference = (PsiReferenceExpression)element;
-        if (reference.getQualifier() == null) {
-          final PsiElement resolved = reference.resolve();
-          if (resolved instanceof PsiEnumConstant) {
-            final PsiEnumConstant enumConstant = (PsiEnumConstant)resolved;
-            final PsiClass enumClass = enumConstant.getContainingClass();
-            if (enumClass != null) {
-              result = enumClass.getName() + "." + enumConstant.getName();
-            }
-          }
-        }
-      }
-      if (result == null) {
-        result = element.getText();
-      }
+    if (element == null) return null;
+    if (element instanceof PsiVariable) {
+      result = qualifyEnumConstant(element, ((PsiVariable)element).getName());
+    }
+    else if (element instanceof PsiMethod) {
+      result = ((PsiMethod)element).getName() + "()";
+    }
+    else if (element instanceof PsiReferenceExpression) {
+      PsiReferenceExpression reference = (PsiReferenceExpression)element;
+      result = qualifyEnumConstant(reference.resolve(), element.getText());
+    }
+    else {
+      result = element.getText();
     }
     return result != null? new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, result) : null;
   }
 
   @Nullable
   private static PsiElement findExpression(PsiElement element) {
-    if (!(element instanceof PsiIdentifier || element instanceof PsiKeyword)) {
-      return null;
+    PsiElement e = PsiTreeUtil.getParentOfType(element, PsiVariable.class, PsiExpression.class, PsiMethod.class);
+    if (e instanceof PsiVariable) {
+      // return e;
     }
-    PsiElement parent = element.getParent();
-    if (parent instanceof PsiVariable) {
-      return element;
+    else if (e instanceof PsiMethod && element.getParent() != e) {
+      e = null;
     }
-    if (parent instanceof PsiReferenceExpression) {
-      if (parent.getParent() instanceof PsiCallExpression) return parent.getParent();
-      return parent;
+    else if (e instanceof PsiReferenceExpression) {
+      if (e.getParent() instanceof PsiCallExpression) {
+        e = e.getParent();
+      }
+      else if (e.getParent() instanceof PsiReferenceExpression) {
+        // <caret>System.out case should not return plain class name
+        PsiElement resolve = ((PsiReferenceExpression)e).resolve();
+        if (resolve instanceof PsiClass) {
+          e = e.getParent();
+        }
+      }
     }
-    if (parent instanceof PsiThisExpression) {
-      return parent;
+    if (e instanceof PsiNewExpression) {
+      // skip new Runnable() { ... }
+      if (((PsiNewExpression)e).getAnonymousClass() != null) return null;
     }
-    return null;
+    return e;
   }
 
   @Nullable
@@ -126,4 +132,15 @@ public class JavaEditorTextProviderImpl implements EditorTextProvider {
     return null;
   }
 
+  @Nullable
+  private static String qualifyEnumConstant(PsiElement resolved, @Nullable String def) {
+    if (resolved instanceof PsiEnumConstant) {
+      final PsiEnumConstant enumConstant = (PsiEnumConstant)resolved;
+      final PsiClass enumClass = enumConstant.getContainingClass();
+      if (enumClass != null) {
+        return enumClass.getName() + "." + enumConstant.getName();
+      }
+    }
+    return def;
+  }
 }

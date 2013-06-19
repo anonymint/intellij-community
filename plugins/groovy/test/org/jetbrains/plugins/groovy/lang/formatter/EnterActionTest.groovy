@@ -240,14 +240,14 @@ def c = { a ->
   public void testEnterAfterAssignmentInDeclaration() {
     doTest """def greeting = <caret>
 """, """def greeting =
-  <caret>
+    <caret>
 """
   }
 
   public void testEnterInAssignment() {
     doTest """greeting = <caret>
 """, """greeting =
-  <caret>
+    <caret>
 """
 
   }
@@ -349,5 +349,21 @@ def cl =  {
 '''
   }
 
+  void testIndentAfterLabelColon() {
+    doTest('''
+class A extends spock.lang.Specification {
+  def 'test'() {
+    abc:<caret>
+  }
+}
+''', '''
+class A extends spock.lang.Specification {
+  def 'test'() {
+    abc:
+      <caret>
+  }
+}
+''')
+  }
 }
 

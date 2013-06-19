@@ -16,7 +16,6 @@
 package org.jetbrains.jps.incremental;
 
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.LowMemoryWatcher;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.UserDataHolderBase;
@@ -34,6 +33,7 @@ import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.ModuleChunk;
+import org.jetbrains.jps.TimingLog;
 import org.jetbrains.jps.api.CanceledStatus;
 import org.jetbrains.jps.api.GlobalOptions;
 import org.jetbrains.jps.api.RequestFuture;
@@ -50,10 +50,12 @@ import org.jetbrains.jps.cmdline.ProjectDescriptor;
 import org.jetbrains.jps.incremental.fs.BuildFSState;
 import org.jetbrains.jps.incremental.java.ExternalJavacDescriptor;
 import org.jetbrains.jps.incremental.messages.*;
+import org.jetbrains.jps.incremental.storage.BuildTargetConfiguration;
 import org.jetbrains.jps.incremental.storage.OneToManyPathsMapping;
 import org.jetbrains.jps.indices.ModuleExcludeIndex;
 import org.jetbrains.jps.model.java.JpsJavaExtensionService;
 import org.jetbrains.jps.model.java.compiler.JpsJavaCompilerConfiguration;
+import org.jetbrains.jps.model.module.JpsModule;
 import org.jetbrains.jps.service.SharedThreadPool;
 import org.jetbrains.jps.util.JpsPathUtil;
 
@@ -66,9 +68,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -80,7 +80,7 @@ public class IncProjectBuilder {
 
   private static final String CLASSPATH_INDEX_FINE_NAME = "classpath.index";
   private static final boolean GENERATE_CLASSPATH_INDEX = Boolean.parseBoolean(System.getProperty(GlobalOptions.GENERATE_CLASSPATH_INDEX_OPTION, "false"));
-  private static final Key<Set<BuildTarget<?>>> TARGET_WITH_CLEARED_OUTPUT = Key.create("_targets_with_cleared_output_");
+  private static final GlobalContextKey<Set<BuildTarget<?>>> TARGET_WITH_CLEARED_OUTPUT = GlobalContextKey.create("_targets_with_cleared_output_");
   private static final int MAX_BUILDER_THREADS;
   static {
     int maxThreads = 6;
@@ -105,6 +105,7 @@ public class IncProjectBuilder {
       }
     }
   };
+  private final boolean myIsTestMode;
 
   private volatile float myTargetsProcessed = 0.0f;
   private final float myTotalTargetsWork;
@@ -112,7 +113,7 @@ public class IncProjectBuilder {
   private final List<Future> myAsyncTasks = Collections.synchronizedList(new ArrayList<Future>());
 
   public IncProjectBuilder(ProjectDescriptor pd, BuilderRegistry builderRegistry, Map<String, String> builderParams, CanceledStatus cs,
-                           @Nullable Callbacks.ConstantAffectionResolver constantSearch) {
+                           @Nullable Callbacks.ConstantAffectionResolver constantSearch, final boolean isTestMode) {
     myProjectDescriptor = pd;
     myBuilderRegistry = builderRegistry;
     myBuilderParams = builderParams;
@@ -120,6 +121,7 @@ public class IncProjectBuilder {
     myConstantSearch = constantSearch;
     myTotalTargetsWork = pd.getBuildTargetIndex().getAllTargets().size();
     myTotalModuleLevelBuilderCount = builderRegistry.getModuleLevelBuilderCount();
+    myIsTestMode = isTestMode;
   }
 
   public void addMessageHandler(MessageHandler handler) {
@@ -129,7 +131,7 @@ public class IncProjectBuilder {
   public void checkUpToDate(CompileScope scope) {
     CompileContextImpl context = null;
     try {
-      context = createContext(scope, true, false);
+      context = createContext(scope);
       final BuildFSState fsState = myProjectDescriptor.fsState;
       for (BuildTarget<?> target : myProjectDescriptor.getBuildTargetIndex().getAllTargets()) {
         if (scope.isAffected(target)) {
@@ -163,8 +165,7 @@ public class IncProjectBuilder {
   }
 
 
-  public void build(CompileScope scope, final boolean isMake, final boolean isProjectRebuild, boolean forceCleanCaches)
-    throws RebuildRequestedException {
+  public void build(CompileScope scope, boolean forceCleanCaches) throws RebuildRequestedException {
 
     final LowMemoryWatcher memWatcher = LowMemoryWatcher.register(new Runnable() {
       @Override
@@ -173,17 +174,32 @@ public class IncProjectBuilder {
         myProjectDescriptor.timestamps.getStorage().force();
       }
     });
+    
+    startTempDirectoryCleanupTask();
+    
     CompileContextImpl context = null;
     try {
-      context = createContext(scope, isMake, isProjectRebuild);
+      context = createContext(scope);
       runBuild(context, forceCleanCaches);
       myProjectDescriptor.dataManager.saveVersion();
+      reportRebuiltModules(context);
+    }
+    catch (StopBuildException e) {
+      reportRebuiltModules(context);
+      // some builder decided to stop the build
+      // report optional progress message if any
+      final String msg = e.getMessage();
+      if (!StringUtil.isEmptyOrSpaces(msg)) {
+        myMessageDispatcher.processMessage(new ProgressMessage(msg));
+      }
     }
     catch (ProjectBuildException e) {
+      LOG.info(e);
       final Throwable cause = e.getCause();
       if (cause instanceof PersistentEnumerator.CorruptedException ||
           cause instanceof MappingFailedException ||
           cause instanceof IOException) {
+        
         myMessageDispatcher.processMessage(new CompilerMessage(
           "", BuildMessage.Kind.INFO,
           "Internal caches are corrupted or have outdated format, forcing project rebuild: " +
@@ -192,35 +208,87 @@ public class IncProjectBuilder {
         throw new RebuildRequestedException(cause);
       }
       else {
-        if (cause == null) {
-          // some builder desided to stop the build
-          // report optional progress message if exists
-          final String msg = e.getMessage();
-          if (!StringUtil.isEmpty(msg)) {
-            myMessageDispatcher.processMessage(new ProgressMessage(msg));
-          }
+        // should stop the build with error
+        final String errMessage = e.getMessage();
+        final CompilerMessage msg;
+        if (StringUtil.isEmptyOrSpaces(errMessage)) {
+          msg = new CompilerMessage("", cause != null? cause : e);
         }
         else {
-          // the reason for the build stop is unexpected internal error, report it
-          myMessageDispatcher.processMessage(new CompilerMessage("", cause));
+          final String causeMessage = cause != null? cause.getMessage() : "";
+          msg = new CompilerMessage("", BuildMessage.Kind.ERROR, StringUtil.isEmptyOrSpaces(causeMessage) || errMessage.equals(causeMessage)? errMessage : errMessage + ": " + causeMessage);
         }
+        myMessageDispatcher.processMessage(msg);
       }
     }
     finally {
       memWatcher.stop();
       flushContext(context);
-      // wait for the async tasks
+      // wait for async tasks
+      final CanceledStatus status = context == null? CanceledStatus.NULL : context.getCancelStatus();
       synchronized (myAsyncTasks) {
         for (Future task : myAsyncTasks) {
-          try {
-            task.get();
+          if (status.isCanceled()) {
+            break;
           }
-          catch (Throwable th) {
-            LOG.info(th);
+          waitForTask(status, task);
+        }
+      }
+    }
+  }
+
+  private static void waitForTask(@NotNull CanceledStatus status, Future task) {
+    try {
+      while (true) {
+        try {
+          task.get(500L, TimeUnit.MILLISECONDS);
+          break;
+        }
+        catch (TimeoutException ignored) {
+          if (status.isCanceled()) {
+            break;
           }
         }
       }
     }
+    catch (Throwable th) {
+      LOG.info(th);
+    }
+  }
+
+  private static void reportRebuiltModules(CompileContextImpl context) {
+    final Set<JpsModule> modules = BuildTargetConfiguration.MODULES_WITH_TARGET_CONFIG_CHANGED_KEY.get(context);
+    if (modules == null || modules.isEmpty()) {
+      return;
+    }
+    final StringBuilder message = new StringBuilder();
+    if (modules.size() > 1) {
+      message.append("Modules ");
+      final int namesLimit = 5;
+      int idx = 0;
+      for (Iterator<JpsModule> iterator = modules.iterator(); iterator.hasNext(); ) {
+        final JpsModule module = iterator.next();
+        if (idx == namesLimit && iterator.hasNext()) {
+          message.append(" and ").append(modules.size() - namesLimit).append(" others");
+          break;
+        }
+        if (idx > 0) {
+          message.append(", ");
+        }
+        message.append("\"").append(module.getName()).append("\"");
+        idx += 1;
+      }
+      message.append(" were");
+    }
+    else {
+      message.append("Module \"").append(modules.iterator().next().getName()).append("\" was");
+    }
+    message.append(" fully rebuilt due to project configuration");
+    if (ModuleBuildTarget.REBUILD_ON_DEPENDENCY_CHANGE) {
+      message.append("/dependencies");
+    }
+    message.append(" changes");
+    context.processMessage(new CompilerMessage("", BuildMessage.Kind.INFO, message.toString()));
   }
 
   private static void flushContext(CompileContext context) {
@@ -241,26 +309,9 @@ public class IncProjectBuilder {
       }
       ExternalJavacDescriptor.KEY.set(context, null);
     }
-    //cleanupJavacNameTable();
   }
 
-  //private static boolean ourClenupFailed = false;
-
-  //private static void cleanupJavacNameTable() {
-  //  try {
-  //    if (JavaBuilder.USE_EMBEDDED_JAVAC && !ourClenupFailed) {
-  //      final Field freelistField = Class.forName("com.sun.tools.javac.util.Name$Table").getDeclaredField("freelist");
-  //      freelistField.setAccessible(true);
-  //      freelistField.set(null, com.sun.tools.javac.util.List.nil());
-  //    }
-  //  }
-  //  catch (Throwable e) {
-  //    ourClenupFailed = true;
-  //    //LOG.info(e);
-  //  }
-  //}
-
-  private void runBuild(CompileContextImpl context, boolean forceCleanCaches) throws ProjectBuildException {
+  private void runBuild(final CompileContextImpl context, boolean forceCleanCaches) throws ProjectBuildException {
     context.setDone(0.0f);
 
     LOG.info("Building project; isRebuild:" +
@@ -269,6 +320,8 @@ public class IncProjectBuilder {
              context.isMake() +
              " parallel compilation:" +
              BuildRunner.PARALLEL_BUILD_ENABLED);
+
+    context.addBuildListener(new ChainedTargetsBuildListener(context));
 
     for (TargetBuilder builder : myBuilderRegistry.getTargetBuilders()) {
       builder.buildStarted(context);
@@ -284,28 +337,15 @@ public class IncProjectBuilder {
 
       context.processMessage(new ProgressMessage("Running 'before' tasks"));
       runTasks(context, myBuilderRegistry.getBeforeTasks());
+      TimingLog.LOG.debug("'before' tasks finished");
 
       context.processMessage(new ProgressMessage("Checking sources"));
       buildChunks(context);
+      TimingLog.LOG.debug("Building targets finished");
 
       context.processMessage(new ProgressMessage("Running 'after' tasks"));
       runTasks(context, myBuilderRegistry.getAfterTasks());
-
-      // cleanup output roots layout, commented for efficiency
-      //final ModuleOutputRootsLayout outputRootsLayout = context.getDataManager().getOutputRootsLayout();
-      //try {
-      //  final Iterator<String> keysIterator = outputRootsLayout.getKeysIterator();
-      //  final Map<String, JpsModule> modules = myProjectDescriptor.project.getModules();
-      //  while (keysIterator.hasNext()) {
-      //    final String moduleName = keysIterator.next();
-      //    if (modules.containsKey(moduleName)) {
-      //      outputRootsLayout.remove(moduleName);
-      //    }
-      //  }
-      //}
-      //catch (IOException e) {
-      //  throw new ProjectBuildException(e);
-      //}
+      TimingLog.LOG.debug("'after' tasks finished");
     }
     finally {
       for (TargetBuilder builder : myBuilderRegistry.getTargetBuilders()) {
@@ -319,14 +359,41 @@ public class IncProjectBuilder {
 
   }
 
-  private CompileContextImpl createContext(CompileScope scope, boolean isMake, final boolean isProjectRebuild)
-    throws ProjectBuildException {
-    final CompileContextImpl context = new CompileContextImpl(scope, myProjectDescriptor, isMake, isProjectRebuild, myMessageDispatcher,
-                                                              myBuilderParams, myCancelStatus
-    );
+  private void startTempDirectoryCleanupTask() {
+    final File systemRoot = Utils.getSystemRoot();
+    final String tempPath = System.getProperty("java.io.tmpdir", null);
+    if (StringUtil.isEmptyOrSpaces(tempPath)) {
+      return;
+    }
+    final File tempDir = new File(tempPath);
+    if (!FileUtil.isAncestor(systemRoot, tempDir, true)) {
+      // cleanup only 'local' temp
+      return;
+    }
+    final File[] files = tempDir.listFiles();
+    if (files != null && files.length != 0) {
+      final RunnableFuture<Void> task = new FutureTask<Void>(new Runnable() {
+        public void run() {
+          for (File tempFile : files) {
+            FileUtil.delete(tempFile);
+          }
+        }
+      }, null);
+      final Thread thread = new Thread(task, "Temp directory cleanup");
+      thread.setPriority(Thread.MIN_PRIORITY);
+      thread.setDaemon(true);
+      thread.start();
+      myAsyncTasks.add(task);
+    }
+  }
+
+  private CompileContextImpl createContext(CompileScope scope) throws ProjectBuildException {
+    final CompileContextImpl context = new CompileContextImpl(scope, myProjectDescriptor, myMessageDispatcher,
+                                                              myBuilderParams, myCancelStatus);
+
     // in project rebuild mode performance gain is hard to observe, so it is better to save memory
     // in make mode it is critical to traverse file system as fast as possible, so we choose speed over memory savings
-    myProjectDescriptor.setFSCache(isProjectRebuild? FSCache.NO_CACHE : new FSCache());
+    myProjectDescriptor.setFSCache(context.isProjectRebuild() ? FSCache.NO_CACHE : new FSCache());
     JavaBuilderUtil.CONSTANT_SEARCH_SERVICE.set(context, myConstantSearch);
     return context;
   }
@@ -463,10 +530,16 @@ public class IncProjectBuilder {
         // do not delete output root itself to avoid lots of unnecessary "roots_changed" events in IDEA
         final File[] children = outputRoot.listFiles();
         if (children != null) {
-          filesToDelete.addAll(Arrays.asList(children));
+          for (File child : children) {
+            if (!child.delete()) {
+              filesToDelete.add(child);
+            }
+          }
         }
-        else if (outputRoot.isFile()) {
-          filesToDelete.add(outputRoot);
+        else { // the output root must be file
+          if (!outputRoot.delete()) {
+            filesToDelete.add(outputRoot);
+          }
         }
         registerTargetsWithClearedOutput(context, entry.getValue());
       }
@@ -742,6 +815,7 @@ public class IncProjectBuilder {
   private void buildTargetsChunk(CompileContext context, final BuildTargetChunk chunk) throws ProjectBuildException {
     boolean doneSomething;
     try {
+      sendBuildingTargetMessages(chunk.getTargets(), BuildingTargetProgressMessage.Event.STARTED);
       Utils.ERRORS_DETECTED_KEY.set(context, Boolean.FALSE);
 
       for (BuildTarget<?> target : chunk.getTargets()) {
@@ -797,7 +871,12 @@ public class IncProjectBuilder {
       finally {
         Utils.REMOVED_SOURCES_KEY.set(context, null);
       }
+      sendBuildingTargetMessages(chunk.getTargets(), BuildingTargetProgressMessage.Event.FINISHED);
     }
+  }
+
+  private void sendBuildingTargetMessages(@NotNull Set<? extends BuildTarget<?>> targets, @NotNull BuildingTargetProgressMessage.Event event) {
+    myMessageDispatcher.processMessage(new BuildingTargetProgressMessage(targets, event));
   }
 
   private static void createClasspathIndex(final BuildTargetChunk chunk) {
@@ -858,7 +937,16 @@ public class IncProjectBuilder {
         final SourceToOutputMapping sourceToOutputStorage = context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
         final ProjectBuilderLogger logger = context.getLoggingManager().getProjectBuilderLogger();
         // actually delete outputs associated with removed paths
-        for (String deletedSource : deletedPaths) {
+        final Collection<String> pathsForIteration;
+        if (myIsTestMode) {
+          // ensure predictable order in test logs
+          pathsForIteration = new ArrayList<String>(deletedPaths);
+          Collections.sort((List<String>)pathsForIteration);
+        }
+        else {
+          pathsForIteration = deletedPaths;
+        }
+        for (String deletedSource : pathsForIteration) {
           // deleting outputs corresponding to non-existing source
           final Collection<String> outputs = sourceToOutputStorage.getOutputs(deletedSource);
 
@@ -951,7 +1039,7 @@ public class IncProjectBuilder {
               FSOperations.processFilesToRecompile(context, chunk, processor);
             }
           };
-        if (!context.isProjectRebuild()) {
+        if (!JavaBuilderUtil.isForcedRecompilationAllJavaModules(context)) {
           final Map<ModuleBuildTarget, Set<File>> cleanedSources = BuildOperations
             .cleanOutputsCorrespondingToChangedFiles(context, dirtyFilesHolder);
           for (Map.Entry<ModuleBuildTarget, Set<File>> entry : cleanedSources.entrySet()) {
@@ -980,7 +1068,7 @@ public class IncProjectBuilder {
             doneSomething |= (buildResult != ModuleLevelBuilder.ExitCode.NOTHING_DONE);
 
             if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
-              throw new ProjectBuildException("Builder " + builder.getPresentableName() + " requested build stop");
+              throw new StopBuildException("Builder " + builder.getPresentableName() + " requested build stop");
             }
             context.checkCanceled();
             if (buildResult == ModuleLevelBuilder.ExitCode.ADDITIONAL_PASS_REQUIRED) {
@@ -993,7 +1081,7 @@ public class IncProjectBuilder {
               nextPassRequired = true;
             }
             else if (buildResult == ModuleLevelBuilder.ExitCode.CHUNK_REBUILD_REQUIRED) {
-              if (!rebuildFromScratchRequested && !context.isProjectRebuild()) {
+              if (!rebuildFromScratchRequested && !JavaBuilderUtil.isForcedRecompilationAllJavaModules(context)) {
                 LOG.info("Builder " + builder.getPresentableName() + " requested rebuild of module chunk " + chunk.getName());
                 // allow rebuild from scratch only once per chunk
                 rebuildFromScratchRequested = true;
@@ -1052,14 +1140,6 @@ public class IncProjectBuilder {
     BuildOperations.markTargetsUpToDate(context, chunk);
   }
 
-  private static final Set<Key> GLOBAL_CONTEXT_KEYS = new HashSet<Key>();
-  static {
-    // keys for data that must be visible to all threads
-    GLOBAL_CONTEXT_KEYS.add(ExternalJavacDescriptor.KEY);
-    GLOBAL_CONTEXT_KEYS.add(FSOperations.ALL_OUTPUTS_KEY);
-    GLOBAL_CONTEXT_KEYS.add(TARGET_WITH_CLEARED_OUTPUT);
-  }
-
   private static CompileContext createContextWrapper(final CompileContext delegate) {
     final ClassLoader loader = delegate.getClass().getClassLoader();
     final UserDataHolderBase localDataHolder = new UserDataHolderBase();
@@ -1072,8 +1152,7 @@ public class IncProjectBuilder {
         final Class<?> declaringClass = method.getDeclaringClass();
         if (dataHolderInterface.equals(declaringClass)) {
           final Object firstArgument = args[0];
-          final boolean isGlobalContextKey = firstArgument instanceof Key && GLOBAL_CONTEXT_KEYS.contains((Key)firstArgument);
-          if (!isGlobalContextKey) {
+          if (!(firstArgument instanceof GlobalContextKey)) {
             final boolean isWriteOperation = args.length == 2 /*&& void.class.equals(method.getReturnType())*/;
             if (isWriteOperation) {
               if (args[1] == null) {

@@ -15,21 +15,22 @@
  */
 package com.intellij.tools;
 
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.DataKey;
-import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.*;
 import org.jetbrains.annotations.NonNls;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
+ * Stores main keys from DataContext.
+ *
+ * Normally nobody needs this. This handles specific case when after action is invoked a dialog can appear, but
+ * we need the DataContext from the action.
  *
  * @author Konstantin Bulenkov
  */
 class HackyDataContext implements DataContext {
-  private static DataKey[] keys = {
+  private static final DataKey[] keys = {
     PlatformDataKeys.PROJECT,
     PlatformDataKeys.PROJECT_FILE_DIRECTORY,
     PlatformDataKeys.EDITOR,
@@ -40,8 +41,10 @@ class HackyDataContext implements DataContext {
 
 
   private final Map<String, Object> values = new HashMap<String, Object>();
+  private final AnActionEvent myActionEvent;
 
-  public HackyDataContext(DataContext context) {
+  public HackyDataContext(DataContext context, AnActionEvent e) {
+    myActionEvent = e;
     for (DataKey key : keys) {
       values.put(key.getName(), key.getData(context));
     }
@@ -55,5 +58,9 @@ class HackyDataContext implements DataContext {
     //noinspection UseOfSystemOutOrSystemErr
     System.out.println("Please add " + dataId + " key in " + getClass().getName());
     return null;
+  }
+
+  AnActionEvent getActionEvent() {
+    return myActionEvent;
   }
 }

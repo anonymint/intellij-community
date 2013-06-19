@@ -29,6 +29,7 @@ import com.intellij.openapi.keymap.impl.ui.ActionsTreeUtil;
 import com.intellij.openapi.keymap.impl.ui.Group;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
@@ -80,6 +81,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
     myIdToNameList.add(new Pair(IdeActions.GROUP_COMMANDER_POPUP, ActionsTreeUtil.COMMANDER_POPUP));
     myIdToNameList.add(new Pair(IdeActions.GROUP_J2EE_VIEW_POPUP, ActionsTreeUtil.J2EE_POPUP));
     myIdToNameList.add(new Pair(IdeActions.GROUP_NAVBAR_POPUP, "Navigation Bar"));
+    myIdToNameList.add(new Pair("NavBarToolBar", "Navigation Bar Toolbar"));
 
     CustomizableActionGroupProvider.CustomizableActionGroupRegistrar registrar =
       new CustomizableActionGroupProvider.CustomizableActionGroupRegistrar() {
@@ -228,7 +230,7 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
     }
 
     final String text = group.getTemplatePresentation().getText();
-    if (text != null) {
+    if (!StringUtil.isEmpty(text)) {
       for (ActionUrl url : myActions) {
         if (url.getGroupPath().contains(text) || url.getGroupPath().contains(defaultGroupName)) {
           return true;
@@ -335,13 +337,12 @@ public class CustomActionsSchema implements ExportableComponent, NamedJDOMExtern
     }
     final IdeFrameImpl frame = WindowManagerEx.getInstanceEx().getFrame(null);
     if (frame != null) {
-      frame.updateToolbar();
-      frame.updateMenuBar();
+      frame.updateView();
     }
   }
 
 
- @NotNull
+  @NotNull
   public File[] getExportFiles() {
     return new File[]{PathManager.getOptionsFile(this)};
   }

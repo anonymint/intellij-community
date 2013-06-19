@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,10 +25,11 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.OverridingMethodsSearch;
 import com.intellij.psi.search.searches.SuperMethodsSearch;
-import org.jetbrains.plugins.groovy.annotator.intentions.GrModifierFix;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.groovy.codeInspection.BaseInspection;
 import org.jetbrains.plugins.groovy.codeInspection.BaseInspectionVisitor;
 import org.jetbrains.plugins.groovy.codeInspection.GroovyInspectionBundle;
+import org.jetbrains.plugins.groovy.codeInspection.bugs.GrModifierFix;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElement;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyRecursiveElementVisitor;
 import org.jetbrains.plugins.groovy.lang.psi.api.GroovyResolveResult;
@@ -57,6 +58,7 @@ public class GrMethodMayBeStaticInspection extends BaseInspection {
     return optionsPanel;
   }
 
+  @NotNull
   @Override
   protected BaseInspectionVisitor buildVisitor() {
     return new BaseInspectionVisitor() {
@@ -112,6 +114,7 @@ public class GrMethodMayBeStaticInspection extends BaseInspection {
     final GrParameter[] parameters = method.getParameters();
     if (method.getName().equals("propertyMissing") && (parameters.length == 2 || parameters.length == 1)) return true;
     if (method.getName().equals("methodMissing") && (parameters.length == 2 || parameters.length == 1)) return true;
+    if (method.getContainingClass() instanceof PsiAnonymousClass) return true;
 
     for (GrMethodMayBeStaticInspectionFilter filter : GrMethodMayBeStaticInspectionFilter.EP_NAME.getExtensions()) {
       if (filter.isIgnored(method)) {

@@ -22,6 +22,7 @@ import com.intellij.ide.util.treeView.NodeRenderer;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.command.CommandProcessor;
@@ -72,7 +73,7 @@ public class FileSystemTreeImpl implements FileSystemTree {
   private final ArrayList<Runnable> myOkActions = new ArrayList<Runnable>(2);
   private final FileChooserDescriptor myDescriptor;
 
-  private final List<Listener> myListeners = new ArrayList<Listener>();
+  private final List<Listener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final MyExpansionListener myExpansionListener = new MyExpansionListener();
 
   private Map<VirtualFile, VirtualFile> myEverExpanded = new WeakHashMap<VirtualFile, VirtualFile>();
@@ -351,6 +352,10 @@ public class FileSystemTreeImpl implements FileSystemTree {
     return roots.size() == 1 ? roots.get(0) : null;
   }
 
+  public <T> T getData(DataKey<T> key) {
+    return myDescriptor.getUserData(key);
+  }
+
   @NotNull
   public VirtualFile[] getSelectedFiles() {
     final List<VirtualFile> files = collectSelectedElements(new NullableFunction<FileElement, VirtualFile>() {
@@ -360,7 +365,7 @@ public class FileSystemTreeImpl implements FileSystemTree {
         return file != null && file.isValid() ? file : null;
       }
     });
-    return VfsUtil.toVirtualFileArray(files);
+    return VfsUtilCore.toVirtualFileArray(files);
   }
 
   private <T> List<T> collectSelectedElements(final Function<FileElement, T> converter) {

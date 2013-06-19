@@ -376,7 +376,7 @@ public class FileHistoryPanelImpl extends PanelWithActionsAndCloseButton {
 
     replaceTransferable();
 
-    myUpdateAlarm = new Alarm(Alarm.ThreadToUse.OWN_THREAD, myProject);
+    myUpdateAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, myProject);
 
     final HistoryAsTreeProvider treeHistoryProvider = myHistorySession.getHistoryAsTreeProvider();
 
@@ -787,7 +787,7 @@ public class FileHistoryPanelImpl extends PanelWithActionsAndCloseButton {
     }
     result.add(new RefreshFileHistoryAction());
     if (! myIsStaticAndEmbedded) {
-      result.add(new ToggleAction("Show Details", "Display details panel", AllIcons.Actions.ShowSource) {
+      result.add(new ToggleAction("Show Details", "Display details panel", AllIcons.Actions.Preview) {
         @Override
         public boolean isSelected(AnActionEvent e) {
           return getConfiguration().SHOW_FILE_HISTORY_DETAILS;
@@ -1349,6 +1349,7 @@ public class FileHistoryPanelImpl extends PanelWithActionsAndCloseButton {
       }
     }
 
+    @Nullable
     @Override
     public RepositoryLocation getChangedRepositoryPath() {
       return myRevision.getChangedRepositoryPath();

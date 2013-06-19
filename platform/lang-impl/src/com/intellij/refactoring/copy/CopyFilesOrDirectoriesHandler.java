@@ -60,6 +60,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
     return filteredElements.length == elements.length;
   }
 
+  @Override
   public void doCopy(final PsiElement[] elements, PsiDirectory defaultTargetDirectory) {
     if (defaultTargetDirectory == null) {
       defaultTargetDirectory = getCommonParentDirectory(elements);
@@ -76,6 +77,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
   public static void copyAsFiles(PsiElement[] elements, PsiDirectory defaultTargetDirectory, Project project) {
     PsiDirectory targetDirectory = null;
     String newName = null;
+    boolean openInEditor = true;
 
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       targetDirectory = defaultTargetDirectory;
@@ -86,6 +88,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
       if (dialog.isOK()) {
         newName = elements.length == 1 ? dialog.getNewName() : null;
         targetDirectory = dialog.getTargetDirectory();
+        openInEditor = dialog.openInEditor();
       }
     }
 
@@ -102,10 +105,11 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
         CommonRefactoringUtil.showErrorHint(project, null, e.getMessage(), CommonBundle.getErrorTitle(), null);
         return;
       }
-      copyImpl(elements, newName, targetDirectory, false);
+      copyImpl(elements, newName, targetDirectory, false, openInEditor);
     }
   }
 
+  @Override
   public void doClone(final PsiElement element) {
     doCloneFile(element);
   }
@@ -124,7 +128,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
     dialog.show();
     if (dialog.isOK()) {
       String newName = dialog.getNewName();
-      copyImpl(elements, newName, targetDirectory, true);
+      copyImpl(elements, newName, targetDirectory, true, true);
     }
   }
 
@@ -166,11 +170,13 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
    * @param elements
    * @param newName can be not null only if elements.length == 1
    * @param targetDirectory
+   * @param openInEditor
    */
   private static void copyImpl(@NotNull final PsiElement[] elements,
                                @Nullable final String newName,
                                @NotNull final PsiDirectory targetDirectory,
-                               final boolean doClone) {
+                               final boolean doClone, 
+                               final boolean openInEditor) {
     if (doClone && elements.length != 1) {
       throw new IllegalArgumentException("invalid number of elements to clone:" + elements.length);
     }
@@ -181,8 +187,10 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
 
     final Project project = targetDirectory.getProject();
     Runnable command = new Runnable() {
+      @Override
       public void run() {
         final Runnable action = new Runnable() {
+          @Override
           public void run() {
             try {
               PsiFile firstFile = null;
@@ -196,9 +204,10 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
 
               if (firstFile != null) {
                 CopyHandler.updateSelectionInActiveProjectView(firstFile, project, doClone);
-                if (!(firstFile instanceof PsiBinaryFile)){
+                if (!(firstFile instanceof PsiBinaryFile) && openInEditor){
                   EditorHelper.openInEditor(firstFile);
                   ApplicationManager.getApplication().invokeLater(new Runnable() {
+                                  @Override
                                   public void run() {
                                     ToolWindowManager.getInstance(project).activateEditorComponent();
                                   }
@@ -208,6 +217,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
             }
             catch (final IncorrectOperationException ex) {
               ApplicationManager.getApplication().invokeLater(new Runnable() {
+                @Override
                 public void run() {
                   Messages.showMessageDialog(project, ex.getMessage(), RefactoringBundle.message("error.title"), Messages.getErrorIcon());
                 }
@@ -215,6 +225,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
             }
             catch (final IOException ex) {
               ApplicationManager.getApplication().invokeLater(new Runnable() {
+                @Override
                 public void run() {
                   Messages.showMessageDialog(project, ex.getMessage(), RefactoringBundle.message("error.title"), Messages.getErrorIcon());
                 }
@@ -270,6 +281,7 @@ public class CopyFilesOrDirectoriesHandler extends CopyHandlerDelegateBase {
       final PsiDirectory existing = targetDirectory.findSubdirectory(newName);
       final PsiDirectory subdirectory = existing == null ? targetDirectory.createSubdirectory(newName) : existing;
       EncodingRegistry.doActionAndRestoreEncoding(directory.getVirtualFile(), new ThrowableComputable<VirtualFile, IOException>() {
+        @Override
         public VirtualFile compute() {
           return subdirectory.getVirtualFile();
         }

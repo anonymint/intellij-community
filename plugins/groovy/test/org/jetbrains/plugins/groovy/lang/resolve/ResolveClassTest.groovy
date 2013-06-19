@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,13 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jetbrains.plugins.groovy.lang.resolve;
+package org.jetbrains.plugins.groovy.lang.resolve
 
-
-import com.intellij.psi.JavaPsiFacade
-import com.intellij.psi.PsiClass
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiReference
+import com.intellij.psi.*
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrAccessorMethod
 import org.jetbrains.plugins.groovy.util.TestUtils
 
@@ -110,7 +106,9 @@ public class ResolveClassTest extends GroovyResolveTestCase {
   public void testInnerEnum() throws Throwable { doTest(); }
   public void testInnerClass()throws Throwable {doTest();}
   public void testInnerClassInSubclass()throws Throwable {doTest();}
-  public void testInnerClassUsageInsideOuterSubclass() throws Throwable{doTest();}
+  public void testInnerClassUsageInsideOuterSubclass() throws Throwable { doTest() }
+  public void testInnerClassOfInterface() { assertNull(resolve()) }
+  public void testInnerClassOfClassInSubClass1() { assertNull(resolve()) }
 
   public void testAliasedImportVsImplicitImport() throws Exception {
     PsiReference ref = configureByFile("aliasedImportVsImplicitImport/Test.groovy");
@@ -129,7 +127,7 @@ public class ResolveClassTest extends GroovyResolveTestCase {
   public void testEnumVsProperty() throws Exception {
     PsiReference ref = configureByFile("enumVsProperty/Test.groovy");
     final PsiElement resolved = ref.resolve();
-    assertInstanceOf(resolved, PsiClass.class);
+    assertInstanceOf(resolved, PsiField.class);
   }
 
   public void testTwoStaticImports() throws Exception {
@@ -143,6 +141,12 @@ public class ResolveClassTest extends GroovyResolveTestCase {
     final PsiReference ref = configureByFile("aliasedImportedClassFromDefaultPackage/Test.groovy");
     final PsiElement resolved = ref.resolve();
     assertNotNull(resolved);
+  }
+
+  public void testQualifiedRefToInnerClass() {
+    myFixture.addFileToProject('A.groovy', 'class A {class Bb {}}')
+    final PsiReference ref = configureByText('b.groovy', 'A.B<ref>b b = new A.Bb()')
+    assertNotNull(ref.resolve())
   }
 
   public void testClassVsPropertyGetter() {
@@ -185,19 +189,6 @@ class X {
 
   public void testLowerCaseClassName() {
     doTest()
-  }
-
-  public void testInnerClassIsNotResolvedInAnonymous() {
-    myFixture.addFileToProject "/p/Super.groovy", """
-package p
-
-interface Super {
-  class Inner {
-  }
-
-  def foo(Inner i);
-}"""
-    assertNull resolve("A.groovy");
   }
 
   public void testInnerClassIsResolvedInAnonymous() {
@@ -272,7 +263,8 @@ print Component
 print Li<caret>st
 ''')
     def target = myFixture.file.findReferenceAt(myFixture.editor.caretModel.offset).resolve()
-    assertEquals('java.util.List', target.getQualifiedName())
+    assert target instanceof PsiClass
+    assertEquals('java.util.List', target.qualifiedName)
   }
 
   void testSuper() {
@@ -284,6 +276,32 @@ class Inheritor {
   class Inner {
     def f = Inheritor.su<caret>per.className
   }
+}
+''', PsiClass)
+  }
+
+  void testInterfaceDoesNotResolveWithExpressionQualifier() {
+    def ref = configureByText('''\
+class Foo {
+  interface Inner {
+  }
+}
+
+new Foo().Inn<caret>er
+''')
+
+    assertNull(ref.resolve())
+  }
+
+  void testInnerClassOfInterfaceInsideItself() {
+    resolveByText('''\
+public interface OuterInterface {
+    static enum InnerEnum {
+        ONE, TWO
+        public static Inne<caret>rEnum getSome() {
+            ONE
+        }
+    }
 }
 ''', PsiClass)
   }

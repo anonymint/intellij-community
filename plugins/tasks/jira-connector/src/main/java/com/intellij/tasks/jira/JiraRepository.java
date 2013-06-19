@@ -4,8 +4,10 @@ import com.atlassian.connector.commons.jira.soap.axis.JiraSoapService;
 import com.atlassian.connector.commons.jira.soap.axis.JiraSoapServiceServiceLocator;
 import com.atlassian.theplugin.jira.api.JIRAIssueBean;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.KeyValue;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.tasks.LocalTask;
 import com.intellij.tasks.Task;
-import com.intellij.tasks.TaskRepository;
 import com.intellij.tasks.TaskState;
 import com.intellij.tasks.impl.BaseRepositoryImpl;
 import com.intellij.util.Function;
@@ -15,8 +17,10 @@ import com.intellij.util.xmlb.annotations.Tag;
 import org.apache.axis.AxisProperties;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.HttpStatus;
+import org.apache.commons.httpclient.cookie.CookiePolicy;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.jdom.Element;
 import org.jdom.JDOMException;
 import org.jdom.input.SAXBuilder;
@@ -35,6 +39,8 @@ import java.util.List;
 public class JiraRepository extends BaseRepositoryImpl {
 
   private final static Logger LOG = Logger.getInstance("#com.intellij.tasks.jira.JiraRepository");
+  public static final String LOGIN_FAILED_CHECK_YOUR_PERMISSIONS = "Login failed. Check your permissions.";
+
   private boolean myJira4 = true;
 
   /**
@@ -94,12 +100,7 @@ public class JiraRepository extends BaseRepositoryImpl {
       LOG.info("JIRA: " + children.size() + " issues found");
       final List<Task> tasks = ContainerUtil.map(children, new Function<Element, Task>() {
         public Task fun(Element o) {
-          return new JiraTask(new JIRAIssueBean(getUrl(), o, false)) {
-            @Override
-            public TaskRepository getRepository() {
-              return JiraRepository.this;
-            }
-          };
+          return new JiraTask(new JIRAIssueBean(getUrl(), o, false), JiraRepository.this);
         }
       });
       return tasks.toArray(new Task[tasks.size()]);
@@ -113,6 +114,7 @@ public class JiraRepository extends BaseRepositoryImpl {
   private HttpClient login() throws Exception {
 
     HttpClient client = getHttpClient();
+    client.getParams().setCookiePolicy(CookiePolicy.BROWSER_COMPATIBILITY);
     if (myJira4) {
       PostMethod postMethod = getLoginMethodFor4x();
       client.executeMethod(postMethod);
@@ -131,12 +133,11 @@ public class JiraRepository extends BaseRepositoryImpl {
       JiraSoapService soapService =
         new JiraSoapServiceServiceLocator().getJirasoapserviceV2(new URL(getUrl() + "/rpc/soap/jirasoapservice-v2"));
       if (isUseProxy()) {
-        HttpConfigurable proxy = HttpConfigurable.getInstance();
-        AxisProperties.setProperty("http.proxyHost", proxy.PROXY_HOST);
-        AxisProperties.setProperty("http.proxyPort", String.valueOf(proxy.PROXY_PORT));
-        if (proxy.PROXY_AUTHENTICATION) {
-          AxisProperties.setProperty("http.proxyUser", String.valueOf(proxy.PROXY_LOGIN));
-          AxisProperties.setProperty("http.proxyPassword", String.valueOf(proxy.getPlainProxyPassword()));
+        final List<KeyValue<String,String>> list = HttpConfigurable.getJvmPropertiesList(false, null);
+        if (! list.isEmpty()) {
+          for (KeyValue<String, String> value : list) {
+            AxisProperties.setProperty(value.getKey(), value.getValue());
+          }
         }
       }
 
@@ -160,6 +161,9 @@ public class JiraRepository extends BaseRepositoryImpl {
     }
     if (statusCode != HttpStatus.SC_OK && statusCode != HttpStatus.SC_MOVED_TEMPORARILY) {
       throw new IOException("Can't login: " + statusCode + " (" + HttpStatus.getStatusText(statusCode) + ")");
+    }
+    if (statusCode == HttpStatus.SC_OK && new String(postMethod.getResponseBody(2000)).contains("\"loginSucceeded\":false")) {
+      throw new IOException(LOGIN_FAILED_CHECK_YOUR_PERMISSIONS);
     }
     return true;
   }
@@ -210,5 +214,33 @@ public class JiraRepository extends BaseRepositoryImpl {
       LOG.warn("Cannot get issue " + id + ": " + e.getMessage());
       return null;
     }
+  }
+
+  @Override
+  public void updateTimeSpent(final LocalTask task, final String timeSpent, final String comment) throws Exception {
+    final HttpClient client = login();
+    checkVersion(client);
+    PostMethod method = new PostMethod(getUrl() + "/rest/api/2/issue/" + task.getId() + "/worklog");
+    method.setRequestEntity(
+      new StringRequestEntity("{\"timeSpent\" : \"" + timeSpent + "\"" +
+                              (StringUtil.isNotEmpty(comment) ? ", \"comment\" : " + comment : "")
+                              + " }", "application/json", "UTF-8"));
+    client.executeMethod(method);
+    if (method.getStatusCode() != 201) {
+      throw new Exception(method.getResponseBodyAsString());
+    }
+  }
+
+  private void checkVersion(final HttpClient client) throws Exception {
+    GetMethod method = new GetMethod(getUrl() + "/rest/api/2/project");
+    client.executeMethod(method);
+    if (method.getStatusCode() != 200) {
+      throw new Exception("This version of JIRA doesn't have support REST API for working with worklog items.");
+    }
+  }
+
+  @Override
+  protected int getFeatures() {
+    return BASIC_HTTP_AUTHORIZATION | TIME_MANAGEMENT;
   }
 }

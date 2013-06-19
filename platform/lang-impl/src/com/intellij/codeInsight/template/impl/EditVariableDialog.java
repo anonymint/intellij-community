@@ -30,6 +30,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.EditableModel;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
@@ -43,7 +44,7 @@ class EditVariableDialog extends DialogWrapper {
   private ArrayList<Variable> myVariables = new ArrayList<Variable>();
 
   private JTable myTable;
-  private Editor myEditor;
+  private final Editor myEditor;
   private final List<TemplateContextType> myContextTypes;
 
   public EditVariableDialog(Editor editor, Component parent, ArrayList<Variable> variables, List<TemplateContextType> contextTypes) {
@@ -57,6 +58,7 @@ class EditVariableDialog extends DialogWrapper {
     setOKButtonText(CommonBundle.getOkButtonText());
   }
 
+  @NotNull
   @Override
   protected Action[] createActions() {
     return new Action[]{getOKAction(), getCancelAction(), getHelpAction()};

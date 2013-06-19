@@ -45,9 +45,11 @@ import com.intellij.openapi.fileTypes.*;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
@@ -56,6 +58,7 @@ import com.intellij.psi.tree.TokenSet;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SeparatorFactory;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -70,7 +73,7 @@ import java.awt.event.FocusEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.util.ArrayList;
+import java.util.List;
 
 /*
  * @author: MYakovlev
@@ -94,10 +97,17 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
   private JEditorPane myDescriptionComponent;
   private boolean myModified = false;
   private URL myDefaultDescriptionUrl;
-  private final Project myProject = PlatformDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext());
+  private final Project myProject;
 
-  private final ArrayList<ChangeListener> myChangeListeners = new ArrayList<ChangeListener>();
+  private final List<ChangeListener> myChangeListeners = ContainerUtil.createLockFreeCopyOnWriteList();;
   private Splitter mySplitter;
+  private final FileType myVelocityFileType = FileTypeManager.getInstance().getFileTypeByExtension("ft");
+  private JPanel myDescriptionPanel;
+
+  public FileTemplateConfigurable() {
+    Project project = PlatformDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext());
+    myProject = project != null ? project : ProjectManager.getInstance().getDefaultProject();
+  }
 
   public FileTemplate getTemplate() {
     return myTemplate;
@@ -147,14 +157,17 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     myAdjustBox.setEnabled(show);
   }
 
+  @Override
   public String getDisplayName() {
     return IdeBundle.message("title.file.templates");
   }
 
+  @Override
   public String getHelpTopic() {
     return null;
   }
 
+  @Override
   public JComponent createComponent() {
     myMainPanel = new JPanel(new GridBagLayout());
     myNameField = new JTextField();
@@ -169,13 +182,13 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     myAdjustBox = new JCheckBox(IdeBundle.message("checkbox.reformat.according.to.style"));
     myTopPanel = new JPanel(new GridBagLayout());
 
-    JPanel secondPanel = new JPanel(new GridBagLayout());
-    secondPanel.add(SeparatorFactory.createSeparator(IdeBundle.message("label.description"), null),
-                    new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL,
-                                           new Insets(0, 0, 2, 0), 0, 0));
-    secondPanel.add(ScrollPaneFactory.createScrollPane(myDescriptionComponent),
-                    new GridBagConstraints(0, 1, 1, 1, 1.0, 1.0, GridBagConstraints.CENTER, GridBagConstraints.BOTH,
-                                           new Insets(2, 0, 0, 0), 0, 0));
+    myDescriptionPanel = new JPanel(new GridBagLayout());
+    myDescriptionPanel.add(SeparatorFactory.createSeparator(IdeBundle.message("label.description"), null),
+                           new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL,
+                                                  new Insets(0, 0, 2, 0), 0, 0));
+    myDescriptionPanel.add(ScrollPaneFactory.createScrollPane(myDescriptionComponent),
+                           new GridBagConstraints(0, 1, 1, 1, 1.0, 1.0, GridBagConstraints.CENTER, GridBagConstraints.BOTH,
+                                                  new Insets(2, 0, 0, 0), 0, 0));
 
     myMainPanel.add(myTopPanel,
                     new GridBagConstraints(0, 0, 4, 1, 1.0, 0.0, GridBagConstraints.CENTER,
@@ -187,15 +200,17 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
                     new GridBagConstraints(0, 2, 4, 1, 1.0, 1.0, GridBagConstraints.CENTER, GridBagConstraints.BOTH,
                                            new Insets(2, 0, 0, 0), 0, 0));
 
-    mySplitter.setSecondComponent(secondPanel);
+    mySplitter.setSecondComponent(myDescriptionPanel);
     setShowInternalMessage(null);
 
     myNameField.addFocusListener(new FocusAdapter() {
+      @Override
       public void focusLost(FocusEvent e) {
         onNameChanged();
       }
     });
     myExtensionField.addFocusListener(new FocusAdapter() {
+      @Override
       public void focusLost(FocusEvent e) {
         onNameChanged();
       }
@@ -222,6 +237,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     scheme.setColor(EditorColors.CARET_ROW_COLOR, null);
 
     editor.getDocument().addDocumentListener(new DocumentAdapter() {
+      @Override
       public void documentChanged(DocumentEvent e) {
         onTextChanged();
       }
@@ -261,6 +277,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     myChangeListeners.remove(listener);
   }
 
+  @Override
   public boolean isModified() {
     if (myModified) {
       return true;
@@ -281,6 +298,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     return false;
   }
 
+  @Override
   public void apply() throws ConfigurationException {
     if (myTemplate != null) {
       myTemplate.setText(myTemplateEditor.getDocument().getText());
@@ -310,6 +328,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     return FileUtil.ensureCanCreateFile(tempFile);
   }
 
+  @Override
   public void reset() {
     final String text = (myTemplate == null) ? "" : myTemplate.getText();
     String name = (myTemplate == null) ? "" : myTemplate.getName();
@@ -343,6 +362,8 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     myDescriptionComponent.setText(desc);
     myDescriptionComponent.setCaretPosition(0);
     myDescriptionComponent.setEditable(false);
+    
+    myDescriptionPanel.setVisible(StringUtil.isNotEmpty(description));
 
     myNameField.setEditable((myTemplate != null) && (!myTemplate.isDefault()));
     myExtensionField.setEditable((myTemplate != null) && (!myTemplate.isDefault()));
@@ -353,7 +374,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
   private PsiFile createFile(final String text, final String name) {
     if (myTemplate == null || myProject == null) return null;
 
-    final FileType fileType = FileTypeManager.getInstance().getFileTypeByExtension("ft");
+    final FileType fileType = myVelocityFileType;
     if (fileType == FileTypes.UNKNOWN) return null;
 
     final PsiFile file = PsiFileFactory.getInstance(myProject).createFileFromText(name + ".txt.ft", fileType, text, 0, true);
@@ -361,6 +382,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
     return file;
   }
 
+  @Override
   public void disposeUIResources() {
     myMainPanel = null;
     if (myTemplateEditor != null) {
@@ -371,21 +393,20 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
   }
 
   private EditorHighlighter createHighlighter() {
-    if (myTemplate != null && myProject != null) {
+    if (myTemplate != null && myProject != null && myVelocityFileType != FileTypes.UNKNOWN) {
       return EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject, new LightVirtualFile("aaa." + myTemplate.getExtension() + ".ft"));
     }
-    else {
-      FileType fileType = null;
-      if (myTemplate != null) {
-        fileType = FileTypeManager.getInstance().getFileTypeByExtension(myTemplate.getExtension());
-      }
-      if (fileType == null) {
-        fileType = FileTypes.PLAIN_TEXT;
-      }
-      SyntaxHighlighter originalHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(fileType, null, null);
-      if (originalHighlighter == null) originalHighlighter = new PlainSyntaxHighlighter();
-      return new LexerEditorHighlighter(new TemplateHighlighter(originalHighlighter), EditorColorsManager.getInstance().getGlobalScheme());
+
+    FileType fileType = null;
+    if (myTemplate != null) {
+      fileType = FileTypeManager.getInstance().getFileTypeByExtension(myTemplate.getExtension());
     }
+    if (fileType == null) {
+      fileType = FileTypes.PLAIN_TEXT;
+    }
+    SyntaxHighlighter originalHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(fileType, null, null);
+    if (originalHighlighter == null) originalHighlighter = new PlainSyntaxHighlighter();
+    return new LexerEditorHighlighter(new TemplateHighlighter(originalHighlighter), EditorColorsManager.getInstance().getGlobalScheme());
   }
 
   private final static TokenSet TOKENS_TO_MERGE = TokenSet.create(FileTemplateTokenType.TEXT);
@@ -401,6 +422,7 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
       templateLexer = new MergingLexerAdapter(templateLexer, TOKENS_TO_MERGE);
 
       myLexer = new CompositeLexer(originalLexer, templateLexer) {
+        @Override
         protected IElementType getCompositeTokenType(IElementType type1, IElementType type2) {
           if (type2 == FileTemplateTokenType.MACRO || type2 == FileTemplateTokenType.DIRECTIVE) {
             return type2;
@@ -412,11 +434,13 @@ public class FileTemplateConfigurable implements Configurable, Configurable.NoSc
       };
     }
 
+    @Override
     @NotNull
     public Lexer getHighlightingLexer() {
       return myLexer;
     }
 
+    @Override
     @NotNull
     public TextAttributesKey[] getTokenHighlights(IElementType tokenType) {
       if (tokenType == FileTemplateTokenType.MACRO) {

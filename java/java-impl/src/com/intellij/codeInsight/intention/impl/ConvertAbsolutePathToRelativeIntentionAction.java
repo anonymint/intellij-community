@@ -15,7 +15,7 @@
  */
 package com.intellij.codeInsight.intention.impl;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiFile;
@@ -24,6 +24,7 @@ import com.intellij.psi.impl.source.resolve.reference.impl.PsiMultiReference;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReference;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReferenceOwner;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReferenceSet;
+import com.intellij.psi.impl.source.resolve.reference.impl.providers.PsiFileReference;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -64,9 +65,9 @@ public class ConvertAbsolutePathToRelativeIntentionAction extends BaseIntentionA
       }
     }
     else if (original instanceof FileReferenceOwner) {
-      final FileReference fileReference = ((FileReferenceOwner)original).getLastFileReference();
-      if (fileReference != null) {
-        return fileReference;
+      final PsiFileReference fileReference = ((FileReferenceOwner)original).getLastFileReference();
+      if (fileReference instanceof FileReference) {
+        return (FileReference)fileReference;
       }
     }
 
@@ -81,7 +82,7 @@ public class ConvertAbsolutePathToRelativeIntentionAction extends BaseIntentionA
 
   @Override
   public void invoke(@NotNull Project project, Editor editor, PsiFile file) throws IncorrectOperationException {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
     final PsiReference reference = file.findReferenceAt(editor.getCaretModel().getOffset());
     final FileReference fileReference = reference == null ? null : findFileReference(reference);

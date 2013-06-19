@@ -16,6 +16,7 @@
 package com.intellij.psi.search;
 
 import com.intellij.core.CoreProjectScopeBuilder;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.FileIndexFacade;
@@ -27,12 +28,14 @@ import org.jetbrains.annotations.NotNull;
  * @author yole
  */
 public class ProjectScopeBuilderImpl extends ProjectScopeBuilder {
+
   protected final Project myProject;
 
   public ProjectScopeBuilderImpl(Project project) {
     myProject = project;
   }
 
+  @NotNull
   @Override
   public GlobalSearchScope buildLibrariesScope() {
     return new ProjectAndLibrariesScope(myProject) {
@@ -48,12 +51,22 @@ public class ProjectScopeBuilderImpl extends ProjectScopeBuilder {
     };
   }
 
+  @NotNull
   @Override
   public GlobalSearchScope buildAllScope() {
     final ProjectRootManager projectRootManager = ProjectRootManager.getInstance(myProject);
-    return projectRootManager == null ? new EverythingGlobalScope(myProject) : new ProjectAndLibrariesScope(myProject);
+    if (projectRootManager == null) return new EverythingGlobalScope(myProject);
+
+    boolean searchOutsideRootModel = false;
+    for (SearchScopeEnlarger each : Extensions.getExtensions(SearchScopeEnlarger.EXTENSION)) {
+      searchOutsideRootModel = each.allScopeSearchesOutsideRootModel(myProject);
+      if (searchOutsideRootModel) break;
+    }
+
+    return new ProjectAndLibrariesScope(myProject, searchOutsideRootModel);
   }
 
+  @NotNull
   @Override
   public GlobalSearchScope buildProjectScope() {
     final ProjectRootManager projectRootManager = ProjectRootManager.getInstance(myProject);
@@ -65,11 +78,10 @@ public class ProjectScopeBuilderImpl extends ProjectScopeBuilder {
         }
       };
     }
-    else {
-      return new ProjectScopeImpl(myProject, FileIndexFacade.getInstance(myProject));
-    }
+    return new ProjectScopeImpl(myProject, FileIndexFacade.getInstance(myProject));
   }
 
+  @NotNull
   @Override
   public GlobalSearchScope buildContentScope() {
     return new CoreProjectScopeBuilder.ContentSearchScope(myProject, FileIndexFacade.getInstance(myProject));

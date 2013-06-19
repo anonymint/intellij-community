@@ -22,12 +22,12 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
+import git4idea.GitCommit;
 import git4idea.GitExecutionException;
 import git4idea.GitPlatformFacade;
 import git4idea.changes.GitChangeUtils;
 import git4idea.commands.Git;
 import git4idea.history.GitHistoryUtils;
-import git4idea.history.browser.GitCommit;
 import git4idea.repo.GitRepository;
 import git4idea.ui.branch.GitCompareBranchesDialog;
 import git4idea.util.GitCommitCompareInfo;
@@ -132,7 +132,7 @@ final class GitBranchWorker {
   @NotNull
   private static Collection<Change> loadTotalDiff(@NotNull GitRepository repository, @NotNull String branchName) {
     try {
-      return GitChangeUtils.getDiff(repository.getProject(), repository.getRoot(), "HEAD", branchName, null);
+      return GitChangeUtils.getDiff(repository.getProject(), repository.getRoot(), null, branchName, null);
     }
     catch (VcsException e) {
       // we treat it as critical and report an error

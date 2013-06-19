@@ -221,7 +221,9 @@ public class DumbServiceImpl extends DumbService {
       }
     }
     finally {
-      while (true) {
+      // It may happen that one of the pending runWhenSmart actions triggers new dumb mode;
+      // in this case we should quit processing pending actions and postpone them until the newly started dumb mode finishes.
+      while (!myDumb) {
         final Runnable runnable;
         synchronized (myRunWhenSmartQueue) {
           if (myRunWhenSmartQueue.isEmpty()) {
@@ -244,8 +246,10 @@ public class DumbServiceImpl extends DumbService {
     UIUtil.invokeLaterIfNeeded(new Runnable() {
       public void run() {
         final IdeFrame ideFrame = WindowManager.getInstance().getIdeFrame(myProject);
-        StatusBarEx statusBar = (StatusBarEx)ideFrame.getStatusBar();
-        statusBar.notifyProgressByBalloon(MessageType.WARNING, message, null, null);
+        if (ideFrame != null) {
+          StatusBarEx statusBar = (StatusBarEx)ideFrame.getStatusBar();
+          statusBar.notifyProgressByBalloon(MessageType.WARNING, message, null, null);
+        }
       }
     });
   }

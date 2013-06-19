@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,18 +52,23 @@ binding.setVariable("isEap", {
   return "true" == p("component.version.eap")
 })
 
-binding.setVariable("mem32", "-Xms128m -Xmx512m -XX:MaxPermSize=250m -XX:ReservedCodeCacheSize=64m -XX:+UseCodeCacheFlushing")
-binding.setVariable("mem64", "-Xms128m -Xmx800m -XX:MaxPermSize=350m -XX:ReservedCodeCacheSize=64m -XX:+UseCodeCacheFlushing")
-binding.setVariable("common_vmoptions", "-ea -Dsun.io.useCanonCaches=false")
+binding.setVariable("mem32", "-server -Xms128m -Xmx512m -XX:MaxPermSize=250m -XX:ReservedCodeCacheSize=64m -XX:+UseCodeCacheFlushing -XX:+UseConcMarkSweepGC -XX:SoftRefLRUPolicyMSPerMB=50")
+binding.setVariable("mem64", "-Xms128m -Xmx750m -XX:MaxPermSize=350m -XX:ReservedCodeCacheSize=96m -XX:+UseCodeCacheFlushing -XX:+UseConcMarkSweepGC -XX:SoftRefLRUPolicyMSPerMB=50")
+binding.setVariable("common_vmoptions", "-ea -Dsun.io.useCanonCaches=false -Djava.net.preferIPv4Stack=true")
 
 binding.setVariable("vmOptions", { "$common_vmoptions ${isEap() ? '-XX:+HeapDumpOnOutOfMemoryError' : ''}".trim() })
 binding.setVariable("vmOptions32", { "$mem32 ${vmOptions()}".trim() })
 binding.setVariable("vmOptions64", { "$mem64 ${vmOptions()}".trim() })
+
+binding.setVariable("yjpOptions", { String systemSelector, String platformSuffix = "" ->
+  "-agentlib:yjpagent$platformSuffix=disablej2ee,disablealloc,disabletracing,onlylocal,builtinprobes=none,disableexceptiontelemetry,sessionname=$systemSelector".trim()
+})
+
 binding.setVariable("vmOptions32yjp", { String systemSelector ->
-  "${vmOptions32()} -agentlib:yjpagent=disablej2ee,disablealloc,onlylocal,sessionname=$systemSelector".trim()
+  "${vmOptions32()} ${yjpOptions(systemSelector)}".trim()
 })
 binding.setVariable("vmOptions64yjp", { String systemSelector ->
-  "${vmOptions64()} -agentlib:yjpagent64=disablej2ee,disablealloc,onlylocal,sessionname=$systemSelector".trim()
+  "${vmOptions64()} ${yjpOptions(systemSelector, "64")}".trim()
 })
 
 binding.setVariable("isDefined", {String key ->
@@ -110,7 +115,7 @@ binding.setVariable("guessHome", {
 })
 
 binding.setVariable("loadProject", {
-  requireProperty("jdkHome", requireProperty("jdk16.home", guessJdk()))
+  requireProperty("jdkHome", guessJdk())
   def mac = isMac()
   jdk("IDEA jdk", jdkHome) {
     if (!mac) {
@@ -176,7 +181,7 @@ def debugPort = System.getProperty("debug.port") ?: 5555
 if (suspendUntilDebuggerConnect == 'y') {
   println """\
 ------------->----------- This process is suspended until remote debugger connects to the port $debugPort ----<----
--------------------------------------------^------^------^------^------^------^------^-----------------------  
+-------------------------------------------^------^------^------^------^------^------^-----------------------
 """
 }
 
@@ -238,39 +243,44 @@ binding.setVariable("classPathLibs", [
 ])
 
 binding.setVariable("platformApiModules", [
-        "core-api",
-        "indexing-api",
-        "projectModel-api",
-        "jps-model-api",
-        "platform-api",
-        "lvcs-api",
-        "lang-api",
-        "vcs-api",
-        "usageView",
-        "xdebugger-api",
-        "xml-openapi",
+  "analysis-api",
+  "core-api",
+  "external-system-api",
+  "indexing-api",
+  "jps-model-api",
+  "lang-api",
+  "lvcs-api",
+  "projectModel-api",
+  "platform-api",
+  "usageView",
+  "vcs-api",
+  "xdebugger-api",
+  "xml-openapi",
+  "xml-psi-api",
 ])
 
 
 binding.setVariable("platformImplementationModules", [
-        "core-impl",
-        "indexing-impl",
-        "jps-model-impl",
-        "jps-model-serialization",
-        "projectModel-impl",
-        "platform-impl",
-        "vcs-impl",
-        "lang-impl",
-        "testRunner",
-        "smRunner",
-        "xdebugger-impl",
-        "xml",
-        "relaxng",
-        "lvcs-impl",
-        "spellchecker",
-        "images",
-        "RegExpSupport",
-        "dvcs"
+  "analysis-impl",
+  "core-impl",
+  "dvcs",
+  "images",
+  "indexing-impl",
+  "jps-model-impl",
+  "jps-model-serialization",
+  "lang-impl",
+  "lvcs-impl",
+  "projectModel-impl",
+  "platform-impl",
+  "vcs-impl",
+  "testRunner",
+  "smRunner",
+  "relaxng",
+  "RegExpSupport",
+  "spellchecker",
+  "xdebugger-impl",
+  "xml",
+  "xml-psi-impl",
 ])
 
 binding.setVariable("layoutMacApp", { String path, String ch, Map args ->
@@ -301,9 +311,9 @@ binding.setVariable("layoutMacApp", { String path, String ch, Map args ->
 
   String fullName = args.fullName != null ? args.fullName : p("component.names.fullname")
 
-  String vmOptions = "${vmOptions()} -Xverify:none"
+  String vmOptions = "-Dfile.encoding=UTF-8 ${vmOptions()} -Xverify:none"
   if (isEap() && !args.mac_no_yjp) {
-    vmOptions += " -agentlib:yjpagent=disablej2ee,disablealloc,sessionname=${args.system_selector}"
+    vmOptions += " ${yjpOptions(args.system_selector)}"
   }
 
   String minor = p("component.version.minor")
@@ -327,6 +337,29 @@ binding.setVariable("layoutMacApp", { String path, String ch, Map args ->
 
   String classPath = classPathLibs.collect {"\$APP_PACKAGE/lib/${it}" }.join(":")
 
+  String urlSchemes = ""
+  if (args.urlSchemes != null) {
+    urlSchemes += """
+      <key>CFBundleURLTypes</key>
+      <array>
+        <dict>
+          <key>CFBundleTypeRole</key>
+          <string>Editor</string>
+          <key>CFBundleURLName</key>
+          <string>Stacktrace</string>
+          <key>CFBundleURLSchemes</key>
+          <array>
+"""
+    args.urlSchemes.each { scheme ->
+      urlSchemes += "            <string>${scheme}</string>"
+    }
+    urlSchemes += """
+          </array>
+        </dict>
+      </array>
+"""
+  }
+
   ant.replace(file: "$path/Contents/Info.plist") {
     replacefilter(token: "@@build@@", value: args.buildNumber)
     replacefilter(token: "@@doc_types@@", value: ifNull(args.doc_types, ""))
@@ -340,6 +373,7 @@ binding.setVariable("layoutMacApp", { String path, String ch, Map args ->
     replacefilter(token: "@@idea_properties@@", value: coreProperties)
     replacefilter(token: "@@class_path@@", value: classPath)
     replacefilter(token: "@@help_id@@", value: helpId)
+    replacefilter(token: "@@url_schemes@@", value: urlSchemes)
   }
 
   if (executable != "idea") {
@@ -635,7 +669,7 @@ binding.setVariable("buildMacZip", { String zipRoot, String zipPath, List paths,
       zipfileset(dir: it, prefix: zipRoot) {
         exclude(name: "bin/*.sh")
         exclude(name: "bin/fsnotifier")
-        exclude(name: "bin/relaunch")
+        exclude(name: "bin/restarter")
         exclude(name: "Contents/MacOS/*")
         extraBins.each {
           exclude(name: it)
@@ -648,7 +682,7 @@ binding.setVariable("buildMacZip", { String zipRoot, String zipPath, List paths,
       zipfileset(dir: it, filemode: "755", prefix: zipRoot) {
         include(name: "bin/*.sh")
         include(name: "bin/fsnotifier")
-        include(name: "bin/relaunch")
+        include(name: "bin/restarter")
         include(name: "Contents/MacOS/*")
         extraBins.each {
           include(name: it)
@@ -697,3 +731,41 @@ private void fixIdeaPropertiesEol(List paths, String eol) {
     }
   }
 }
+
+binding.setVariable("buildWinLauncher", { String ch, String inputPath, String outputPath, String appInfo, String launcherProperties, String pathsSelector, List resourcePaths ->
+  projectBuilder.stage("winLauncher")
+
+  File launcherPropertiesTempFile = null;
+  if (pathsSelector != null) {
+    String propertiesContent = new File(launcherProperties).text
+    if (propertiesContent.contains("__PRODUCT_PATHS_SELECTOR__")) {
+      propertiesContent = propertiesContent.replace("__PRODUCT_PATHS_SELECTOR__", pathsSelector)
+      launcherPropertiesTempFile = File.createTempFile("launcher", ".properties")
+      launcherPropertiesTempFile.write(propertiesContent)
+      launcherProperties = launcherPropertiesTempFile.getAbsolutePath()
+    }
+  }
+
+  ant.java(classname: "com.pme.launcher.LauncherGeneratorMain", fork: "true") {
+    arg(value: inputPath)
+    arg(value: appInfo)
+    arg(value: "$ch/native/WinLauncher/WinLauncher/resource.h")
+    arg(value: launcherProperties)
+    arg(value: outputPath)
+    classpath {
+      pathelement(location: "$ch/build/lib/launcher-generator.jar")
+      fileset(dir: "$ch/lib") {
+        include(name: "guava*.jar")
+        include(name: "jdom.jar")
+        include(name: "sanselan*.jar")
+      }
+      resourcePaths.each {
+        pathelement(location: it)
+      }
+    }
+  }
+
+  if (launcherPropertiesTempFile != null) {
+    launcherPropertiesTempFile.delete()
+  }
+})

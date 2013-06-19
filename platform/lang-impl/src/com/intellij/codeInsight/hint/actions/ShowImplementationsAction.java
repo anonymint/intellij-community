@@ -26,6 +26,7 @@ import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -43,6 +44,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.presentation.java.SymbolPresentationUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.ui.JBListWithHintProvider;
 import com.intellij.ui.popup.AbstractPopup;
 import com.intellij.ui.popup.NotLookupOrSearchCondition;
 import com.intellij.ui.popup.PopupPositionManager;
@@ -59,6 +61,9 @@ import java.util.*;
 public class ShowImplementationsAction extends AnAction implements PopupAction {
   @NonNls public static final String CODEASSISTS_QUICKDEFINITION_LOOKUP_FEATURE = "codeassists.quickdefinition.lookup";
   @NonNls public static final String CODEASSISTS_QUICKDEFINITION_FEATURE = "codeassists.quickdefinition";
+
+  private static final Logger LOG = Logger.getInstance("#" + ShowImplementationsAction.class.getName());
+
   private WeakReference<JBPopup> myPopupRef;
   private WeakReference<BackgroundUpdaterTask> myTaskRef;
 
@@ -76,41 +81,39 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     performForContext(dataContext, true);
   }
 
+  protected Editor getEditor(DataContext dataContext) {
+    Editor editor = PlatformDataKeys.EDITOR.getData(dataContext);
+
+    if (editor == null) {
+      final PsiFile file = LangDataKeys.PSI_FILE.getData(dataContext);
+      if (file != null) {
+        final FileEditor fileEditor = FileEditorManager.getInstance(file.getProject()).getSelectedEditor(file.getVirtualFile());
+        if (fileEditor instanceof TextEditor) {
+          editor = ((TextEditor)fileEditor).getEditor();
+        }
+      }
+    }
+    return editor;
+  }
+  
   public void performForContext(DataContext dataContext, boolean invokedByShortcut) {
     final Project project = PlatformDataKeys.PROJECT.getData(dataContext);
-    Editor editor = PlatformDataKeys.EDITOR.getData(dataContext);
     PsiFile file = LangDataKeys.PSI_FILE.getData(dataContext);
 
     if (project == null) return;
 
     PsiDocumentManager.getInstance(project).commitAllDocuments();
 
-    boolean isInvokedFromEditor = editor != null;
-    PsiElement element;
-    if (editor != null) {
-      element = TargetElementUtilBase.findTargetElement(editor, TargetElementUtilBase.getInstance().getAllAccepted());
-    }
-    else {
-      element = LangDataKeys.PSI_ELEMENT.getData(dataContext);
-      if (file != null) {
-        final FileEditor fileEditor = FileEditorManager.getInstance(project).getSelectedEditor(file.getVirtualFile());
-        if (fileEditor instanceof TextEditor) {
-          editor = ((TextEditor)fileEditor).getEditor();
-        }
-      }
-    }
+    final Editor editor = getEditor(dataContext);
+
+    PsiElement element = LangDataKeys.PSI_ELEMENT.getData(dataContext);
+    boolean isInvokedFromEditor = PlatformDataKeys.EDITOR.getData(dataContext) != null;
+    element = getElement(project, file, editor, element);
 
     if (element == null && file == null) return;
     PsiFile containingFile = element != null ? element.getContainingFile() : file;
     if (containingFile == null || !containingFile.getViewProvider().isPhysical()) return;
 
-    final PsiElement adjustedElement =
-      TargetElementUtilBase.getInstance().adjustElement(editor, TargetElementUtilBase.getInstance().getAllAccepted(), element, null);
-    if (adjustedElement != null) {
-      element = adjustedElement;
-    } else if (file != null && editor != null) {
-      element = DocumentationManager.getInstance(project).getElementFromLookup(editor, file);
-    }
 
     PsiReference ref = null;
     if (editor != null) {
@@ -152,7 +155,21 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     showImplementations(impls, project, text, editor, file, element, isInvokedFromEditor, invokedByShortcut);
   }
 
-  private static ImplementationSearcher createImplementationsSearcher() {
+  protected static PsiElement getElement(Project project, PsiFile file, Editor editor, PsiElement element) {
+    if (element == null && editor != null) {
+      element = TargetElementUtilBase.findTargetElement(editor, TargetElementUtilBase.getInstance().getAllAccepted());
+      final PsiElement adjustedElement =
+        TargetElementUtilBase.getInstance().adjustElement(editor, TargetElementUtilBase.getInstance().getAllAccepted(), element, null);
+      if (adjustedElement != null) {
+        element = adjustedElement;
+      } else if (file != null) {
+        element = DocumentationManager.getInstance(project).getElementFromLookup(editor, file);
+      }
+    }
+    return element;
+  }
+
+  protected static ImplementationSearcher createImplementationsSearcher() {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
       return new ImplementationSearcher() {
         @Override
@@ -176,6 +193,8 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     String text = "";
     if (element != null) {
      // if (element instanceof PsiPackage) return;
+      PsiFile containingFile = element.getContainingFile();
+      if (containingFile == null || !containingFile.getViewProvider().isPhysical()) return;
 
       impls = getSelfAndImplementations(editor, element, createImplementationsSearcher());
       text = SymbolPresentationUtil.getSymbolPresentableText(element);
@@ -274,18 +293,29 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     }
 
     if (element == null) return; //already found
-    final ImplementationsUpdaterTask task = new ImplementationsUpdaterTask(element, editor, title);
+    final ImplementationsUpdaterTask task = new ImplementationsUpdaterTask(element, editor, title, isIncludeAlwaysSelf());
     task.init(popup, component, usageView);
 
     myTaskRef = new WeakReference<BackgroundUpdaterTask>(task);
     ProgressManager.getInstance().run(task);
   }
 
-  private static PsiElement[] getSelfAndImplementations(Editor editor, PsiElement element, final ImplementationSearcher handler) {
+  protected boolean isIncludeAlwaysSelf() {
+    return true;
+  }
 
+  private static PsiElement[] getSelfAndImplementations(Editor editor,
+                                                        PsiElement element,
+                                                        final ImplementationSearcher handler) {
+    return getSelfAndImplementations(editor, element, handler, !(element instanceof PomTargetPsiElement));
+  }
+
+  protected static PsiElement[] getSelfAndImplementations(Editor editor,
+                                                          PsiElement element,
+                                                          final ImplementationSearcher handler,
+                                                          final boolean includeSelfAlways) {
     int offset = editor == null ? 0 : editor.getCaretModel().getOffset();
-    final PsiElement[] handlerImplementations = handler.searchImplementations(element, offset, !(element instanceof PomTargetPsiElement),
-                                                                              true);
+    final PsiElement[] handlerImplementations = handler.searchImplementations(element, offset, includeSelfAlways, true);
     if (handlerImplementations.length > 0) return handlerImplementations;
 
     PsiFile psiFile = element.getContainingFile();
@@ -306,7 +336,9 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
   private static PsiElement[] filterElements(final PsiElement[] targetElements) {
     Set<PsiElement> unique = new LinkedHashSet<PsiElement>(Arrays.asList(targetElements));
     for (PsiElement elt : targetElements) {
-      PsiFile psiFile = elt.getContainingFile().getOriginalFile();
+      final PsiFile containingFile = elt.getContainingFile();
+      LOG.assertTrue(containingFile != null, elt);
+      PsiFile psiFile = containingFile.getOriginalFile();
       if (psiFile.getVirtualFile() == null) unique.remove(elt);
     }
     // special case for Python (PY-237)
@@ -336,13 +368,15 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     private String myCaption;
     private Editor myEditor;
     private PsiElement myElement;
+    private final boolean myIncludeSelf;
     private PsiElement[] myElements;
 
-    public ImplementationsUpdaterTask(final PsiElement element, final Editor editor, final String caption) {
+    public ImplementationsUpdaterTask(final PsiElement element, final Editor editor, final String caption, boolean includeSelf) {
       super(element.getProject(), ImplementationSearcher.SEARCHING_FOR_IMPLEMENTATIONS);
       myCaption = caption;
       myEditor = editor;
       myElement = element;
+      myIncludeSelf = includeSelf;
     }
 
     @Override
@@ -369,8 +403,8 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
     @Override
     public void run(@NotNull final ProgressIndicator indicator) {
       super.run(indicator);
-      myElements =
-        getSelfAndImplementations(myEditor, myElement, new ImplementationSearcher.BackgroundableImplementationSearcher() {
+      final ImplementationSearcher.BackgroundableImplementationSearcher implementationSearcher =
+        new ImplementationSearcher.BackgroundableImplementationSearcher() {
           @Override
           protected void processElement(PsiElement element) {
             if (!updateComponent(element, null)) {
@@ -383,7 +417,12 @@ public class ShowImplementationsAction extends AnAction implements PopupAction {
           protected PsiElement[] filterElements(PsiElement element, PsiElement[] targetElements, int offset) {
             return ShowImplementationsAction.filterElements(targetElements);
           }
-        });
+        };
+      if (!myIncludeSelf) {
+        myElements = getSelfAndImplementations(myEditor, myElement, implementationSearcher, false);
+      } else {
+        myElements = getSelfAndImplementations(myEditor, myElement, implementationSearcher);
+      }
     }
 
     @Override

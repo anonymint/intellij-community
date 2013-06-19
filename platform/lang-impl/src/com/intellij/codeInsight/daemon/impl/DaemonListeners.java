@@ -19,6 +19,7 @@ package com.intellij.codeInsight.daemon.impl;
 import com.intellij.ProjectTopics;
 import com.intellij.codeHighlighting.Pass;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
+import com.intellij.codeInsight.daemon.impl.analysis.HighlightingSettingsPerFile;
 import com.intellij.codeInsight.hint.TooltipController;
 import com.intellij.ide.PowerSaveMode;
 import com.intellij.ide.todo.TodoConfiguration;
@@ -59,6 +60,9 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileAdapter;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.VirtualFilePropertyEvent;
+import com.intellij.openapi.wm.WindowManager;
+import com.intellij.openapi.wm.ex.StatusBarEx;
+import com.intellij.openapi.wm.impl.status.TogglePopupHintsPanel;
 import com.intellij.packageDependencies.DependencyValidationManager;
 import com.intellij.profile.Profile;
 import com.intellij.profile.ProfileChangeAdapter;
@@ -400,7 +404,7 @@ public class DaemonListeners implements Disposable {
   private Result vcsThinksItChanged(VirtualFile virtualFile) {
     AbstractVcs activeVcs = myProjectLevelVcsManager.getVcsFor(virtualFile);
     if (activeVcs == null) return Result.NOT_SURE;
-    
+
     FilePath path = new FilePathImpl(virtualFile);
     boolean vcsIsThinking = !myVcsDirtyScopeManager.whatFilesDirty(Arrays.asList(path)).isEmpty();
     if (vcsIsThinking) return Result.NOT_SURE; // do not modify file which is in the process of updating
@@ -504,9 +508,38 @@ public class DaemonListeners implements Disposable {
     }
 
     @Override
-    public void profileActivated(Profile oldProfile, Profile profile) {
+    public void profileActivated(@NotNull Profile oldProfile, Profile profile) {
       stopDaemonAndRestartAllFiles();
     }
+
+    @Override
+    public void profilesInitialized() {
+      inspectionProfilesInitialized();
+    }
+
+    @Override
+    public void profilesShutdown() {
+      HighlightingSettingsPerFile.getInstance(myProject).cleanProfileSettings();
+    }
+  }
+
+  private TogglePopupHintsPanel myTogglePopupHintsPanel;
+  private void inspectionProfilesInitialized() {
+    UIUtil.invokeLaterIfNeeded(new Runnable() {
+      @Override
+      public void run() {
+        if (myProject.isDisposed()) return;
+        StatusBarEx statusBar = (StatusBarEx)WindowManager.getInstance().getStatusBar(myProject);
+        myTogglePopupHintsPanel = new TogglePopupHintsPanel(myProject);
+        statusBar.addWidget(myTogglePopupHintsPanel, myProject);
+
+        stopDaemonAndRestartAllFiles();
+      }
+    });
+  }
+
+  public void updateStatusBar() {
+    if (myTogglePopupHintsPanel != null) myTogglePopupHintsPanel.updateStatus();
   }
 
   private class MyAnActionListener implements AnActionListener {
@@ -567,7 +600,7 @@ public class DaemonListeners implements Disposable {
           int offset = editor.logicalPositionToOffset(logical);
           if (editor.offsetToLogicalPosition(offset).column != logical.column) return; // we are in virtual space
           HighlightInfo info = myDaemonCodeAnalyzer.findHighlightByOffset(editor.getDocument(), offset, false);
-          if (info == null || info.description == null) return;
+          if (info == null || info.getDescription() == null) return;
           DaemonTooltipUtil.showInfoTooltip(info, editor, offset);
           shown = true;
         }
@@ -594,5 +627,4 @@ public class DaemonListeners implements Disposable {
     myDaemonEventPublisher.daemonCancelEventOccurred();
     myDaemonCodeAnalyzer.restart();
   }
-
 }

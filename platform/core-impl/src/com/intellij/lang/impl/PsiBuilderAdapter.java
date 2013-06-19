@@ -32,6 +32,10 @@ public class PsiBuilderAdapter implements PsiBuilder {
     myDelegate = delegate;
   }
 
+  public PsiBuilder getDelegate() {
+    return myDelegate;
+  }
+
   @Override
   public Project getProject() {
     return myDelegate.getProject();
@@ -58,7 +62,7 @@ public class PsiBuilderAdapter implements PsiBuilder {
   }
 
   @Override
-  public void setWhitespaceSkippedCallback(WhitespaceSkippedCallback callback) {
+  public void setWhitespaceSkippedCallback(@Nullable final WhitespaceSkippedCallback callback) {
     myDelegate.setWhitespaceSkippedCallback(callback);
   }
 

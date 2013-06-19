@@ -31,6 +31,7 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author nik
@@ -39,11 +40,10 @@ public abstract class SocketConnectionBase<Request extends AbstractRequest, Resp
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.io.socketConnection.impl.ServerSocketConnectionImpl");
   private final Object myLock = new Object();
   private int myPort = -1;
-  private ConnectionStatus myStatus = ConnectionStatus.NOT_CONNECTED;
+  private final AtomicReference<ConnectionState> myState = new AtomicReference<ConnectionState>(new ConnectionState(ConnectionStatus.NOT_CONNECTED));
   private boolean myStopping;
   private final EventDispatcher<SocketConnectionListener> myDispatcher = EventDispatcher.create(SocketConnectionListener.class);
-  private String myStatusMessage;
-  private List<Thread> myThreadsToInterrupt = new ArrayList<Thread>();
+  private final List<Thread> myThreadsToInterrupt = new ArrayList<Thread>();
   private final RequestResponseExternalizerFactory<Request, Response> myExternalizerFactory;
   private final LinkedBlockingQueue<Request> myRequests = new LinkedBlockingQueue<Request>();
   private final TIntObjectHashMap<TimeoutInfo> myTimeouts = new TIntObjectHashMap<TimeoutInfo>();
@@ -122,36 +122,32 @@ public abstract class SocketConnectionBase<Request extends AbstractRequest, Resp
     }
   }
 
+  @Override
   public void dispose() {
     LOG.debug("Firefox connection disposed");
   }
 
+  @Override
   public int getPort() {
     return myPort;
   }
 
-  @NotNull
-  public String getStatusMessage() {
-    synchronized (myLock) {
-      return myStatusMessage != null ? myStatusMessage : myStatus.getStatusText();
-    }
-  }
-
   protected void setStatus(@NotNull ConnectionStatus status, @Nullable String message) {
     synchronized (myLock) {
-      myStatus = status;
-      myStatusMessage = message;
+      myState.set(new ConnectionState(status, message, null));
     }
     myDispatcher.getMulticaster().statusChanged(status);
   }
 
+  @Override
   @NotNull
-  public ConnectionStatus getStatus() {
+  public ConnectionState getState() {
     synchronized (myLock) {
-      return myStatus;
+      return myState.get();
     }
   }
 
+  @Override
   public void addListener(@NotNull SocketConnectionListener listener, @Nullable Disposable parentDisposable) {
     if (parentDisposable != null) {
       myDispatcher.addListener(listener, parentDisposable);
@@ -196,8 +192,8 @@ public abstract class SocketConnectionBase<Request extends AbstractRequest, Resp
   }
 
   private static class TimeoutInfo {
-    private int myTimeout;
-    private Runnable myOnTimeout;
+    private final int myTimeout;
+    private final Runnable myOnTimeout;
 
     private TimeoutInfo(int timeout, Runnable onTimeout) {
       myTimeout = timeout;

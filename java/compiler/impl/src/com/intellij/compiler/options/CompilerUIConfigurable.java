@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.intellij.compiler.CompilerConfiguration;
 import com.intellij.compiler.CompilerConfigurationImpl;
 import com.intellij.compiler.CompilerWorkspaceConfiguration;
 import com.intellij.compiler.MalformedPatternException;
-import com.intellij.compiler.impl.TranslatingCompilerFilesMonitor;
 import com.intellij.compiler.server.BuildManager;
 import com.intellij.openapi.compiler.CompilerBundle;
 import com.intellij.openapi.diagnostic.Logger;
@@ -27,25 +26,47 @@ import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.Gray;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.RawCommandLineEditor;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtilRt;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.StringTokenizer;
 
 public class CompilerUIConfigurable implements SearchableConfigurable, Configurable.NoScroll {
   private static final Logger LOG = Logger.getInstance("#com.intellij.compiler.options.CompilerUIConfigurable");
+
+  public static final Function<String, List<String>> LINE_PARSER = new Function<String, List<String>>() {
+    @Override
+    public List<String> fun(String text) {
+      final ArrayList<String> result = ContainerUtilRt.newArrayList();
+      final StringTokenizer tokenizer = new StringTokenizer(text, ";", false);
+      while (tokenizer.hasMoreTokens()) {
+        result.add(tokenizer.nextToken());
+      }
+      return result;
+    }
+  };
+  public static final Function<List<String>, String> LINE_JOINER = new Function<List<String>, String>() {
+    @Override
+    public String fun(List<String> strings) {
+      return StringUtil.join(strings, ";");
+    }
+  };
+
   private JPanel myPanel;
   private final Project myProject;
 
-  private JTextField myResourcePatternsField;
+  private RawCommandLineEditor myResourcePatternsField;
   private JCheckBox myCbClearOutputDirectory;
   private JCheckBox myCbAssertNotNull;
   private JBLabel myPatternLegendLabel;
@@ -57,16 +78,18 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
   private JTextField myVMOptionsField;
   private JLabel myHeapSizeLabel;
   private JLabel myVMOptionsLabel;
+  private JCheckBox myCbRebuildOnDependencyChange;
 
   public CompilerUIConfigurable(final Project project) {
     myProject = project;
 
-    myPatternLegendLabel.setText("<html>" +
+    myPatternLegendLabel.setText("<html><body>" +
                                  "Use <b>;</b> to separate patterns and <b>!</b> to negate a pattern. " +
                                  "Accepted wildcards: <b>?</b> &mdash; exactly one symbol; <b>*</b> &mdash; zero or more symbols; " +
                                  "<b>/</b> &mdash; path separator; <b>/**/</b> &mdash; any number of directories; " +
                                  "<i>&lt;dir_name&gt;</i>:<i>&lt;pattern&gt;</i> &mdash; restrict to source roots with the specified name" +
-                                 "</html>");
+                                 "</body></html>");
+    myPatternLegendLabel.setForeground(new JBColor(Gray._50, Gray._130));
     myCbUseExternalBuild.addItemListener(new ItemListener() {
       @Override
       public void itemStateChanged(ItemEvent e) {
@@ -85,6 +108,7 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
     myCbUseExternalBuild.setSelected(workspaceConfiguration.USE_COMPILE_SERVER);
     myCbEnableAutomake.setSelected(workspaceConfiguration.MAKE_PROJECT_ON_SAVE);
     myCbParallelCompilation.setSelected(workspaceConfiguration.PARALLEL_COMPILATION);
+    myCbRebuildOnDependencyChange.setSelected(workspaceConfiguration.REBUILD_ON_DEPENDENCY_CHANGE);
     myHeapSizeField.setText(String.valueOf(workspaceConfiguration.COMPILER_PROCESS_HEAP_SIZE));
     final String options = workspaceConfiguration.COMPILER_PROCESS_ADDITIONAL_VM_OPTIONS;
     myVMOptionsField.setText(options == null? "" : options.trim());
@@ -116,6 +140,7 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
     workspaceConfiguration.USE_COMPILE_SERVER = myCbUseExternalBuild.isSelected();
     workspaceConfiguration.MAKE_PROJECT_ON_SAVE = myCbEnableAutomake.isSelected();
     workspaceConfiguration.PARALLEL_COMPILATION = myCbParallelCompilation.isSelected();
+    workspaceConfiguration.REBUILD_ON_DEPENDENCY_CHANGE = myCbRebuildOnDependencyChange.isSelected();
     try {
       workspaceConfiguration.COMPILER_PROCESS_HEAP_SIZE = Integer.parseInt(myHeapSizeField.getText().trim());
     }
@@ -128,30 +153,11 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
     configuration.removeResourceFilePatterns();
     String extensionString = myResourcePatternsField.getText().trim();
     applyResourcePatterns(extensionString, (CompilerConfigurationImpl)CompilerConfiguration.getInstance(myProject));
-
-    // this will schedule for compilation all files that might become compilable after resource patterns' changing
-    final TranslatingCompilerFilesMonitor monitor = TranslatingCompilerFilesMonitor.getInstance();
-    if (workspaceConfiguration.USE_COMPILE_SERVER) {
-      monitor.suspendProject(myProject);
+    if (wasUsingExternalMake != workspaceConfiguration.USE_COMPILE_SERVER) {
+      myProject.getMessageBus().syncPublisher(ExternalBuildOptionListener.TOPIC).externalBuildOptionChanged(workspaceConfiguration.USE_COMPILE_SERVER);
     }
-    else {
-      // use old make
-      if (wasUsingExternalMake) {
-        monitor.watchProject(myProject);
-        monitor.scanSourcesForCompilableFiles(myProject);
-        if (!myProject.isDefault()) {
-          final File buildSystem = BuildManager.getInstance().getBuildSystemDirectory();
-          final File[] subdirs = buildSystem.listFiles();
-          if (subdirs != null) {
-            final String prefix = myProject.getName().toLowerCase(Locale.US) + "_";
-            for (File subdir : subdirs) {
-              if (subdir.getName().startsWith(prefix)) {
-                FileUtil.asyncDelete(subdir);
-              }
-            }
-          }
-        }
-      }
+    if (workspaceConfiguration.USE_COMPILE_SERVER) {
+      BuildManager.getInstance().clearState(myProject);
     }
   }
 
@@ -193,6 +199,7 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
     isModified |= ComparingUtils.isModified(myCbUseExternalBuild, workspaceConfiguration.USE_COMPILE_SERVER);
     isModified |= ComparingUtils.isModified(myCbEnableAutomake, workspaceConfiguration.MAKE_PROJECT_ON_SAVE);
     isModified |= ComparingUtils.isModified(myCbParallelCompilation, workspaceConfiguration.PARALLEL_COMPILATION);
+    isModified |= ComparingUtils.isModified(myCbRebuildOnDependencyChange, workspaceConfiguration.REBUILD_ON_DEPENDENCY_CHANGE);
     isModified |= ComparingUtils.isModified(myHeapSizeField, workspaceConfiguration.COMPILER_PROCESS_HEAP_SIZE);
     isModified |= ComparingUtils.isModified(myVMOptionsField, workspaceConfiguration.COMPILER_PROCESS_ADDITIONAL_VM_OPTIONS);
 
@@ -231,10 +238,15 @@ public class CompilerUIConfigurable implements SearchableConfigurable, Configura
   private void updateExternalMakeOptionControls(boolean enabled) {
     myCbEnableAutomake.setEnabled(enabled);
     myCbParallelCompilation.setEnabled(enabled);
+    myCbRebuildOnDependencyChange.setEnabled(enabled);
     myHeapSizeField.setEnabled(enabled);
     myVMOptionsField.setEnabled(enabled);
     myHeapSizeLabel.setEnabled(enabled);
     myVMOptionsLabel.setEnabled(enabled);
   }
 
+  private void createUIComponents() {
+    myResourcePatternsField = new RawCommandLineEditor(LINE_PARSER, LINE_JOINER);
+    myResourcePatternsField.setDialogCaption("Resource patterns");
+  }
 }

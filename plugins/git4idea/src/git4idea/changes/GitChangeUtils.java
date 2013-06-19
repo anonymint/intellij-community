@@ -181,33 +181,25 @@ public class GitChangeUtils {
   }
 
   /**
-   * Load actual revision number with timestamp basing on revision number expression
-   *
-   * @param project        a project
-   * @param vcsRoot        a repository root
-   * @param revisionNumber a revision number expression
-   * @return a resolved revision
-   * @throws VcsException if there is a problem with running git
+   * Load actual revision number with timestamp basing on a reference: name of a branch or tag, or revision number expression.
    */
   @NotNull
-  public static GitRevisionNumber loadRevision(@NotNull Project project, @NotNull VirtualFile vcsRoot, @NonNls final String revisionNumber)
-    throws VcsException {
+  public static GitRevisionNumber resolveReference(@NotNull Project project, @NotNull VirtualFile vcsRoot,
+                                                   @NotNull String reference) throws VcsException {
     GitSimpleHandler handler = new GitSimpleHandler(project, vcsRoot, GitCommand.REV_LIST);
-    handler.addParameters("--timestamp", "--max-count=1", revisionNumber);
+    handler.addParameters("--timestamp", "--max-count=1", reference);
     handler.endOptions();
-    handler.setNoSSH(true);
     handler.setSilent(true);
     String output = handler.run();
     StringTokenizer stk = new StringTokenizer(output, "\n\r \t", false);
     if (!stk.hasMoreTokens()) {
       GitSimpleHandler dh = new GitSimpleHandler(project, vcsRoot, GitCommand.LOG);
       dh.addParameters("-1", "HEAD");
-      dh.setNoSSH(true);
       dh.setSilent(true);
       String out = dh.run();
       LOG.info("Diagnostic output from 'git log -1 HEAD': [" + out + "]");
       throw new VcsException(String.format("The string '%s' does not represent a revision number. Output: [%s]\n Root: %s",
-                                           revisionNumber, output, vcsRoot));
+                                           reference, output, vcsRoot));
     }
     Date timestamp = GitUtil.parseTimestampWithNFEReport(stk.nextToken(), handler, output);
     return new GitRevisionNumber(stk.nextToken(), timestamp);
@@ -247,9 +239,9 @@ public class GitChangeUtils {
                                                           boolean skipDiffsForMerge,
                                                           boolean local, boolean revertable) throws VcsException {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.SHOW);
-    h.setNoSSH(true);
     h.setSilent(true);
-    h.addParameters("--name-status", "--no-abbrev", "-M", "--pretty=format:" + COMMITTED_CHANGELIST_FORMAT, "--encoding=UTF-8",
+    h.addParameters("--name-status", "--first-parent", "--no-abbrev", "-M", "--pretty=format:" + COMMITTED_CHANGELIST_FORMAT,
+                    "--encoding=UTF-8",
                     revisionName, "--");
     String output = h.run();
     StringScanner s = new StringScanner(output);
@@ -259,7 +251,6 @@ public class GitChangeUtils {
   @Nullable
   public static String getCommitAbbreviation(final Project project, final VirtualFile root, final SHAHash hash) {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LOG);
-    h.setNoSSH(true);
     h.setSilent(true);
     h.addParameters("--max-count=1", "--pretty=%h", "--encoding=UTF-8", "\"" + hash.getValue() + "\"", "--");
     try {
@@ -276,7 +267,6 @@ public class GitChangeUtils {
   public static SHAHash commitExists(final Project project, final VirtualFile root, final String anyReference,
                                      List<VirtualFile> paths, final String... parameters) {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LOG);
-    h.setNoSSH(true);
     h.setSilent(true);
     h.addParameters(parameters);
     h.addParameters("--max-count=1", "--pretty=%H", "--encoding=UTF-8", anyReference, "--");
@@ -296,7 +286,6 @@ public class GitChangeUtils {
   public static boolean isAnyLevelChild(final Project project, final VirtualFile root, final SHAHash parent,
                                         final String anyReferenceChild) {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.MERGE_BASE);
-    h.setNoSSH(true);
     h.setSilent(true);
     h.addParameters("\"" + parent.getValue() + "\"","\"" + anyReferenceChild + "\"",  "--");
     try {
@@ -312,7 +301,6 @@ public class GitChangeUtils {
   @Nullable
   public static List<AbstractHash> commitExistsByComment(final Project project, final VirtualFile root, final String anyReference) {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LOG);
-    h.setNoSSH(true);
     h.setSilent(true);
     String escaped = StringUtil.escapeQuotes(anyReference);
     escaped = StringUtil.escapeSlashes(escaped);
@@ -381,9 +369,8 @@ public class GitChangeUtils {
     }
     GitRevisionNumber thisRevision = new GitRevisionNumber(revisionNumber, commitDate);
 
-    long number = longForSHAHash(revisionNumber);
     if (skipDiffsForMerge || (parents.length <= 1)) {
-      final GitRevisionNumber parentRevision = parents.length > 0 ? loadRevision(project, root, parents[0]) : null;
+      final GitRevisionNumber parentRevision = parents.length > 0 ? resolveReference(project, root, parents[0]) : null;
       // This is the first or normal commit with the single parent.
       // Just parse changes in this commit as returned by the show command.
       parseChanges(project, root, thisRevision, local ? null : parentRevision, s, changes, null);
@@ -394,9 +381,8 @@ public class GitChangeUtils {
       // If no changes are found (why to merge then?). Empty changelist is reported.
 
       for (String parent : parents) {
-        final GitRevisionNumber parentRevision = loadRevision(project, root, parent);
+        final GitRevisionNumber parentRevision = resolveReference(project, root, parent);
         GitSimpleHandler diffHandler = new GitSimpleHandler(project, root, GitCommand.DIFF);
-        diffHandler.setNoSSH(true);
         diffHandler.setSilent(true);
         diffHandler.addParameters("--name-status", "-M", parentRevision.getRev(), thisRevision.getRev());
         String diff = diffHandler.run();
@@ -408,7 +394,7 @@ public class GitChangeUtils {
       }
     }
     String changeListName = String.format("%s(%s)", commentSubject, revisionNumber);
-    return new GitCommittedChangeList(changeListName, fullComment, committerName, number, commitDate, changes, revertable);
+    return new GitCommittedChangeList(changeListName, fullComment, committerName, thisRevision, commitDate, changes, revertable);
   }
 
   public static long longForSHAHash(String revisionNumber) {
@@ -417,23 +403,31 @@ public class GitChangeUtils {
 
   @NotNull
   public static Collection<Change> getDiff(@NotNull Project project, @NotNull VirtualFile root,
-                                           @NotNull String oldRevision, @Nullable String newRevision,
+                                           @Nullable String oldRevision, @Nullable String newRevision,
                                            @Nullable Collection<FilePath> dirtyPaths) throws VcsException {
+    LOG.assertTrue(oldRevision != null || newRevision != null, "Both old and new revisions can't be null");
     String range;
     GitRevisionNumber newRev;
-    if (newRevision == null) {
-      // it is current revision
-      range = oldRevision;
+    GitRevisionNumber oldRev;
+    if (newRevision == null) { // current revision at the right
+      range = oldRevision + "..";
+      oldRev = resolveReference(project, root, oldRevision);
       newRev = null;
+    }
+    else if (oldRevision == null) { // current revision at the left
+      range = ".." + newRevision;
+      oldRev = null;
+      newRev = resolveReference(project, root, newRevision);
     }
     else {
       range = oldRevision + ".." + newRevision;
-      newRev = loadRevision(project, root, newRevision);
+      oldRev = resolveReference(project, root, oldRevision);
+      newRev = resolveReference(project, root, newRevision);
     }
     String output = getDiffOutput(project, root, range, dirtyPaths);
 
     Collection<Change> changes = new ArrayList<Change>();
-    parseChanges(project, root, newRev, loadRevision(project, root, oldRevision), output, changes, Collections.<String>emptySet());
+    parseChanges(project, root, newRev, oldRev, output, changes, Collections.<String>emptySet());
     return changes;
   }
 
@@ -462,7 +456,6 @@ public class GitChangeUtils {
                                                  @NotNull String diffRange, @Nullable Collection<FilePath> dirtyPaths) {
     GitSimpleHandler handler = new GitSimpleHandler(project, root, GitCommand.DIFF);
     handler.addParameters("--name-status", "--diff-filter=ADCMRUXT", "-M", diffRange);
-    handler.setNoSSH(true);
     handler.setSilent(true);
     handler.setStdoutSuppressed(true);
     handler.endOptions();

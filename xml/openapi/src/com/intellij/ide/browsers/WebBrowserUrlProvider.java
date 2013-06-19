@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,13 @@
 package com.intellij.ide.browsers;
 
 import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author spleaner
- */
 public abstract class WebBrowserUrlProvider {
   public static ExtensionPointName<WebBrowserUrlProvider> EP_NAME = ExtensionPointName.create("com.intellij.webBrowserUrlProvider");
 
@@ -36,34 +35,30 @@ public abstract class WebBrowserUrlProvider {
     }
   }
 
-  /**
-   * Invariant: element has not null containing psi file with not null virtual file 
-   */
-  @NotNull
-  public String getUrl(@NotNull PsiElement element) throws BrowserException {
+  public boolean canHandleElement(@NotNull PsiElement element, @NotNull PsiFile psiFile, Ref<Url> result) {
+    VirtualFile file = psiFile.getVirtualFile();
+    if (file == null) {
+      return false;
+    }
+
+    Url url;
     try {
-      return getUrl(element, false);
+      url = getUrl(element, psiFile, file);
     }
-    catch (BrowserException e) {
-      throw e;
+    catch (BrowserException ignored) {
+      return false;
     }
-    catch (Exception e) {
-      throw new RuntimeException(e);
+
+    if (url == null) {
+      return false;
     }
+
+    result.set(url);
+    return true;
   }
 
-  /**
-   * @deprecated override {@link #getUrl(com.intellij.psi.PsiElement)} instead
-   */
-  @NotNull
-  public String getUrl(@NotNull PsiElement element, boolean shiftDown) throws Exception {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * Invariant: element has not null containing psi file with not null virtual file
-   */
-  public abstract boolean canHandleElement(@NotNull final PsiElement element);
+  @Nullable
+  public abstract Url getUrl(@NotNull PsiElement element, @NotNull PsiFile psiFile, @NotNull VirtualFile virtualFile) throws BrowserException;
 
   @Nullable
   public String getOpenInBrowserActionText(@NotNull PsiFile file) {

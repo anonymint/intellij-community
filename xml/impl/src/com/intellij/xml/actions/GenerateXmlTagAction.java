@@ -16,6 +16,7 @@
 package com.intellij.xml.actions;
 
 import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.actions.SimpleCodeInsightAction;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.lookup.impl.LookupCellRenderer;
@@ -103,7 +104,7 @@ public class GenerateXmlTagAction extends SimpleCodeInsightAction {
                 int offset = editor.getCaretModel().getOffset();
                 Document document = editor.getDocument();
                 document.insertString(offset, newTag.getText());
-                PsiDocumentManager.getInstance(getProject()).commitDocument(document);
+                PsiDocumentManager.getInstance(project).commitDocument(document);
                 newTag = PsiTreeUtil.getParentOfType(file.findElementAt(offset + 1), XmlTag.class, false);
               }
               else {
@@ -170,7 +171,7 @@ public class GenerateXmlTagAction extends SimpleCodeInsightAction {
 
   public static void generateTag(XmlTag newTag) {
     generateRaw(newTag);
-    final XmlTag restored = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(newTag);
+    final XmlTag restored = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(newTag);
     if (restored == null) {
       LOG.error("Could not restore tag: " + newTag.getText());
     }
@@ -300,7 +301,7 @@ public class GenerateXmlTagAction extends SimpleCodeInsightAction {
   }
 
   @Override
-  protected boolean isValidForFile(Project project, Editor editor, PsiFile file) {
+  protected boolean isValidForFile(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
     if (!(file instanceof XmlFile)) return false;
     XmlTag contextTag = getContextTag(editor, file);
     return contextTag != null && contextTag.getDescriptor() != null;

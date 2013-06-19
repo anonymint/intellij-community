@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.openapi.wm.StatusBarWidget;
 import com.intellij.openapi.wm.impl.status.EditorBasedWidget;
 import com.intellij.util.Consumer;
 import git4idea.GitUtil;
+import git4idea.branch.GitBranchUtil;
 import git4idea.config.GitVcsSettings;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryChangeListener;
@@ -69,17 +70,17 @@ public class GitBranchWidget extends EditorBasedWidget implements StatusBarWidge
   }
 
   @Override
-  public void selectionChanged(FileEditorManagerEvent event) {
+  public void selectionChanged(@NotNull FileEditorManagerEvent event) {
     update();
   }
 
   @Override
-  public void fileOpened(FileEditorManager source, VirtualFile file) {
+  public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
     update();
   }
 
   @Override
-  public void fileClosed(FileEditorManager source, VirtualFile file) {
+  public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
     update();
   }
 
@@ -94,7 +95,7 @@ public class GitBranchWidget extends EditorBasedWidget implements StatusBarWidge
     if (project == null) {
       return null;
     }
-    GitRepository repo = GitBranchUiUtil.getCurrentRepository(project);
+    GitRepository repo = GitBranchUtil.getCurrentRepository(project);
     if (repo == null) {
       return null;
     }
@@ -109,6 +110,7 @@ public class GitBranchWidget extends EditorBasedWidget implements StatusBarWidge
 
   @NotNull
   @Override
+  @Deprecated
   public String getMaxValue() {
     return myMaxString;
   }
@@ -138,14 +140,14 @@ public class GitBranchWidget extends EditorBasedWidget implements StatusBarWidge
           return;
         }
 
-        GitRepository repo = GitBranchUiUtil.getCurrentRepository(project);
+        GitRepository repo = GitBranchUtil.getCurrentRepository(project);
         if (repo == null) { // the file is not under version control => display nothing
           emptyTextAndTooltip();
           return;
         }
 
         int maxLength = myMaxString.length() - 1; // -1, because there are arrows indicating that it is a popup
-        myText = StringUtil.shortenTextWithEllipsis(GitBranchUiUtil.getDisplayableBranchText(repo), maxLength, 5);
+        myText = StringUtil.shortenTextWithEllipsis(GitBranchUtil.getDisplayableBranchText(repo), maxLength, 5);
         myTooltip = getDisplayableBranchTooltip(repo);
         myStatusBar.updateWidget(ID());
         mySettings.setRecentRoot(repo.getRoot().getPath());
@@ -160,7 +162,7 @@ public class GitBranchWidget extends EditorBasedWidget implements StatusBarWidge
 
   @NotNull
   private static String getDisplayableBranchTooltip(GitRepository repo) {
-    String text = GitBranchUiUtil.getDisplayableBranchText(repo);
+    String text = GitBranchUtil.getDisplayableBranchText(repo);
     if (!GitUtil.justOneGitRepository(repo.getProject())) {
       return text + "\n" + "Root: " + repo.getRoot().getName();
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,11 +52,11 @@ public class GroovySmartCompletionTest extends GroovyCompletionTestBase {
   }
 
   public void testReturnStatement() throws Exception {
-    doSmartCompletion("b", "b1", "b2", "equals", "foo");
+    doSmartCompletion("b", "b1", "b2", "foo");
   }
 
   public void testIncSmartCompletion() throws Exception {
-    doSmartCompletion("a", "b", "hashCode");
+    doSmartCompletion("a", "b");
   }
 
   public void testInheritConstructorsAnnotation() throws Throwable {
@@ -79,7 +79,7 @@ public class GroovySmartCompletionTest extends GroovyCompletionTestBase {
   public void testDontCompletePrivateMembers() {doSmartCompletion "foo1", "foo2", "getFoo1", "getFoo2"}
 
   public void testEnumMembersInAssignment() {doSmartCompletion "IN_STOCK", "NOWHERE", "ORDERED" }
-  public void testEnumMembersInAssignmentInsideEnum() {doSmartCompletion "IN_STOCK", "NOWHERE", "ORDERED", "next", "previous" }
+  public void testEnumMembersInAssignmentInsideEnum() {doSmartCompletion "IN_STOCK", "NOWHERE", "ORDERED", "next", "previous", "valueOf" }
 
   public void testPreferVarargElement() {
     doCompletionTest(null, null, '\n', CompletionType.SMART)
@@ -104,22 +104,8 @@ String s = <caret>
 
     myFixture.complete(CompletionType.SMART, 2)
     assertOrderedEquals(myFixture.lookupElementStrings,
-                        'copyValueOf',
-                        'copyValueOf',
-                        'format',
-                        'format',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
-                        'valueOf',
                         'foo',
-                        'string',
-                        'toString')
+                        'string')
   }
 
   public void testGlobalListCreators() {
@@ -169,8 +155,8 @@ Runnable r = new Run<caret>
 ''', '''\
 Runnable r = new Runnable() {
     @Override
-    void run() {
-        <caret><selection>//To change body of implemented methods use File | Settings | File Templates.</selection>
+    void run() {<caret><selection></selection>
+
     }
 }
 ''')
@@ -189,6 +175,26 @@ def aaaa = '123'
 aaaa = 123
 
 foo(aaaa<caret>)
+''')
+  }
+
+  void testQualifiedNameAfterNew() {
+    myFixture.addClass('''\
+package foo;
+public class User<T> {}
+''')
+    doSmartTest('''\
+class User {
+}
+def a(foo.User<String> f){}
+
+a(new Us<caret>)
+''', '''\
+class User {
+}
+def a(foo.User<String> f){}
+
+a(new foo.User<String>()<caret>)
 ''')
   }
 }

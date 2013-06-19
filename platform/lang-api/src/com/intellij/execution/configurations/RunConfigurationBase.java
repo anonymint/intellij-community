@@ -19,8 +19,10 @@ import com.intellij.diagnostic.logging.LogConsole;
 import com.intellij.execution.ExecutionTarget;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.InvalidDataException;
+import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.WriteExternalException;
 import org.jdom.Element;
@@ -64,31 +66,38 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     myIcon = factory.getIcon();
   }
 
+  @Override
   public int getUniqueID() {
     return System.identityHashCode(this);
   }
 
+  @Override
   public final ConfigurationFactory getFactory() {
     return myFactory;
   }
 
+  @Override
   public final void setName(final String name) {
     myName = name;
   }
 
+  @Override
   public final Project getProject() {
     return myProject;
   }
 
+  @Override
   @NotNull
   public ConfigurationType getType() {
     return myFactory.getType();
   }
 
+  @Override
   public Icon getIcon() {
     return myIcon;
   }
 
+  @Override
   public final String getName() {
     return myName;
   }
@@ -104,6 +113,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
   public void checkSettingsBeforeRun() throws RuntimeConfigurationException {
   }
 
+  @Override
   public boolean canRunOn(@NotNull ExecutionTarget target) {
     return true;
   }
@@ -112,6 +122,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     return super.equals(obj);
   }
 
+  @Override
   public RunConfiguration clone() {
     final RunConfigurationBase runConfiguration = (RunConfigurationBase)super.clone();
     runConfiguration.myLogFiles = new ArrayList<LogFileOptions>(myLogFiles);
@@ -169,13 +180,14 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
   }
 
   //invoke before run/debug tabs are shown.
-  //Should be overriden to add additional tabs for run/debug toolwindow
+  //Should be overridden to add additional tabs for run/debug toolwindow
   public void createAdditionalTabComponents(AdditionalTabComponentManager manager, ProcessHandler startedProcess) {
   }
 
   public void customizeLogConsole(LogConsole console) {
   }
 
+  @Override
   public void readExternal(Element element) throws InvalidDataException {
     myLogFiles.clear();
     for (final Object o : element.getChildren(LOG_FILE)) {
@@ -200,6 +212,7 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
     myShowConsoleOnStdErr = Boolean.parseBoolean(element.getAttributeValue(SHOW_CONSOLE_ON_STD_ERR));
   }
 
+  @Override
   public void writeExternal(Element element) throws WriteExternalException {
     for (final LogFileOptions options : myLogFiles) {
       Element logFile = new Element(LOG_FILE);
@@ -270,5 +283,17 @@ public abstract class RunConfigurationBase extends UserDataHolderBase implements
   @Override
   public String toString() {
     return getType().getDisplayName() + ": " + getName();
+  }
+
+  @SuppressWarnings("deprecation")
+  @Override
+  public JDOMExternalizable createRunnerSettings(ConfigurationInfoProvider provider) {
+    return null;
+  }
+
+  @SuppressWarnings("deprecation")
+  @Override
+  public SettingsEditor<JDOMExternalizable> getRunnerSettingsEditor(ProgramRunner runner) {
+    return null;
   }
 }

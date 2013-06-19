@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 package git4idea.branch
-
 import com.intellij.dvcs.test.MockVirtualFile
 import com.intellij.notification.NotificationListener
 import com.intellij.openapi.progress.ProgressIndicator
@@ -30,13 +29,11 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.vcs.MockChangeListManager
 import com.intellij.util.LineSeparator
 import com.intellij.util.text.CharArrayUtil
+import git4idea.GitCommit
 import git4idea.config.GitVersion
 import git4idea.config.GitVersionSpecialty
-import git4idea.history.browser.GitCommit
 import git4idea.repo.GitRepository
-import git4idea.test.GitExecutor
 import git4idea.test.GitLightTest
-import git4idea.test.GitScenarios
 import org.jetbrains.annotations.NotNull
 import org.junit.After
 import org.junit.Before
@@ -44,15 +41,16 @@ import org.junit.Test
 
 import java.util.regex.Matcher
 
+import static com.intellij.dvcs.test.Executor.*
+import static git4idea.test.GitExecutor.cd
+import static git4idea.test.GitExecutor.git
+import static git4idea.test.GitScenarios.*
 import static groovy.util.GroovyTestCase.assertEquals
 import static junit.framework.Assert.*
-
 /**
  *
  * @author Kirill Likhodedov
  */
-@Mixin(GitExecutor)
-@Mixin(GitScenarios)
 class GitBranchWorkerTest extends GitLightTest {
 
   private GitRepository myUltimate
@@ -415,6 +413,29 @@ class GitBranchWorkerTest extends GitLightTest {
   }
 
   @Test
+  void "Force checkout in case of local changes that would be overwritten by checkout"() {
+    // IDEA-99849
+    prepareLocalChangesOverwrittenBy(myUltimate)
+
+    String errorMessage = null;
+    String successMessage = null;
+    def uiHandler = [
+      showSmartOperationDialog: { Project p, List<Change> cs, String op, boolean force ->
+        GitSmartOperationDialog.FORCE_EXIT_CODE;
+      },
+      notifySuccess: { String message -> successMessage = message },
+      notifyError: { String title, String message -> errorMessage = message }
+    ] as GitBranchUiHandler
+    GitBranchWorker brancher = new GitBranchWorker(myProject, myPlatformFacade, myGit, uiHandler)
+    brancher.checkoutNewBranchStartingFrom("new_branch", "feature", myRepositories)
+
+    assertNull("Error notification is unexpected, but was: $errorMessage", errorMessage)
+    assertEquals("Notification about successful branch creation is incorrect",
+                 "Checked out new branch <b><code>new_branch</code></b> from <b><code>feature</code></b>", successMessage)
+    assertCurrentBranch("new_branch")
+  }
+
+  @Test
   public void "rollback of 'checkout branch as new branch' should delete branches"() {
     branchWithCommit(myRepositories, "feature")
     touch("feature.txt", "feature_content")
@@ -728,7 +749,7 @@ class GitBranchWorkerTest extends GitLightTest {
   }
 
   private static LineSeparator detectLineSeparators(String actual) {
-    char[] chars = CharArrayUtil.fromSequenceWithoutCopying(actual);
+    char[] chars = CharArrayUtil.fromSequence(actual);
     for (char c : chars) {
       if (c == '\r') {
         return LineSeparator.CRLF;
@@ -761,7 +782,12 @@ class GitBranchWorkerTest extends GitLightTest {
     }
 
     @Override
-    boolean showBranchIsNotFullyMergedDialog(@NotNull Project project, @NotNull Map<GitRepository, List<GitCommit>> history, @NotNull String unmergedBranch, @NotNull List<String> mergedToBranches, @NotNull String baseBranch) {
+    boolean showBranchIsNotFullyMergedDialog(
+      Project project,
+      Map<GitRepository, List<GitCommit>> history,
+      String unmergedBranch,
+      List<String> mergedToBranches,
+      String baseBranch) {
       throw new UnsupportedOperationException()
     }
 

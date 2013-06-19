@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrAc
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrEnumConstant
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrGdkMethod
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod
-import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrLightLocalVariable
+import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrBindingVariable
 import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringUtil
 import org.jetbrains.plugins.groovy.util.TestUtils
 /**
@@ -141,7 +141,7 @@ public class ResolvePropertyTest extends GroovyResolveTestCase {
   public void testUndefinedVar1() throws Exception {
     PsiReference ref = configureByFile("undefinedVar1/A.groovy");
     PsiElement resolved = ref.resolve();
-    assertInstanceOf(resolved, GrLightLocalVariable);
+    assertInstanceOf(resolved, GrBindingVariable);
   }
 
   public void testRecursive1() throws Exception {
@@ -311,7 +311,7 @@ print ba<caret>r
   private void doUndefinedVarTest(String fileName) throws Exception {
     PsiReference ref = configureByFile(fileName);
     PsiElement resolved = ref.resolve();
-    assertInstanceOf(resolved, GrLightLocalVariable);
+    assertInstanceOf(resolved, GrBindingVariable);
   }
 
   public void testBooleanProperty() throws Exception {
@@ -788,7 +788,7 @@ new A().pro<caret>p''')
     assertInstanceOf(resolved, GrGdkMethod)
     def method = resolved.staticMethod as PsiMethod
 
-    assertEquals(method.parameterList.parameters[0].type.canonicalText, CommonClassNames.JAVA_LANG_STRING)
+    assertEquals(method.parameterList.parameters[0].type.canonicalText, 'java.lang.CharSequence')
   }
 
   void testLocalVarNotAvailableInClass() {
@@ -1037,4 +1037,236 @@ print Fie<caret>ld1
     assertNotNull(ref.resolve())
 
   }
+
+  void testLocalVarVsClassFieldInAnonymous() {
+    final ref = configureByText('a.groovy', '''\
+      class A {
+        public foo
+      }
+
+      def foo = 4
+
+      new A() {
+        def foo() {
+          print fo<caret>o
+        }
+      }
+''')
+
+    assertFalse( ref.resolve() instanceof PsiField)
+    assertTrue( ref.resolve() instanceof GrVariable)
+  }
+
+  void testInterfaceDoesNotResolveWithExpressionQualifier() {
+    def ref = configureByText('''\
+class Foo {
+  interface Inner {
+  }
+
+  public Inner = 5
+}
+
+new Foo().Inn<caret>er
+''')
+
+    assertInstanceOf(ref.resolve(), PsiField)
+  }
+
+  void testInterfaceDoesNotResolveWithExpressionQualifier2() {
+    def ref = configureByText('''\
+class Foo {
+  interface Inner {
+  }
+
+  public Inner = 5
+}
+
+def foo = new Foo()
+print foo.Inn<caret>er
+''')
+
+    assertInstanceOf(ref.resolve(), PsiField)
+  }
+
+  void testResolveBinding1() {
+    resolveByText('''\
+abc = 4
+
+print ab<caret>c
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding2() {
+    resolveByText('''\
+print ab<caret>c
+
+abc = 4
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding3() {
+    resolveByText('''\
+a<caret>bc = 4
+
+print abc
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding4() {
+    resolveByText('''\
+print abc
+
+a<caret>bc = 4
+''', GrBindingVariable)
+  }
+
+
+  void testResolveBinding5() {
+    resolveByText('''\
+def foo() {
+  abc = 4
+}
+
+def bar() {
+  print ab<caret>c
+}
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding6() {
+    resolveByText('''\
+def foo() {
+  print ab<caret>c
+}
+
+def bar() {
+  abc = 4
+}
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding7() {
+    resolveByText('''\
+def foo() {
+  a<caret>bc = 4
+}
+
+def bar() {
+  print abc
+}
+''', GrBindingVariable)
+  }
+
+  void testResolveBinding8() {
+    resolveByText('''\
+def foo() {
+  print abc
+}
+
+def bar() {
+  a<caret>bc = 4
+}
+''', GrBindingVariable)
+  }
+
+  void testBinding9() {
+    resolveByText('''\
+a<caret>a = 5
+print aa
+aa = 6
+print aa
+''', GrBindingVariable)
+  }
+
+  void testBinding10() {
+    resolveByText('''\
+aa = 5
+print a<caret>a
+aa = 6
+print aa
+''', GrBindingVariable)
+  }
+
+  void testBinding11() {
+    resolveByText('''\
+aa = 5
+print aa
+a<caret>a = 6
+print aa
+''', GrBindingVariable)
+  }
+
+  void testBinding12() {
+    resolveByText('''\
+aa = 5
+print aa
+aa = 6
+print a<caret>a
+''', GrBindingVariable)
+  }
+
+  void testVarVsPackage1() {
+    myFixture.addClass('''package p; public class A {}''')
+
+    resolveByText('''\
+      def p = [A:5]
+
+      print <caret>p.A
+''', PsiPackage)
+  }
+
+  void testVarVsPackage2() {
+    myFixture.addClass('''package p; public class A {}''')
+
+    resolveByText('''\
+      def p = [A:5]
+
+      print <caret>p
+''', PsiVariable)
+  }
+
+  void testVarVsPackage3() {
+    myFixture.addClass('''package p; public class A {}''')
+
+    resolveByText('''\
+      def p = [A:{2}]
+
+      print <caret>p.A()
+''', PsiVariable)
+  }
+
+  void testVarVsPackage4() {
+    myFixture.addClass('''package p; public class A {public static int foo(){return 2;}}''')
+
+    resolveByText('''\
+      def p = [A:[foo:{-2}]]
+
+      print <caret>p.A.foo()
+''', PsiVariable)
+  }
+
+  void testVarVsClass1() {
+    myFixture.addClass('package p; public class A {public static int foo() {return 1;}}')
+
+    resolveByText('''\
+import p.A
+
+def A = [a:{-1}]
+
+print <caret>A
+''', PsiVariable)
+  }
+
+  void testVarVsClass2() {
+    myFixture.addClass('package p; public class A {public static int foo() {return 1;}}')
+
+    resolveByText('''\
+import p.A
+
+def A = [a:{-1}]
+
+print <caret>A.a()
+''', PsiVariable)
+  }
+
 }

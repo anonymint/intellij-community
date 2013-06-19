@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -199,19 +199,6 @@ public abstract class ParserUtils {
     marker.error(msg);
   }
 
-  @Deprecated
-  public static void advance(PsiBuilder builder, int count) {
-    for (int i = 0; i < count; i++) {
-      builder.getTokenText();
-      builder.advanceLexer();
-    }
-  }
-
-  @Deprecated
-  public static void advance(PsiBuilder builder) {
-    advance(builder, 1);
-  }
-
   public static boolean skipCountingBraces(PsiBuilder builder, TokenSet until) {
     int braceLevel = 0;
     while (true) {
@@ -232,6 +219,4 @@ public abstract class ParserUtils {
       builder.advanceLexer();
     }
   }
-
-
 }

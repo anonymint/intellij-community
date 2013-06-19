@@ -19,7 +19,7 @@
  * User: max
  * Date: Nov 28, 2001
  * Time: 4:17:17 PM
- * To change template for new class use 
+ * To change template for new class use
  * Code Style | Class Templates options (Tools | IDE Options).
  */
 package com.intellij.codeInspection.reference;
@@ -29,6 +29,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiModifierListOwner;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class RefImplicitConstructorImpl extends RefMethodImpl implements RefImplicitConstructor {
@@ -37,47 +38,59 @@ public class RefImplicitConstructorImpl extends RefMethodImpl implements RefImpl
     super(InspectionsBundle.message("inspection.reference.implicit.constructor.name", ownerClass.getName()), ownerClass);
   }
 
+  @Override
   public void buildReferences() {
     getRefManager().fireBuildReferences(this);
   }
 
+  @Override
   public boolean isSuspicious() {
     return ((RefClassImpl)getOwnerClass()).isSuspicious();
   }
 
+  @NotNull
+  @Override
   public String getName() {
     return InspectionsBundle.message("inspection.reference.implicit.constructor.name", getOwnerClass().getName());
   }
 
+  @Override
   public String getExternalName() {
     return getOwnerClass().getExternalName();
   }
 
+  @Override
   public boolean isValid() {
     return ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
+      @Override
       public Boolean compute() {
         return getOwnerClass().isValid();
       }
     }).booleanValue();
   }
 
+  @Override
   public String getAccessModifier() {
     return getOwnerClass().getAccessModifier();
   }
 
+  @Override
   public void setAccessModifier(String am) {
     RefJavaUtil.getInstance().setAccessModifier(getOwnerClass(), am);
   }
 
+  @Override
   public PsiModifierListOwner getElement() {
     return getOwnerClass().getElement();
   }
 
+  @Override
   @Nullable
   public PsiFile getContainingFile() {
     return ((RefClassImpl)getOwnerClass()).getContainingFile();
-  }  
+  }
 
+  @Override
   public RefClass getOwnerClass() {
     return myOwnerClass == null ? super.getOwnerClass() : myOwnerClass;
   }

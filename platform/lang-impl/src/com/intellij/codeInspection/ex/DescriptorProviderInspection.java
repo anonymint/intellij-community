@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.reference.RefElement;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.reference.RefModule;
-import com.intellij.codeInspection.ui.ProblemDescriptionNode;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -49,29 +48,30 @@ import java.util.*;
 public abstract class DescriptorProviderInspection extends InspectionTool implements ProblemDescriptionsProcessor {
   private static final Object lock = new Object();
   private Map<RefEntity, CommonProblemDescriptor[]> myProblemElements;
-  private HashMap<String, Set<RefEntity>> myContents = null;
-  private HashSet<RefModule> myModulesProblems = null;
+  private Map<String, Set<RefEntity>> myContents = null;
+  private Set<RefModule> myModulesProblems = null;
   private Map<CommonProblemDescriptor, RefEntity> myProblemToElements;
   private DescriptorComposer myComposer;
   private Map<RefEntity, Set<QuickFix>> myQuickFixActions;
   private Map<RefEntity, CommonProblemDescriptor[]> myIgnoredElements;
 
-  private HashMap<RefEntity, CommonProblemDescriptor[]> myOldProblemElements = null;
+  private Map<RefEntity, CommonProblemDescriptor[]> myOldProblemElements = null;
   protected static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.ex.DescriptorProviderInspection");
 
-  public void addProblemElement(RefEntity refElement, CommonProblemDescriptor... descriptions){
+  @Override
+  public void addProblemElement(RefEntity refElement, @NotNull CommonProblemDescriptor... descriptions){
     addProblemElement(refElement, true, descriptions);
   }
 
-  protected void addProblemElement(RefEntity refElement, boolean filterSuppressed, CommonProblemDescriptor... descriptions) {
+  protected void addProblemElement(RefEntity refElement, boolean filterSuppressed, @NotNull CommonProblemDescriptor... descriptions) {
     if (refElement == null) return;
-    if (descriptions == null || descriptions.length == 0) return;
+    if (descriptions.length == 0) return;
     if (filterSuppressed) {
       if (ourOutputPath == null || !(this instanceof LocalInspectionToolWrapper)) {
         synchronized (lock) {
           Map<RefEntity, CommonProblemDescriptor[]> problemElements = getProblemElements();
           CommonProblemDescriptor[] problems = problemElements.get(refElement);
-          problems = problems == null ? descriptions : ArrayUtil.mergeArrays(problems, descriptions);
+          problems = problems == null ? descriptions : ArrayUtil.mergeArrays(problems, descriptions, CommonProblemDescriptor.ARRAY_FACTORY);
           problemElements.put(refElement, problems);
         }
         for (CommonProblemDescriptor description : descriptions) {
@@ -90,7 +90,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
-  private void writeOutput(@NotNull final CommonProblemDescriptor[] descriptions, final RefEntity refElement) {
+  private void writeOutput(@NotNull final CommonProblemDescriptor[] descriptions, @NotNull RefEntity refElement) {
     final Element parentNode = new Element(InspectionsBundle.message("inspection.problems"));
     exportResults(descriptions, refElement, parentNode);
     final List list = parentNode.getChildren();
@@ -112,7 +112,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
         pathMacroManager.collapsePaths(element);
         JDOMUtil.writeElement(element, writer, "\n");
       }
-      printWriter = new PrintWriter(new BufferedWriter(new FileWriter(file, true)));
+      printWriter = new PrintWriter(new BufferedWriter(new OutputStreamWriter(new FileOutputStream(fileName, true), "UTF-8")));
       printWriter.append("\n");
       printWriter.append(writer.toString());
     }
@@ -126,6 +126,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
+  @NotNull
   public Collection<CommonProblemDescriptor> getProblemDescriptors() {
     return getProblemToElements().keySet();
   }
@@ -141,17 +142,19 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
-  public void ignoreElement(final RefEntity refEntity) {
-    if (refEntity == null) return;
+  @Override
+  public void ignoreElement(@NotNull final RefEntity refEntity) {
     getProblemElements().remove(refEntity);
     getQuickFixActions().remove(refEntity);
   }
 
+  @Override
   public void ignoreCurrentElement(RefEntity refEntity) {
     if (refEntity == null) return;
     getIgnoredElements().put(refEntity, getProblemElements().get(refEntity));
   }
 
+  @Override
   public void amnesty(RefEntity refEntity) {
     getIgnoredElements().remove(refEntity);
   }
@@ -211,19 +214,10 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     return true;
   }
 
+  @Override
   public void cleanup() {
     super.cleanup();
-    final GlobalInspectionContextImpl context = getContext();
-    if (context != null && context.getUIOptions().SHOW_DIFF_WITH_PREVIOUS_RUN){
-      if (myOldProblemElements == null) {
-        myOldProblemElements = new HashMap<RefEntity, CommonProblemDescriptor[]>();
-      }
-      myOldProblemElements.clear();
-      myOldProblemElements.putAll(getIgnoredElements());
-      myOldProblemElements.putAll(getProblemElements());
-    } else {
-      myOldProblemElements = null;
-    }
+    myOldProblemElements = null;
 
     synchronized (lock) {
       myProblemElements = null;
@@ -237,13 +231,15 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
   }
 
 
+  @Override
   public void finalCleanup() {
     super.finalCleanup();
     myOldProblemElements = null;
   }
 
+  @Override
   @Nullable
-  public CommonProblemDescriptor[] getDescriptions(RefEntity refEntity) {
+  public CommonProblemDescriptor[] getDescriptions(@NotNull RefEntity refEntity) {
     final CommonProblemDescriptor[] problems = getProblemElements().get(refEntity);
     if (problems == null) return null;
 
@@ -255,6 +251,8 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     return problems;
   }
 
+  @NotNull
+  @Override
   public HTMLComposerImpl getComposer() {
     if (myComposer == null) {
       myComposer = new DescriptorComposer(this);
@@ -263,7 +261,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
   }
 
   @Override
-  public void exportResults(final @NotNull Element parentNode, RefEntity refEntity) {
+  public void exportResults(@NotNull final Element parentNode, @NotNull RefEntity refEntity) {
     synchronized (lock) {
       if (getProblemElements().containsKey(refEntity)) {
         CommonProblemDescriptor[] descriptions = getDescriptions(refEntity);
@@ -274,12 +272,13 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
-  private void exportResults(@NotNull final CommonProblemDescriptor[] descriptions, final RefEntity refEntity, final Element parentNode) {
+  private void exportResults(@NotNull final CommonProblemDescriptor[] descriptions, @NotNull RefEntity refEntity, @NotNull Element parentNode) {
     for (CommonProblemDescriptor description : descriptions) {
       @NonNls final String template = description.getDescriptionTemplate();
       int line = description instanceof ProblemDescriptor ? ((ProblemDescriptor)description).getLineNumber() : -1;
       final PsiElement psiElement = description instanceof ProblemDescriptor ? ((ProblemDescriptor)description).getPsiElement() : null;
-      @NonNls String problemText = StringUtil.replace(StringUtil.replace(template, "#ref", psiElement != null ? ProblemDescriptionNode.extractHighlightedText(description, psiElement): "") , " #loc ", " ");
+      @NonNls String problemText = StringUtil.replace(StringUtil.replace(template, "#ref", psiElement != null ? ProblemDescriptorUtil
+        .extractHighlightedText(description, psiElement): "") , " #loc ", " ");
 
       Element element = refEntity.getRefManager().export(refEntity, parentNode, line);
       if (element == null) return;
@@ -324,10 +323,12 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
+  @Override
   public boolean isGraphNeeded() {
     return false;
   }
 
+  @Override
   public boolean hasReportedProblems() {
     final GlobalInspectionContextImpl context = getContext();
     if (context != null && context.getUIOptions().SHOW_ONLY_DIFF) {
@@ -351,6 +352,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
            myOldProblemElements != null && !myOldProblemElements.isEmpty();
   }
 
+  @Override
   public void updateContent() {
     myContents = new HashMap<String, Set<RefEntity>>();
     myModulesProblems = new HashSet<RefModule>();
@@ -372,10 +374,12 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
   }
 
+  @Override
   public Map<String, Set<RefEntity>> getContent() {
     return myContents;
   }
 
+  @Override
   public Map<String, Set<RefEntity>> getOldContent() {
     if (myOldProblemElements == null) return null;
     final HashMap<String, Set<RefEntity>> oldContents = new HashMap<String, Set<RefEntity>>();
@@ -397,49 +401,52 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     return oldContents;
   }
 
+  @Override
   public Set<RefModule> getModuleProblems() {
     return myModulesProblems;
   }
 
-  public QuickFixAction[] getQuickFixes(final RefEntity[] refElements) {
-    return extractActiveFixes(refElements, getQuickFixActions());    
+  @Override
+  @Nullable
+  public QuickFixAction[] getQuickFixes(@NotNull final RefEntity[] refElements) {
+    return extractActiveFixes(refElements, getQuickFixActions());
   }
 
-  public QuickFixAction[] extractActiveFixes(final RefEntity[] refElements, final Map<RefEntity, Set<QuickFix>> actions) {
-    if (refElements == null) return null;
-    Map<Class, QuickFixAction> result = new java.util.HashMap<Class, QuickFixAction>();
+  @Nullable
+  public QuickFixAction[] extractActiveFixes(@NotNull RefEntity[] refElements, @NotNull Map<RefEntity, Set<QuickFix>> actions) {
+    Map<Class, QuickFixAction> result = new HashMap<Class, QuickFixAction>();
     for (RefEntity refElement : refElements) {
       final Set<QuickFix> localQuickFixes = actions.get(refElement);
-      if (localQuickFixes != null){
-        for (QuickFix fix : localQuickFixes) {
-          if (fix == null) continue;
-          final Class klass = fix instanceof IntentionWrapper ? ((IntentionWrapper) fix).getAction().getClass() : fix.getClass();
-          final QuickFixAction quickFixAction = result.get(klass);
-          if (quickFixAction != null){
-            try {
-              String familyName = fix.getFamilyName();
-              familyName = familyName != null && familyName.length() > 0 ? "\'" + familyName + "\'" : familyName;
-              ((LocalQuickFixWrapper)quickFixAction).setText(InspectionsBundle.message("inspection.descriptor.provider.apply.fix", familyName));
-            }
-            catch (AbstractMethodError e) {
-              //for plugin compatibility
-              ((LocalQuickFixWrapper)quickFixAction).setText(InspectionsBundle.message("inspection.descriptor.provider.apply.fix", ""));
-            }
-          } else {
-            LocalQuickFixWrapper quickFixWrapper = new LocalQuickFixWrapper(fix, this);
-            result.put(klass, quickFixWrapper);
+      if (localQuickFixes == null) continue;
+      for (QuickFix fix : localQuickFixes) {
+        if (fix == null) continue;
+        final Class klass = fix instanceof ActionClassHolder ? ((ActionClassHolder ) fix).getActionClass() : fix.getClass();
+        final QuickFixAction quickFixAction = result.get(klass);
+        if (quickFixAction != null){
+          try {
+            String familyName = fix.getFamilyName();
+            familyName = !familyName.isEmpty() ? "\'" + familyName + "\'" : familyName;
+            ((LocalQuickFixWrapper)quickFixAction).setText(InspectionsBundle.message("inspection.descriptor.provider.apply.fix", familyName));
           }
+          catch (AbstractMethodError e) {
+            //for plugin compatibility
+            ((LocalQuickFixWrapper)quickFixAction).setText(InspectionsBundle.message("inspection.descriptor.provider.apply.fix", ""));
+          }
+        } else {
+          LocalQuickFixWrapper quickFixWrapper = new LocalQuickFixWrapper(fix, this);
+          result.put(klass, quickFixWrapper);
         }
       }
     }
     return result.values().isEmpty() ? null : result.values().toArray(new QuickFixAction[result.size()]);
   }
 
-  public RefEntity getElement(CommonProblemDescriptor descriptor) {
+  @Override
+  public RefEntity getElement(@NotNull CommonProblemDescriptor descriptor) {
     return getProblemToElements().get(descriptor);
   }
 
-  public void ignoreProblem(final CommonProblemDescriptor descriptor, final QuickFix fix) {
+  public void ignoreProblem(@NotNull CommonProblemDescriptor descriptor, @NotNull QuickFix fix) {
     RefEntity refElement = getProblemToElements().get(descriptor);
     if (refElement != null) {
       final QuickFix[] fixes = descriptor.getFixes();
@@ -453,6 +460,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
   }
 
 
+  @Override
   public boolean isElementIgnored(final RefEntity element) {
     if (getIgnoredElements() == null) return false;
     for (RefEntity entity : getIgnoredElements().keySet()) {
@@ -465,6 +473,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
 
   public boolean isProblemResolved(RefEntity refEntity, CommonProblemDescriptor descriptor) {
     if (getIgnoredElements() == null) return false;
+    if (descriptor == null) return true;
     for (RefEntity entity : getIgnoredElements().keySet()) {
       if (Comparing.equal(entity, refEntity)) {
         final CommonProblemDescriptor[] descriptors = getIgnoredElements().get(refEntity);
@@ -473,7 +482,7 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     }
     return false;
   }
-  
+
   public FileStatus getProblemStatus(final CommonProblemDescriptor descriptor) {
     final GlobalInspectionContextImpl context = getContext();
     if (context != null && context.getUIOptions().SHOW_DIFF_WITH_PREVIOUS_RUN){
@@ -511,6 +520,8 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
   }
 
 
+  @NotNull
+  @Override
   public FileStatus getElementStatus(final RefEntity element) {
     final GlobalInspectionContextImpl context = getContext();
     if (context != null && context.getUIOptions().SHOW_DIFF_WITH_PREVIOUS_RUN){
@@ -523,6 +534,8 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
     return FileStatus.NOT_CHANGED;
   }
 
+  @NotNull
+  @Override
   public Collection<RefEntity> getIgnoredRefElements() {
     return getIgnoredElements().keySet();
   }
@@ -537,10 +550,11 @@ public abstract class DescriptorProviderInspection extends InspectionTool implem
   }
 
   @Nullable
-  public HashMap<RefEntity, CommonProblemDescriptor[]> getOldProblemElements() {
+  public Map<RefEntity, CommonProblemDescriptor[]> getOldProblemElements() {
     return myOldProblemElements;
   }
 
+  @NotNull
   private Map<CommonProblemDescriptor, RefEntity> getProblemToElements() {
     synchronized (lock) {
       if (myProblemToElements == null) {

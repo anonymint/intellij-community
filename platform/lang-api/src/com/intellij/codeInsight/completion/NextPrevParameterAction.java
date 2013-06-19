@@ -31,19 +31,20 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public abstract class NextPrevParameterAction extends CodeInsightAction {
-  private boolean myNext;
+  private final boolean myNext;
 
   protected NextPrevParameterAction(boolean next) {
     myNext = next;
   }
 
+  @NotNull
   @Override
   public CodeInsightActionHandler getHandler() {
     return new Handler();
   }
 
   @Override
-  protected boolean isValidForFile(Project project, Editor editor, PsiFile file) {
+  protected boolean isValidForFile(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
     return hasSutablePolicy(editor, file);
   }
 

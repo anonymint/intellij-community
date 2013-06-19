@@ -46,6 +46,11 @@ public abstract class WebProjectGenerator<T> implements DirectoryProjectGenerato
 
   public abstract String getDescription();
 
+  @Nullable
+  public String getHelpId() {
+    return null;
+  }
+
   @Override
   @NotNull
   public final T showGenerationSettings(VirtualFile baseDir) throws ProcessCanceledException {
@@ -118,11 +123,16 @@ public abstract class WebProjectGenerator<T> implements DirectoryProjectGenerato
         @Override
         public void stateChanged(boolean validSettings) {
           getOKAction().setEnabled(validSettings);
-          initValidation();
         }
       });
       setTitle(WebProjectGenerator.this.getName());
       init();
+    }
+
+    @Nullable
+    @Override
+    protected String getHelpId() {
+      return WebProjectGenerator.this.getHelpId();
     }
 
     @Override

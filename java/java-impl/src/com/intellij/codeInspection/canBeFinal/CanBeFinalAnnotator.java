@@ -20,6 +20,7 @@ import com.intellij.codeInspection.reference.*;
 import com.intellij.psi.*;
 import com.intellij.psi.controlFlow.*;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,14 +35,16 @@ class CanBeFinalAnnotator extends RefGraphAnnotatorEx {
   private final RefManager myManager;
   public static int CAN_BE_FINAL_MASK;
 
-  public CanBeFinalAnnotator(RefManager manager) {
+  public CanBeFinalAnnotator(@NotNull RefManager manager) {
     myManager = manager;
   }
 
+  @Override
   public void initialize(RefManager refManager) {
     CAN_BE_FINAL_MASK = refManager.getLastUsedMask();
   }
 
+  @Override
   public void onInitialize(RefElement refElement) {
     ((RefElementImpl)refElement).setFlag(true, CAN_BE_FINAL_MASK);
     if (refElement instanceof RefClass) {
@@ -93,6 +96,7 @@ class CanBeFinalAnnotator extends RefGraphAnnotatorEx {
   }
 
 
+  @Override
   public void onMarkReferenced(RefElement refWhat,
                                RefElement refFrom,
                                boolean referencedFromClassInitializer,
@@ -110,6 +114,7 @@ class CanBeFinalAnnotator extends RefGraphAnnotatorEx {
     }
   }
 
+  @Override
   public void onReferencesBuild(RefElement refElement) {
     if (refElement instanceof RefClass) {
       final PsiClass psiClass = (PsiClass)refElement.getElement();

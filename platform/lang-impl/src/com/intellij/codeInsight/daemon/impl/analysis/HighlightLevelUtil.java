@@ -24,6 +24,7 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.SingleRootFileViewProvider;
 import com.intellij.psi.search.ProjectScope;
 import org.jetbrains.annotations.NotNull;
 
@@ -42,8 +43,8 @@ public class HighlightLevelUtil {
     final HighlightingSettingsPerFile component = HighlightingSettingsPerFile.getInstance(psiRoot.getProject());
     if (component == null) return true;
 
-    final FileHighlighingSetting settingForRoot = component.getHighlightingSettingForRoot(psiRoot);
-    return settingForRoot != FileHighlighingSetting.SKIP_HIGHLIGHTING;
+    final FileHighlightingSetting settingForRoot = component.getHighlightingSettingForRoot(psiRoot);
+    return settingForRoot != FileHighlightingSetting.SKIP_HIGHLIGHTING;
   }
 
   public static boolean shouldInspect(@NotNull PsiElement psiRoot) {
@@ -59,14 +60,16 @@ public class HighlightLevelUtil {
     final ProjectFileIndex fileIndex = ProjectRootManager.getInstance(project).getFileIndex();
     if (ProjectScope.getLibrariesScope(project).contains(virtualFile) && !fileIndex.isInContent(virtualFile)) return false;
 
+    if (SingleRootFileViewProvider.isTooLargeForIntelligence(virtualFile)) return false;
+
     final HighlightingSettingsPerFile component = HighlightingSettingsPerFile.getInstance(project);
     if (component == null) return true;
 
-    final FileHighlighingSetting settingForRoot = component.getHighlightingSettingForRoot(psiRoot);
-    return settingForRoot != FileHighlighingSetting.SKIP_INSPECTION;
+    final FileHighlightingSetting settingForRoot = component.getHighlightingSettingForRoot(psiRoot);
+    return settingForRoot != FileHighlightingSetting.SKIP_INSPECTION;
   }
 
-  public static void forceRootHighlighting(@NotNull PsiElement root, @NotNull FileHighlighingSetting level) {
+  public static void forceRootHighlighting(@NotNull PsiElement root, @NotNull FileHighlightingSetting level) {
     final HighlightingSettingsPerFile component = HighlightingSettingsPerFile.getInstance(root.getProject());
     if (component == null) return;
 

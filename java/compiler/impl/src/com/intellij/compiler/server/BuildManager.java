@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,9 @@
 package com.intellij.compiler.server;
 
 import com.intellij.ProjectTopics;
-import com.intellij.application.options.PathMacrosImpl;
 import com.intellij.compiler.CompilerWorkspaceConfiguration;
 import com.intellij.compiler.impl.javaCompiler.javac.JavacConfiguration;
-import com.intellij.compiler.server.impl.CompileServerClasspathManager;
+import com.intellij.compiler.server.impl.BuildProcessClasspathManager;
 import com.intellij.execution.ExecutionAdapter;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.ExecutionManager;
@@ -27,14 +26,21 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.process.*;
 import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.execution.ui.RunContentManager;
 import com.intellij.ide.PowerSaveMode;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathMacros;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.compiler.CompileContext;
 import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.event.DocumentAdapter;
+import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
+import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
@@ -50,6 +56,8 @@ import com.intellij.openapi.roots.ModuleRootAdapter;
 import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.startup.StartupManager;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.openapi.util.SystemInfo;
@@ -63,6 +71,8 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.util.Alarm;
 import com.intellij.util.Function;
+import com.intellij.util.SmartList;
+import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.concurrency.SequentialTaskExecutor;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.messages.MessageBusConnection;
@@ -81,19 +91,16 @@ import org.jboss.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepend
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
-import org.jetbrains.jps.api.CmdlineProtoUtil;
-import org.jetbrains.jps.api.CmdlineRemoteProto;
-import org.jetbrains.jps.api.GlobalOptions;
-import org.jetbrains.jps.api.RequestFuture;
+import org.jetbrains.ide.PooledThreadExecutor;
+import org.jetbrains.jps.api.*;
 import org.jetbrains.jps.cmdline.BuildMain;
 import org.jetbrains.jps.cmdline.ClasspathBootstrap;
 import org.jetbrains.jps.incremental.Utils;
+import org.jetbrains.jps.model.serialization.JpsGlobalLoader;
 
 import javax.tools.*;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
@@ -110,16 +117,20 @@ import static org.jetbrains.jps.api.CmdlineRemoteProto.Message.ControllerMessage
  *         Date: 9/6/11
  */
 public class BuildManager implements ApplicationComponent{
+  public static final Key<Boolean> ALLOW_AUTOMAKE = Key.create("_allow_automake_when_process_is_active_");
+  private static final Key<String> FORCE_MODEL_LOADING_PARAMETER = Key.create(BuildParametersKeys.FORCE_MODEL_LOADING);
+
   private static final Logger LOG = Logger.getInstance("#com.intellij.compiler.server.BuildManager");
-  private static final String SYSTEM_ROOT = "compile-server";
-  private static final String LOGGER_CONFIG = "log.xml";
-  private static final String DEFAULT_LOGGER_CONFIG = "defaultLogConfig.xml";
-  private static final int MAKE_TRIGGER_DELAY = 3 * 1000 /*3 seconds*/;
+  private static final String COMPILER_PROCESS_JDK_PROPERTY = "compiler.process.jdk";
+  public static final String SYSTEM_ROOT = "compile-server";
+  public static final String TEMP_DIR_NAME = "_temp_";
+  private static final int MAKE_TRIGGER_DELAY = 300 /*300 ms*/;
+  private static final int DOCUMENT_SAVE_TRIGGER_DELAY = 1500 /*1.5 sec*/;
   private final boolean IS_UNIT_TEST_MODE;
   private static final String IWS_EXTENSION = ".iws";
   private static final String IPR_EXTENSION = ".ipr";
   private static final String IDEA_PROJECT_DIR_PATTERN = "/.idea/";
-  private static final Function<String, Boolean> PATH_FILTER = 
+  private static final Function<String, Boolean> PATH_FILTER =
     SystemInfo.isFileSystemCaseSensitive?
     new Function<String, Boolean>() {
       @Override
@@ -139,28 +150,70 @@ public class BuildManager implements ApplicationComponent{
 
   private final Map<RequestFuture, Project> myAutomakeFutures = new HashMap<RequestFuture, Project>();
   private final Map<String, RequestFuture> myBuildsInProgress = Collections.synchronizedMap(new HashMap<String, RequestFuture>());
-  private final CompileServerClasspathManager myClasspathManager = new CompileServerClasspathManager();
-  private final Executor myPooledThreadExecutor = new Executor() {
-    @Override
-    public void execute(@NotNull Runnable command) {
-      ApplicationManager.getApplication().executeOnPooledThread(command);
-    }
-  };
+  private final BuildProcessClasspathManager myClasspathManager = new BuildProcessClasspathManager();
+  private final Executor myPooledThreadExecutor = new PooledThreadExecutor();
   private final SequentialTaskExecutor myRequestsProcessor = new SequentialTaskExecutor(myPooledThreadExecutor);
   private final Map<String, ProjectData> myProjectDataMap = Collections.synchronizedMap(new HashMap<String, ProjectData>());
 
-  private final Alarm myAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
-  private final AtomicBoolean myAutoMakeInProgress = new AtomicBoolean(false);
+  private final BuildManagerPeriodicTask myAutoMakeTask = new BuildManagerPeriodicTask() {
+    @Override
+    protected int getDelay() {
+      return Registry.intValue("compiler.automake.trigger.delay", MAKE_TRIGGER_DELAY);
+    }
+
+    @Override
+    protected void runTask() {
+      runAutoMake();
+    }
+  };
+
+  private final BuildManagerPeriodicTask myDocumentSaveTask = new BuildManagerPeriodicTask() {
+    @Override
+    protected int getDelay() {
+      return Registry.intValue("compiler.document.save.trigger.delay", DOCUMENT_SAVE_TRIGGER_DELAY);
+    }
+
+    private final Semaphore mySemaphore = new Semaphore();
+    private final Runnable mySaveDocsRunnable = new Runnable() {
+      @Override
+      public void run() {
+        try {
+          ((FileDocumentManagerImpl)FileDocumentManager.getInstance()).saveAllDocuments(false);
+        }
+        finally {
+          mySemaphore.up();
+        }
+      }
+    };
+
+    @Override
+    public void runTask() {
+      if (shouldSaveDocuments()) {
+        mySemaphore.down();
+        ApplicationManager.getApplication().invokeLater(mySaveDocsRunnable, ModalityState.NON_MODAL);
+        mySemaphore.waitFor();
+      }
+    }
+
+    private boolean shouldSaveDocuments() {
+      for (final Project project : getActiveProjects()) {
+        if (canStartAutoMake(project)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  };
 
   private final ChannelGroup myAllOpenChannels = new DefaultChannelGroup("build-manager");
   private final BuildMessageDispatcher myMessageDispatcher = new BuildMessageDispatcher();
   private volatile int myListenPort = -1;
-  private volatile CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings myGlobals;
   @Nullable
   private final Charset mySystemCharset;
 
   public BuildManager(final ProjectManager projectManager) {
-    IS_UNIT_TEST_MODE = ApplicationManager.getApplication().isUnitTestMode();
+    final Application application = ApplicationManager.getApplication();
+    IS_UNIT_TEST_MODE = application.isUnitTestMode();
     myProjectManager = projectManager;
     mySystemCharset = CharsetToolkit.getDefaultSystemCharset();
     final String systemPath = PathManager.getSystemPath();
@@ -174,8 +227,8 @@ public class BuildManager implements ApplicationComponent{
     mySystemDirectory = system;
 
     projectManager.addProjectManagerListener(new ProjectWatcher());
-    
-    final MessageBusConnection conn = ApplicationManager.getApplication().getMessageBus().connect();
+
+    final MessageBusConnection conn = application.getMessageBus().connect();
     conn.subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener.Adapter() {
       @Override
       public void after(@NotNull List<? extends VFileEvent> events) {
@@ -194,16 +247,16 @@ public class BuildManager implements ApplicationComponent{
           if (eventFile == null || ProjectCoreUtil.isProjectOrWorkspaceFile(eventFile)) {
             continue;
           }
-          
+
           if (activeProjects == null) {
             activeProjects = getActiveProjects();
             if (activeProjects.isEmpty()) {
               return false;
             }
           }
-          // todo: probably we do not need this excessive filtering
+
           for (Project project : activeProjects) {
-            if (!project.isInitialized() || ProjectRootManager.getInstance(project).getFileIndex().isInContent(eventFile)) {
+            if (ProjectRootManager.getInstance(project).getFileIndex().isInContent(eventFile)) {
               return true;
             }
           }
@@ -211,19 +264,12 @@ public class BuildManager implements ApplicationComponent{
         return false;
       }
 
-      private List<Project> getActiveProjects() {
-        final Project[] projects = myProjectManager.getOpenProjects();
-        if (projects.length == 0) {
-          return Collections.emptyList();
-        }
-        final List<Project> projectList = new ArrayList<Project>();
-        for (Project project : projects) {
-          if (project.isDefault() || project.isDisposed()) {
-            continue;
-          }
-          projectList.add(project);
-        }
-        return projectList;
+    });
+
+    EditorFactory.getInstance().getEventMulticaster().addDocumentListener(new DocumentAdapter() {
+      @Override
+      public void documentChanged(DocumentEvent e) {
+        scheduleProjectSave();
       }
     });
 
@@ -233,6 +279,21 @@ public class BuildManager implements ApplicationComponent{
         stopListening();
       }
     });
+  }
+
+  private List<Project> getActiveProjects() {
+    final Project[] projects = myProjectManager.getOpenProjects();
+    if (projects.length == 0) {
+      return Collections.emptyList();
+    }
+    final List<Project> projectList = new SmartList<Project>();
+    for (Project project : projects) {
+      if (project.isDefault() || project.isDisposed() || !project.isInitialized()) {
+        continue;
+      }
+      projectList.add(project);
+    }
+    return projectList;
   }
 
   public static BuildManager getInstance() {
@@ -302,11 +363,10 @@ public class BuildManager implements ApplicationComponent{
   }
 
   public static void forceModelLoading(CompileContext context) {
-    context.getCompileScope().putUserData(BuildMain.FORCE_MODEL_LOADING_PARAMETER, Boolean.TRUE.toString());
+    context.getCompileScope().putUserData(FORCE_MODEL_LOADING_PARAMETER, Boolean.TRUE.toString());
   }
 
   public void clearState(Project project) {
-    myGlobals = null;
     final String projectPath = getProjectPath(project);
     synchronized (myProjectDataMap) {
       final ProjectData data = myProjectDataMap.get(projectPath);
@@ -347,97 +407,68 @@ public class BuildManager implements ApplicationComponent{
   }
 
   public void scheduleAutoMake() {
-    if (IS_UNIT_TEST_MODE || PowerSaveMode.isEnabled()) {
-      return;
+    if (!IS_UNIT_TEST_MODE && !PowerSaveMode.isEnabled()) {
+      myAutoMakeTask.schedule();
     }
-    addMakeRequest(new Runnable() {
-      @Override
-      public void run() {
-        if (!HeavyProcessLatch.INSTANCE.isRunning() && !myAutoMakeInProgress.getAndSet(true)) {
-          try {
-            ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-              @Override
-              public void run() {
-                try {
-                  runAutoMake();
-                }
-                finally {
-                  myAutoMakeInProgress.set(false);
-                }
-              }
-            });
-          }
-          catch (RejectedExecutionException ignored) {
-            // we were shut down
-            myAutoMakeInProgress.set(false);
-          }
-          catch (Throwable e) {
-            myAutoMakeInProgress.set(false);
-            throw new RuntimeException(e);
-          }
-        }
-        else {
-          addMakeRequest(this);
-        }
-      }
-    });
   }
 
-  private void addMakeRequest(Runnable runnable) {
-    myAlarm.cancelAllRequests();
-    final int delay = Math.max(50, Registry.intValue("compiler.automake.trigger.delay", MAKE_TRIGGER_DELAY));
-    myAlarm.addRequest(runnable, delay);
+  private void scheduleProjectSave() {
+    if (!IS_UNIT_TEST_MODE && !PowerSaveMode.isEnabled()) {
+      myDocumentSaveTask.schedule();
+    }
   }
 
   private void runAutoMake() {
-    final Project[] openProjects = myProjectManager.getOpenProjects();
-    if (openProjects.length > 0) {
-      final List<RequestFuture> futures = new ArrayList<RequestFuture>();
-      for (final Project project : openProjects) {
-        if (project.isDefault() || project.isDisposed()) {
-          continue;
-        }
-        final CompilerWorkspaceConfiguration config = CompilerWorkspaceConfiguration.getInstance(project);
-        if (!config.useOutOfProcessBuild() || !config.MAKE_PROJECT_ON_SAVE) {
-          continue;
-        }
-        if (!config.allowAutoMakeWhileRunningApplication()) {
-          final RunContentManager contentManager = ExecutionManager.getInstance(project).getContentManager();
-          boolean hasRunningProcesses = false;
-          for (RunContentDescriptor descriptor : contentManager.getAllDescriptors()) {
-            final ProcessHandler handler = descriptor.getProcessHandler();
-            if (handler != null && !handler.isProcessTerminated()) { // active process
-              hasRunningProcesses = true;
-              break;
-            }
-          }
-          if (hasRunningProcesses) {
-            continue;
-          }
-        }
-
-        final List<String> emptyList = Collections.emptyList();
-        final RequestFuture future = scheduleBuild(
-          project, false, true, false, CmdlineProtoUtil.createAllModulesScopes(), emptyList, Collections.<String, String>emptyMap(), new AutoMakeMessageHandler(project)
-        );
-        if (future != null) {
-          futures.add(future);
-          synchronized (myAutomakeFutures) {
-            myAutomakeFutures.put(future, project);
-          }
-        }
+    final List<RequestFuture> futures = new ArrayList<RequestFuture>();
+    for (final Project project : getActiveProjects()) {
+      if (!canStartAutoMake(project)) {
+        continue;
       }
-      try {
-        for (RequestFuture future : futures) {
-          future.waitFor();
-        }
-      }
-      finally {
+      final List<String> emptyList = Collections.emptyList();
+      final RequestFuture future = scheduleBuild(
+        project, false, true, false, CmdlineProtoUtil.createAllModulesScopes(false), emptyList, Collections.<String, String>emptyMap(), new AutoMakeMessageHandler(project)
+      );
+      if (future != null) {
+        futures.add(future);
         synchronized (myAutomakeFutures) {
-          myAutomakeFutures.keySet().removeAll(futures);
+          myAutomakeFutures.put(future, project);
         }
       }
     }
+    try {
+      for (RequestFuture future : futures) {
+        future.waitFor();
+      }
+    }
+    finally {
+      synchronized (myAutomakeFutures) {
+        myAutomakeFutures.keySet().removeAll(futures);
+      }
+    }
+  }
+
+  private static boolean canStartAutoMake(Project project) {
+    if (project.isDisposed()) {
+      return false;
+    }
+    final CompilerWorkspaceConfiguration config = CompilerWorkspaceConfiguration.getInstance(project);
+    if (!config.useOutOfProcessBuild() || !config.MAKE_PROJECT_ON_SAVE) {
+      return false;
+    }
+    if (!config.allowAutoMakeWhileRunningApplication() && hasRunningProcess(project)) {
+      return false;
+    }
+    return true;
+  }
+
+  private static boolean hasRunningProcess(Project project) {
+    for (RunContentDescriptor descriptor : ExecutionManager.getInstance(project).getContentManager().getAllDescriptors()) {
+      final ProcessHandler handler = descriptor.getProcessHandler();
+      if (handler != null && !handler.isProcessTerminated() && !ALLOW_AUTOMAKE.get(handler, Boolean.FALSE)) { // active process
+        return true;
+      }
+    }
+    return false;
   }
 
   public Collection<RequestFuture> cancelAutoMakeTasks(Project project) {
@@ -498,11 +529,10 @@ public class BuildManager implements ApplicationComponent{
             return;
           }
 
-          CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings globals = myGlobals;
-          if (globals == null) {
-            globals = buildGlobalSettings();
-            myGlobals = globals;
-          }
+          final CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings globals =
+            CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings.newBuilder()
+              .setGlobalOptionsPath(PathManager.getOptionsPath())
+              .build();
           CmdlineRemoteProto.Message.ControllerMessage.FSEvent currentFSChanges;
           final SequentialTaskExecutor projectTaskQueue;
           synchronized (myProjectDataMap) {
@@ -528,15 +558,14 @@ public class BuildManager implements ApplicationComponent{
 
           final CmdlineRemoteProto.Message.ControllerMessage params;
           if (isRebuild) {
-            params = CmdlineProtoUtil.createRebuildRequest(projectPath, scopes, userData, globals);
+            params = CmdlineProtoUtil.createBuildRequest(projectPath, scopes, Collections.<String>emptyList(), userData, globals, null);
           }
           else if (onlyCheckUpToDate) {
             params = CmdlineProtoUtil.createUpToDateCheckRequest(projectPath, scopes, paths, userData, globals, currentFSChanges);
           }
           else {
-            params = isMake ?
-                     CmdlineProtoUtil.createMakeRequest(projectPath, scopes, userData, globals, currentFSChanges) :
-                     CmdlineProtoUtil.createForceCompileRequest(projectPath, scopes, paths, userData, globals, currentFSChanges);
+            params = CmdlineProtoUtil.createBuildRequest(projectPath, scopes, isMake ? Collections.<String>emptyList() : paths,
+                                                         userData, globals, currentFSChanges);
           }
 
           myMessageDispatcher.registerBuildMessageHandler(sessionId, new BuilderMessageHandlerWrapper(handler) {
@@ -555,7 +584,7 @@ public class BuildManager implements ApplicationComponent{
             projectTaskQueue.submit(new Runnable() {
               @Override
               public void run() {
-                ExecutionException execFailure = null;
+                Throwable execFailure = null;
                 try {
                   if (project.isDisposed()) {
                     return;
@@ -596,7 +625,7 @@ public class BuildManager implements ApplicationComponent{
                     handler.handleFailure(sessionId, CmdlineProtoUtil.createFailure("Disconnected from build process", null));
                   }
                 }
-                catch (ExecutionException e) {
+                catch (Throwable e) {
                   execFailure = e;
                 }
                 finally {
@@ -651,100 +680,85 @@ public class BuildManager implements ApplicationComponent{
     return "com.intellij.compiler.server.BuildManager";
   }
 
-  private static CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings buildGlobalSettings() {
-    final Map<String, String> data = new HashMap<String, String>();
+  private OSProcessHandler launchBuildProcess(Project project, final int port, final UUID sessionId) throws ExecutionException {
+    final String compilerPath;
+    final String vmExecutablePath;
+    JavaSdkVersion sdkVersion = null;
 
-    for (Map.Entry<String, String> entry : PathMacrosImpl.getGlobalSystemMacros().entrySet()) {
-      data.put(entry.getKey(), FileUtil.toSystemIndependentName(entry.getValue()));
-    }
+    final String forcedCompiledJdkHome = Registry.stringValue(COMPILER_PROCESS_JDK_PROPERTY);
 
-    final PathMacros pathVars = PathMacros.getInstance();
-    for (String name : pathVars.getAllMacroNames()) {
-      final String path = pathVars.getValue(name);
-      if (path != null) {
-        data.put(name, FileUtil.toSystemIndependentName(path));
+    if (StringUtil.isEmptyOrSpaces(forcedCompiledJdkHome)) {
+      // choosing sdk with which the build process should be run
+      Sdk projectJdk = null;
+      int sdkMinorVersion = 0;
+
+      final Set<Sdk> candidates = new HashSet<Sdk>();
+      final Sdk defaultSdk = ProjectRootManager.getInstance(project).getProjectSdk();
+      if (defaultSdk != null && defaultSdk.getSdkType() instanceof JavaSdkType) {
+        candidates.add(defaultSdk);
       }
-    }
 
-    final CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings.Builder cmdBuilder =
-      CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings.newBuilder();
-
-    cmdBuilder.setGlobalOptionsPath(PathManager.getOptionsPath());
-
-    if (!data.isEmpty()) {
-      for (Map.Entry<String, String> entry : data.entrySet()) {
-        final String var = entry.getKey();
-        final String value = entry.getValue();
-        if (var != null && value != null) {
-          cmdBuilder.addPathVariable(CmdlineProtoUtil.createPair(var, value));
+      for (Module module : ModuleManager.getInstance(project).getModules()) {
+        final Sdk sdk = ModuleRootManager.getInstance(module).getSdk();
+        if (sdk != null && sdk.getSdkType() instanceof JavaSdkType) {
+          candidates.add(sdk);
         }
       }
-    }
 
-    return cmdBuilder.build();
-  }
-
-  private OSProcessHandler launchBuildProcess(Project project, final int port, final UUID sessionId) throws ExecutionException {
-    // choosing sdk with which the build process should be run
-    Sdk projectJdk = null;
-    JavaSdkVersion sdkVersion = null;
-    int sdkMinorVersion = 0;
-
-    final Set<Sdk> candidates = new HashSet<Sdk>();
-    for (Module module : ModuleManager.getInstance(project).getModules()) {
-      final Sdk sdk = ModuleRootManager.getInstance(module).getSdk();
-      if (sdk != null && sdk.getSdkType() instanceof JavaSdk) {
-        candidates.add(sdk);
-      }
-    }
-    // now select the latest version from the sdks that are used in the project, but not older than the internal sdk version
-    for (Sdk candidate : candidates) {
-      final String vs = candidate.getVersionString();
-      if (vs != null) {
-        final JavaSdkVersion candidateVersion = ((JavaSdk)candidate.getSdkType()).getVersion(vs);
-        if (candidateVersion != null) {
-          final int candidateMinorVersion = getMinorVersion(vs);
-          if (projectJdk == null) {
-            sdkVersion = candidateVersion;
-            sdkMinorVersion = candidateMinorVersion;
-            projectJdk = candidate;
-          }
-          else {
-            final int result = candidateVersion.compareTo(sdkVersion);
-            if (result > 0 || (result == 0 && candidateMinorVersion > sdkMinorVersion)) {
+      // now select the latest version from the sdks that are used in the project, but not older than the internal sdk version
+      final JavaSdk javaSdkType = JavaSdk.getInstance();
+      for (Sdk candidate : candidates) {
+        final String vs = candidate.getVersionString();
+        if (vs != null) {
+          final JavaSdkVersion candidateVersion = javaSdkType.getVersion(vs);
+          if (candidateVersion != null) {
+            final int candidateMinorVersion = getMinorVersion(vs);
+            if (projectJdk == null) {
               sdkVersion = candidateVersion;
               sdkMinorVersion = candidateMinorVersion;
               projectJdk = candidate;
             }
+            else {
+              final int result = candidateVersion.compareTo(sdkVersion);
+              if (result > 0 || (result == 0 && candidateMinorVersion > sdkMinorVersion)) {
+                sdkVersion = candidateVersion;
+                sdkMinorVersion = candidateMinorVersion;
+                projectJdk = candidate;
+              }
+            }
           }
         }
       }
-    }
 
-    final Sdk internalJdk = JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
-    if (projectJdk == null || sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_6)) {
-      projectJdk = internalJdk;
-    }
-
-    // validate tools.jar presence
-    final String compilerPath;
-    if (projectJdk.equals(internalJdk)) {
-      final JavaCompiler systemCompiler = ToolProvider.getSystemJavaCompiler();
-      if (systemCompiler == null) {
-        throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
+      final Sdk internalJdk = JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
+      if (projectJdk == null || sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_6)) {
+        projectJdk = internalJdk;
       }
-      compilerPath = ClasspathBootstrap.getResourcePath(systemCompiler.getClass());
+
+      // validate tools.jar presence
+      if (projectJdk.equals(internalJdk)) {
+        final JavaCompiler systemCompiler = ToolProvider.getSystemJavaCompiler();
+        if (systemCompiler == null) {
+          throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
+        }
+        compilerPath = ClasspathBootstrap.getResourcePath(systemCompiler.getClass());
+      }
+      else {
+        compilerPath = javaSdkType.getToolsPath(projectJdk);
+        if (compilerPath == null) {
+          throw new ExecutionException("Cannot determine path to 'tools.jar' library for " + projectJdk.getName() + " (" + projectJdk.getHomePath() + ")");
+        }
+      }
+
+      vmExecutablePath = ((JavaSdkType)projectJdk.getSdkType()).getVMExecutablePath(projectJdk);
     }
     else {
-      compilerPath = ((JavaSdk)projectJdk.getSdkType()).getToolsPath(projectJdk);
-      if (compilerPath == null) {
-        throw new ExecutionException("Cannot determine path to 'tools.jar' library for " + projectJdk.getName() + " (" + projectJdk.getHomePath() + ")");
-      }
+      compilerPath = new File(forcedCompiledJdkHome, "lib/tools.jar").getAbsolutePath();
+      vmExecutablePath = new File(forcedCompiledJdkHome, "bin/java").getAbsolutePath();
     }
 
     final CompilerWorkspaceConfiguration config = CompilerWorkspaceConfiguration.getInstance(project);
     final GeneralCommandLine cmdLine = new GeneralCommandLine();
-    final String vmExecutablePath = ((JavaSdkType)projectJdk.getSdkType()).getVMExecutablePath(projectJdk);
     cmdLine.setExePath(vmExecutablePath);
     //cmdLine.addParameter("-XX:MaxPermSize=150m");
     //cmdLine.addParameter("-XX:ReservedCodeCacheSize=64m");
@@ -764,6 +778,7 @@ public class BuildManager implements ApplicationComponent{
     }
 
     cmdLine.addParameter("-Djava.awt.headless=true");
+    cmdLine.addParameter("-Djava.endorsed.dirs=\"\""); // turn off all jre customizations for predictable behaviour
     if (IS_UNIT_TEST_MODE) {
       cmdLine.addParameter("-Dtest.mode=true");
     }
@@ -774,6 +789,11 @@ public class BuildManager implements ApplicationComponent{
       cmdLine.addParameter("-D"+ GlobalOptions.GENERATE_CLASSPATH_INDEX_OPTION +"=" + shouldGenerateIndex);
     }
     cmdLine.addParameter("-D"+ GlobalOptions.COMPILE_PARALLEL_OPTION +"=" + Boolean.toString(config.PARALLEL_COMPILATION));
+    cmdLine.addParameter("-D"+ GlobalOptions.REBUILD_ON_DEPENDENCY_CHANGE_OPTION + "=" + Boolean.toString(config.REBUILD_ON_DEPENDENCY_CHANGE));
+
+    if (Boolean.TRUE.equals(Boolean.valueOf(System.getProperty("java.net.preferIPv4Stack", "false")))) {
+      cmdLine.addParameter("-Djava.net.preferIPv4Stack=true");
+    }
 
     boolean isProfilingMode = false;
     final String additionalOptions = config.COMPILER_PROCESS_ADDITIONAL_VM_OPTIONS;
@@ -807,6 +827,7 @@ public class BuildManager implements ApplicationComponent{
       cmdLine.setCharset(mySystemCharset);
       cmdLine.addParameter("-D" + CharsetToolkit.FILE_ENCODING_PROPERTY + "=" + mySystemCharset.name());
     }
+    cmdLine.addParameter("-D" + JpsGlobalLoader.FILE_TYPES_COMPONENT_NAME_KEY + "=" + FileTypeManagerImpl.getFileTypeComponentName());
     for (String name : new String[]{"user.language", "user.country", "user.region", PathManager.PROPERTY_HOME_PATH}) {
       final String value = System.getProperty(name);
       if (value != null) {
@@ -814,13 +835,20 @@ public class BuildManager implements ApplicationComponent{
       }
     }
 
+    cmdLine.addParameter("-D" + GlobalOptions.LOG_DIR_OPTION + "=" + FileUtil.toSystemIndependentName(getBuildLogDirectory().getAbsolutePath()));
+
     final File workDirectory = getBuildSystemDirectory();
     workDirectory.mkdirs();
-    ensureLogConfigExists(workDirectory);
+    cmdLine.addParameter("-Djava.io.tmpdir=" + FileUtil.toSystemIndependentName(workDirectory.getPath()) + "/" + TEMP_DIR_NAME);
 
+    for (BuildProcessParametersProvider provider : project.getExtensions(BuildProcessParametersProvider.EP_NAME)) {
+      final List<String> args = provider.getVMArguments();
+      cmdLine.addParameters(args);
+    }
+    
     final List<String> cp = ClasspathBootstrap.getBuildProcessApplicationClasspath();
     cp.add(compilerPath);
-    cp.addAll(myClasspathManager.getCompileServerPluginsClasspath(project));
+    cp.addAll(myClasspathManager.getBuildProcessPluginsClasspath(project));
     if (isProfilingMode) {
       cp.add(new File(workDirectory, "yjp-controller-api-redist.jar").getPath());
       cmdLine.addParameter("-agentlib:yjpagent=disablej2ee,disablealloc,sessionname=ExternalBuild");
@@ -852,6 +880,10 @@ public class BuildManager implements ApplicationComponent{
     return new File(mySystemDirectory, SYSTEM_ROOT);
   }
 
+  public File getBuildLogDirectory() {
+    return new File(PathManager.getLogPath(), "build-log");
+  }
+
   @Nullable
   public File getProjectSystemDirectory(Project project) {
     final String projectPath = getProjectPath(project);
@@ -880,33 +912,6 @@ public class BuildManager implements ApplicationComponent{
       }
     }
     return 0;
-  }
-
-  private static void ensureLogConfigExists(File workDirectory) {
-    final File logConfig = new File(workDirectory, LOGGER_CONFIG);
-    if (!logConfig.exists()) {
-      FileUtil.createIfDoesntExist(logConfig);
-      try {
-        final InputStream in = BuildMain.class.getResourceAsStream("/" + DEFAULT_LOGGER_CONFIG);
-        if (in != null) {
-          try {
-            final FileOutputStream out = new FileOutputStream(logConfig);
-            try {
-              FileUtil.copy(in, out);
-            }
-            finally {
-              out.close();
-            }
-          }
-          finally {
-            in.close();
-          }
-        }
-      }
-      catch (IOException e) {
-        LOG.error(e);
-      }
-    }
   }
 
   public void stopListening() {
@@ -994,6 +999,52 @@ public class BuildManager implements ApplicationComponent{
     }
   }
 
+  private static abstract class BuildManagerPeriodicTask implements Runnable {
+    private final Alarm myAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+    private final AtomicBoolean myInProgress = new AtomicBoolean(false);
+    private final Runnable myTaskRunnable = new Runnable() {
+      @Override
+      public void run() {
+        try {
+          runTask();
+        }
+        finally {
+          myInProgress.set(false);
+        }
+      }
+    };
+
+    public final void schedule() {
+      myAlarm.cancelAllRequests();
+      final int delay = Math.max(100, getDelay());
+      myAlarm.addRequest(this, delay);
+    }
+
+    protected abstract int getDelay();
+
+    protected abstract void runTask();
+
+    @Override
+    public final void run() {
+      if (!HeavyProcessLatch.INSTANCE.isRunning() && !myInProgress.getAndSet(true)) {
+        try {
+          ApplicationManager.getApplication().executeOnPooledThread(myTaskRunnable);
+        }
+        catch (RejectedExecutionException ignored) {
+          // we were shut down
+          myInProgress.set(false);
+        }
+        catch (Throwable e) {
+          myInProgress.set(false);
+          throw new RuntimeException(e);
+        }
+      }
+      else {
+        schedule();
+      }
+    }
+  }
+
   private class ProjectWatcher extends ProjectManagerAdapter {
     private final Map<Project, MessageBusConnection> myConnections = new HashMap<Project, MessageBusConnection>();
 
@@ -1016,7 +1067,19 @@ public class BuildManager implements ApplicationComponent{
           scheduleAutoMake();
         }
       });
-      scheduleAutoMake(); // run automake on project opening
+      final String projectPath = getProjectPath(project);
+      Disposer.register(project, new Disposable() {
+        @Override
+        public void dispose() {
+          myProjectDataMap.remove(projectPath);
+        }
+      });
+      StartupManager.getInstance(project).registerPostStartupActivity(new Runnable() {
+        @Override
+        public void run() {
+          scheduleAutoMake(); // run automake after project opened
+        }
+      });
     }
 
     @Override

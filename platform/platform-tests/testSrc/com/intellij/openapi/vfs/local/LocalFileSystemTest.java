@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,11 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.IoTestUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.newvfs.ManagingFS;
+import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
 import com.intellij.openapi.vfs.newvfs.RefreshQueue;
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
+import com.intellij.openapi.vfs.newvfs.impl.FakeVirtualFile;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualDirectoryImpl;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
@@ -135,7 +137,7 @@ public class LocalFileSystemTest extends PlatformLangTestCase {
     final String newName = "dir";
     final VirtualFile dirCopy = dirToCopy.copy(this, toVDir, newName);
     assertEquals(newName, dirCopy.getName());
-    PlatformTestUtil.assertDirectoriesEqual(toVDir, fromVDir, null);
+    PlatformTestUtil.assertDirectoriesEqual(toVDir, fromVDir);
   }
 
   public void testUnicodeNames() throws Exception {
@@ -235,7 +237,7 @@ public class LocalFileSystemTest extends PlatformLangTestCase {
 
       final VirtualFile file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(targetFile);
       assertNotNull(file);
-      file.setBinaryContent("hello".getBytes(), 0, 0, requestor);
+      file.setBinaryContent("hello".getBytes("UTF-8"), 0, 0, requestor);
       assertTrue(file.getLength() > 0);
 
       final VirtualFile check = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(hardLinkFile);
@@ -280,8 +282,8 @@ public class LocalFileSystemTest extends PlatformLangTestCase {
 
   public void testRefreshSeesLatestDirectoryContents() throws Exception {
     File testDir = FileUtil.createTempDirectory("RefreshChildrenTest." + getName(), null);
-    byte[] bytes = "".getBytes();
-    FileUtil.writeToFile(new File(testDir, "Foo.java"), bytes);
+    String content = "";
+    FileUtil.writeToFile(new File(testDir, "Foo.java"), content);
 
     LocalFileSystem local = LocalFileSystem.getInstance();
     VirtualFile virtualDir = local.findFileByIoFile(testDir);
@@ -290,7 +292,7 @@ public class LocalFileSystemTest extends PlatformLangTestCase {
     virtualDir.refresh(false, true);
     checkChildCount(virtualDir, 1);
 
-    FileUtil.writeToFile(new File(testDir, "Bar.java"), bytes);
+    FileUtil.writeToFile(new File(testDir, "Bar.java"), content);
     virtualDir.refresh(false, true);
     checkChildCount(virtualDir, 2);
   }
@@ -341,5 +343,63 @@ public class LocalFileSystemTest extends PlatformLangTestCase {
 
     final VirtualFile vFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
     assertNull(vFile);
+  }
+
+  public void testGetAttributesConvertsToAbsolute() throws Exception {
+    PersistentFS fs = PersistentFS.getInstance();
+    LocalFileSystem lfs = LocalFileSystem.getInstance();
+    NewVirtualFile fakeRoot = fs.findRoot("", lfs);
+    assertNotNull(fakeRoot);
+    File userDir = new File(System.getProperty("user.dir"));
+    File[] files = userDir.listFiles();
+    File fileToQuery;
+    if (files != null && files.length != 0) {
+      fileToQuery = files[0];
+    }
+    else if (userDir.isDirectory()) {
+      fileToQuery = FileUtil.createTempFile(userDir, getTestName(false), "", true);
+      myFilesToDelete.add(fileToQuery);
+    }
+    else {
+      // can't test
+      return;
+    }
+
+    FileAttributes attributes = lfs.getAttributes(new FakeVirtualFile(fakeRoot, fileToQuery.getName()));
+    assertNull(attributes);
+
+    attributes = lfs.getAttributes(new FakeVirtualFile(fakeRoot, "windows"));
+    assertNull(attributes);
+    attributes = lfs.getAttributes(new FakeVirtualFile(fakeRoot, "usr"));
+    assertNull(attributes);
+    attributes = lfs.getAttributes(new FakeVirtualFile(fakeRoot, "Users"));
+    assertNull(attributes);
+  }
+
+  public void testCopyToPointDir() throws Exception {
+    File top = createTempDirectory(false);
+    File sub = IoTestUtil.createTestDir(top, "sub");
+    File file = IoTestUtil.createTestFile(top, "file.txt", "hi there");
+
+    LocalFileSystem lfs = LocalFileSystem.getInstance();
+    VirtualFile topDir = lfs.refreshAndFindFileByIoFile(top);
+    assertNotNull(topDir);
+    VirtualFile sourceFile = lfs.refreshAndFindFileByIoFile(file);
+    assertNotNull(sourceFile);
+    VirtualFile parentDir = lfs.refreshAndFindFileByIoFile(sub);
+    assertNotNull(parentDir);
+    assertEquals(2, topDir.getChildren().length);
+
+    try {
+      sourceFile.copy(this, parentDir, ".");
+      fail("Copying a file into a '.' path should have failed");
+    }
+    catch (IOException e) {
+      System.out.println(e.getMessage());
+    }
+
+    topDir.refresh(false, true);
+    assertTrue(topDir.exists());
+    assertEquals(2, topDir.getChildren().length);
   }
 }

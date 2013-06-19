@@ -25,7 +25,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.PathManagerEx;
 import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.projectRoots.impl.JavaSdkImpl;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -38,6 +37,7 @@ import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.fixtures.TempDirTestFixture;
 import com.intellij.testFramework.fixtures.impl.LightTempDirTestFixtureImpl;
 import com.intellij.usageView.UsageInfo;
+import com.intellij.usages.FindUsagesProcessPresentation;
 import com.intellij.usages.Usage;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.CommonProcessors;
@@ -185,7 +185,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
     PsiDirectory psiDirectory = FindInProjectUtil.getPsiDirectory(findModel, myProject);
     List<UsageInfo> result = new ArrayList<UsageInfo>();
     final CommonProcessors.CollectProcessor<UsageInfo> collector = new CommonProcessors.CollectProcessor<UsageInfo>(result);
-    FindInProjectUtil.findUsages(findModel, psiDirectory, myProject, true, collector);
+    FindInProjectUtil.findUsages(findModel, psiDirectory, myProject, true, collector, new FindUsagesProcessPresentation());
     return result;
   }
 
@@ -371,7 +371,7 @@ public class FindManagerTest extends DaemonAnalyzerTestCase {
 
     List<Usage> usages = FindUtil.findAll(getProject(), myEditor, findModel);
     for (Usage usage : usages) {
-      ReplaceInProjectManager.getInstance(getProject()).doReplace(usage, findModel, Collections.<Usage>emptySet(), false);
+      ReplaceInProjectManager.getInstance(getProject()).replaceUsage(usage, findModel, Collections.<Usage>emptySet(), false);
     }
     String newText = StringUtil.repeat(toReplace + "\n",6);
     assertEquals(newText, getEditor().getDocument().getText());

@@ -32,7 +32,8 @@ import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
-import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.messages.MessageBusConnection;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -51,31 +52,25 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
   /**
    * State corresponding to the most recent file is the last
    */
-  private final ArrayList<HistoryEntry> myEntriesList;
+  private final ArrayList<HistoryEntry> myEntriesList = new ArrayList<HistoryEntry>();
 
   /** Invoked by reflection */
-  EditorHistoryManager(final Project project, FileEditorManager fileEditorManager, final UISettings uiSettings){
+  EditorHistoryManager(final Project project, final UISettings uiSettings){
     super(project);
-    myEntriesList = new ArrayList<HistoryEntry>();
-    MyEditorManagerListener editorManagerListener = new MyEditorManagerListener();
-
-    /**
-     * Updates history length
-     */
-    final MyUISettingsListener myUISettingsListener = new MyUISettingsListener();
-
-    fileEditorManager.addFileEditorManagerListener(editorManagerListener, project);
-    project.getMessageBus().connect().subscribe(FileEditorManagerListener.Before.FILE_EDITOR_MANAGER, new MyEditorManagerBeforeListener());
-
-    uiSettings.addUISettingsListener(myUISettingsListener, project);
+    uiSettings.addUISettingsListener(new MyUISettingsListener(), project);
   }
 
   public void projectOpened(){
-    StartupManager.getInstance(myProject).registerPostStartupActivity(
-      new DumbAwareRunnable(){
-        public void run(){
-          // myElement may be null if node that correspondes to this manager does not exist
-          if (myElement != null){
+
+    MessageBusConnection connection = myProject.getMessageBus().connect();
+    connection.subscribe(FileEditorManagerListener.Before.FILE_EDITOR_MANAGER, new MyEditorManagerBeforeListener());
+    connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new MyEditorManagerListener());
+
+    StartupManager.getInstance(myProject).runWhenProjectIsInitialized(
+      new DumbAwareRunnable() {
+        public void run() {
+          // myElement may be null if node that corresponds to this manager does not exist
+          if (myElement != null) {
             final List children = myElement.getChildren(HistoryEntry.TAG);
             myElement = null;
             //noinspection unchecked
@@ -100,7 +95,6 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
     );
   }
 
-
   @NotNull
   public String getComponentName(){
     return "editorHistoryManager";
@@ -109,7 +103,7 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
   private void fileOpenedImpl(@NotNull final VirtualFile file) {
     fileOpenedImpl(file, null, null);
   }
-  
+
   /**
    * Makes file most recent one
    */
@@ -140,7 +134,7 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
       selectedEditor = fallbackEditor;
     }
     LOG.assertTrue(selectedEditor != null);
-    final int selectedProviderIndex = ArrayUtil.find(editors, selectedEditor);
+    final int selectedProviderIndex = ArrayUtilRt.find(editors, selectedEditor);
     LOG.assertTrue(selectedProviderIndex != -1);
 
     final HistoryEntry entry = getEntry(file);
@@ -161,11 +155,11 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
       trimToSize();
     }
   }
-  
-  private void updateHistoryEntry(@Nullable final VirtualFile file, final boolean changeEntryOrderOnly) {
+
+  public void updateHistoryEntry(@Nullable final VirtualFile file, final boolean changeEntryOrderOnly) {
     updateHistoryEntry(file, null, null, changeEntryOrderOnly);
   }
-  
+
   private void updateHistoryEntry(@Nullable final VirtualFile file,
                                   @Nullable final FileEditor fallbackEditor,
                                   @Nullable FileEditorProvider fallbackProvider,
@@ -182,7 +176,7 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
       editors = new FileEditor[] {fallbackEditor};
       providers = new FileEditorProvider[] {fallbackProvider};
     }
-    
+
     if (editors.length == 0) {
       // obviously not opened in any editor at the moment,
       // makes no sense to put the file in the history
@@ -312,9 +306,9 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
   }
 
   public void readExternal(final Element element) {
-    // we have to delay xml processing because history entries require EditorStates to be created 
-    // which is done via corresponding EditorProviders, those are not accessible before their 
-    // is initComponent() called 
+    // we have to delay xml processing because history entries require EditorStates to be created
+    // which is done via corresponding EditorProviders, those are not accessible before their
+    // is initComponent() called
     myElement = (Element)element.clone();
   }
 
@@ -337,11 +331,11 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
    * Updates history
    */
   private final class MyEditorManagerListener extends FileEditorManagerAdapter{
-    public void fileOpened(final FileEditorManager source, final VirtualFile file){
+    public void fileOpened(@NotNull final FileEditorManager source, @NotNull final VirtualFile file){
       fileOpenedImpl(file);
     }
 
-    public void selectionChanged(final FileEditorManagerEvent event){
+    public void selectionChanged(@NotNull final FileEditorManagerEvent event){
       updateHistoryEntry(event.getOldFile(), event.getOldEditor(), event.getOldProvider(), false);
       updateHistoryEntry(event.getNewFile(), true);
     }
@@ -349,7 +343,7 @@ public final class EditorHistoryManager extends AbstractProjectComponent impleme
 
   private final class MyEditorManagerBeforeListener extends FileEditorManagerListener.Before.Adapter {
     @Override
-    public void beforeFileClosed(FileEditorManager source, VirtualFile file) {
+    public void beforeFileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
       updateHistoryEntry(file, false);
     }
   }

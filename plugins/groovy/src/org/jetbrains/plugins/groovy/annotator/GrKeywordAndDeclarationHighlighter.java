@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@ import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
 import org.jetbrains.plugins.groovy.lang.psi.GrNamedElement;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElement;
-import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.GrLabel;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.annotation.GrAnnotation;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.annotation.GrAnnotationNameValuePair;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.arguments.GrArgumentLabel;
@@ -47,7 +46,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.intellij.codeInsight.daemon.impl.HighlightInfoType.INFORMATION;
-import static org.jetbrains.plugins.groovy.highlighter.DefaultHighlighter.*;
+import static org.jetbrains.plugins.groovy.highlighter.DefaultHighlighter.ANNOTATION;
+import static org.jetbrains.plugins.groovy.highlighter.DefaultHighlighter.KEYWORD;
 
 /**
  * @author Max Medvedev
@@ -81,15 +81,16 @@ public class GrKeywordAndDeclarationHighlighter extends TextEditorHighlightingPa
           }
         }
         else {
-          if (element instanceof GrLabel) {
-            addInfo(element, LABEL);
-          }
           super.visitElement(element);
         }
       }
 
-      private void addInfo(PsiElement element, final TextAttributesKey attribute) {
-        result.add(HighlightInfo.createHighlightInfo(INFORMATION, element, null, attribute));
+      private void addInfo(@NotNull PsiElement element, @NotNull TextAttributesKey attribute) {
+        HighlightInfo.Builder builder = HighlightInfo.newHighlightInfo(INFORMATION).range(element);
+        HighlightInfo info = builder.needsUpdateOnTyping(false).textAttributes(attribute).create();
+        if (info != null) {
+          result.add(info);
+        }
       }
     });
     toHighlight = result;

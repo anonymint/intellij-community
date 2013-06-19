@@ -15,7 +15,7 @@
  */
 package com.intellij.refactoring.inline;
 
-import com.intellij.codeInsight.ChangeContextUtil;
+import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
@@ -31,14 +31,11 @@ import com.intellij.refactoring.rename.NonCodeUsageInfoFactory;
 import com.intellij.refactoring.util.*;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
-import com.intellij.usageView.UsageViewUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 
 /**
  * @author ven
@@ -170,7 +167,9 @@ public class InlineConstantFieldProcessor extends BaseRefactoringProcessor {
   private void inlineExpressionUsage(PsiExpression expr,
                                      final PsiConstantEvaluationHelper evalHelper,
                                      PsiExpression initializer1) throws IncorrectOperationException {
-    myField.normalizeDeclaration();
+    if (myField.isWritable()) {
+      myField.normalizeDeclaration();
+    }
     if (expr instanceof PsiReferenceExpression) {
       PsiExpression qExpression = ((PsiReferenceExpression)expr).getQualifierExpression();
       if (qExpression != null) {
@@ -180,8 +179,8 @@ public class InlineConstantFieldProcessor extends BaseRefactoringProcessor {
         } else if (initializer1 instanceof PsiMethodCallExpression) {
           referenceExpression = ((PsiMethodCallExpression)initializer1).getMethodExpression();
         }
-        if (referenceExpression != null && 
-            referenceExpression.getQualifierExpression() == null && 
+        if (referenceExpression != null &&
+            referenceExpression.getQualifierExpression() == null &&
             !(referenceExpression.advancedResolve(false).getCurrentFileResolveScope() instanceof PsiImportStaticStatement)) {
           referenceExpression.setQualifierExpression(qExpression);
         }
@@ -213,7 +212,7 @@ public class InlineConstantFieldProcessor extends BaseRefactoringProcessor {
   }
 
   protected String getCommandName() {
-    return RefactoringBundle.message("inline.field.command", UsageViewUtil.getDescriptiveName(myField));
+    return RefactoringBundle.message("inline.field.command", DescriptiveNameUtil.getDescriptiveName(myField));
   }
 
   protected boolean preprocessUsages(Ref<UsageInfo[]> refUsages) {
@@ -264,5 +263,15 @@ public class InlineConstantFieldProcessor extends BaseRefactoringProcessor {
     }
 
     return PsiUtil.isAccessedForWriting(expr);
+  }
+
+  @NotNull
+  protected Collection<? extends PsiElement> getElementsToWrite(@NotNull final UsageViewDescriptor descriptor) {
+    if (myInlineThisOnly) {
+      return Collections.singletonList(myRefExpr);
+    }
+    else {
+      return super.getElementsToWrite(descriptor);
+    }
   }
 }

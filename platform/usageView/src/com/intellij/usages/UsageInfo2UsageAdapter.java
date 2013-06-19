@@ -36,6 +36,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.reference.SoftReference;
 import com.intellij.usageView.UsageInfo;
+import com.intellij.usageView.UsageViewBundle;
 import com.intellij.usages.rules.*;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
@@ -455,7 +456,7 @@ public class UsageInfo2UsageAdapter implements UsageInModule,
         int lineEnd = document.getLineEndOffset(lineNumber);
         String prefixSuffix = null;
 
-        if (lineEnd - lineStart > ChunkExtractor.MAX_LINE_TO_SHOW) {
+        if (lineEnd - lineStart > ChunkExtractor.MAX_LINE_LENGTH_TO_SHOW) {
           prefixSuffix = "...";
           lineStart = Math.max(startOffset - ChunkExtractor.OFFSET_BEFORE_TO_SHOW_WHEN_LONG_LINE, lineStart);
           lineEnd = Math.min(startOffset + ChunkExtractor.OFFSET_AFTER_TO_SHOW_WHEN_LONG_LINE, lineEnd);
@@ -465,7 +466,7 @@ public class UsageInfo2UsageAdapter implements UsageInModule,
         return s;
       }
     }
-    return "";
+    return UsageViewBundle.message("node.invalid");
   }
 
   @Override

@@ -63,6 +63,7 @@ public class
   @Override
   protected void paintLastGhost(Graphics2D g2d) {}
 
+  @Override
   protected void doPaintInactive(Graphics2D g2d,
                                  boolean leftGhostExists,
                                  TabLabel label,
@@ -76,12 +77,12 @@ public class
     int _height = effectiveBounds.height - insets.top - insets.bottom - 3;
     _height -= TabsUtil.ACTIVE_TAB_UNDERLINE_HEIGHT;
     if (dark) {
-      g2d.setPaint(new GradientPaint(_x, _y, ColorUtil.shift(UIUtil.getListBackground(), 1.3), _x, _y + effectiveBounds.height, UIUtil.getPanelBackground()));
+      g2d.setPaint(UIUtil.getGradientPaint(_x, _y, ColorUtil.shift(UIUtil.getListBackground(), 1.3), _x, _y + effectiveBounds.height, UIUtil.getPanelBackground()));
       g2d.fillRect(_x, _y, _width, _height);
 
       g2d.setColor(Gray._0.withAlpha(50));
     } else {
-      g2d.setPaint(new GradientPaint(_x, _y, new Color(255, 255, 255, 180), _x, _y + effectiveBounds.height, new Color(255, 255, 255, 100)));
+      g2d.setPaint(UIUtil.getGradientPaint(_x, _y, new Color(255, 255, 255, 180), _x, _y + effectiveBounds.height, new Color(255, 255, 255, 100)));
       g2d.fillRect(_x, _y, _width, _height);
 
       g2d.setColor(new Color(255, 255, 255, 100));
@@ -132,6 +133,7 @@ public class
     g2d.drawLine(0, 0, 0, getSize().height);
   }
 
+  @Override
   protected void paintSelectionAndBorder(Graphics2D g2d) {
     if (getSelectedInfo() == null) return;
     final boolean dark = UIUtil.isUnderDarcula();
@@ -152,7 +154,7 @@ public class
     int _height = r.height;
 
     if (!isHideTabs()) {
-      g2d.setPaint(new GradientPaint(_x, _y, col, _x, _y + _height - 3, panelBg));
+      g2d.setPaint(UIUtil.getGradientPaint(_x, _y, col, _x, _y + _height - 3, panelBg));
 
       g2d.fill(selectedShape.fillPath.getShape());
 
@@ -227,7 +229,7 @@ public class
     if (label == null || point == null) {
       return true;
     }
-    final Rectangle bounds = label.getBounds();                                                 
+    final Rectangle bounds = label.getBounds();
     return point.y <= bounds.y + bounds.height;
   }
 

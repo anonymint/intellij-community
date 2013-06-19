@@ -144,12 +144,14 @@ public class PsiScopesUtil {
     }
   }
 
-  public static boolean resolveAndWalk(PsiScopeProcessor processor, PsiJavaCodeReferenceElement ref, @Nullable PsiElement maxScope) {
+  public static boolean resolveAndWalk(@NotNull PsiScopeProcessor processor,
+                                       @NotNull PsiJavaCodeReferenceElement ref,
+                                       @Nullable PsiElement maxScope) {
     return resolveAndWalk(processor, ref, maxScope, false);
   }
 
-  public static boolean resolveAndWalk(PsiScopeProcessor processor,
-                                       PsiJavaCodeReferenceElement ref,
+  public static boolean resolveAndWalk(@NotNull PsiScopeProcessor processor,
+                                       @NotNull PsiJavaCodeReferenceElement ref,
                                        @Nullable PsiElement maxScope,
                                        boolean incompleteCode) {
     final PsiElement qualifier = ref.getQualifier();
@@ -308,6 +310,18 @@ public class PsiScopesUtil {
 
         if (referenceName instanceof PsiIdentifier && qualifier instanceof PsiExpression) {
           PsiType type = ((PsiExpression)qualifier).getType();
+          if (type != null && qualifier instanceof PsiReferenceExpression) {
+            final PsiElement resolve = ((PsiReferenceExpression)qualifier).resolve();
+            if (resolve instanceof PsiVariable && ((PsiVariable)resolve).hasModifierProperty(PsiModifier.FINAL)) {
+              final PsiExpression initializer = ((PsiVariable)resolve).getInitializer();
+              if (initializer instanceof PsiNewExpression) {
+                final PsiAnonymousClass anonymousClass = ((PsiNewExpression)initializer).getAnonymousClass();
+                if (anonymousClass != null && type.equals(anonymousClass.getBaseClassType())) {
+                  type = initializer.getType();
+                }
+              }
+            }
+          }
           if (type == null) {
             if (qualifier instanceof PsiJavaCodeReferenceElement) {
               final JavaResolveResult result = ((PsiJavaCodeReferenceElement)qualifier).advancedResolve(false);

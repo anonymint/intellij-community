@@ -33,13 +33,10 @@ import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.ui.ProblemDescriptionNode;
 import com.intellij.lang.Language;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiUtilBase;
+import com.intellij.psi.util.PsiUtilCore;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 public class OfflineProblemDescriptorNode extends ProblemDescriptionNode {
 
@@ -57,9 +54,10 @@ public class OfflineProblemDescriptorNode extends ProblemDescriptionNode {
         result.addAll(CollectHighlightsUtil.getElementsInRange(psiRoot, startOffset, endOffset, true));
       }
     }
-    return PsiUtilBase.toPsiElementArray(result);
+    return PsiUtilCore.toPsiElementArray(result);
   }
 
+  @Override
   @Nullable
   public RefEntity getElement() {
     if (userObject instanceof CommonProblemDescriptor) {
@@ -72,6 +70,7 @@ public class OfflineProblemDescriptorNode extends ProblemDescriptionNode {
     return myElement;
   }
 
+  @Override
   @Nullable
   public CommonProblemDescriptor getDescriptor() {
     if (userObject == null) return null;
@@ -167,6 +166,7 @@ public class OfflineProblemDescriptorNode extends ProblemDescriptionNode {
     }
   }
 
+  @Override
   public boolean isValid() {
     return getDescriptor() != null && super.isValid();
   }

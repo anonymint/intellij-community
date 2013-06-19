@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,10 +34,7 @@ import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XSourcePosition;
-import com.intellij.xdebugger.breakpoints.SuspendPolicy;
-import com.intellij.xdebugger.breakpoints.XBreakpoint;
-import com.intellij.xdebugger.breakpoints.XBreakpointProperties;
-import com.intellij.xdebugger.breakpoints.XBreakpointType;
+import com.intellij.xdebugger.breakpoints.*;
 import com.intellij.xdebugger.impl.DebuggerSupport;
 import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.XDebuggerSupport;
@@ -98,6 +95,7 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
   }
 
   public final void fireBreakpointChanged() {
+    clearIcon();
     myBreakpointManager.fireBreakpointChanged(this);
   }
 
@@ -278,11 +276,16 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
   }
 
   protected void updateIcon() {
-    myIcon = calculateIcon();
+    final Icon icon = calculateSpecialIcon();
+    myIcon = icon != null ? icon : getType().getEnabledIcon();
   }
 
-  @NotNull
-  private Icon calculateIcon() {
+  protected void setIcon(Icon icon) {
+    myIcon = icon;
+  }
+
+  @Nullable
+  protected final Icon calculateSpecialIcon() {
     if (!isEnabled()) {
       // disabled icon takes precedence to other to visually distinguish it and provide feedback then it is enabled/disabled
       // (e.g. in case of mute-mode we would like to differentiate muted but enabled breakpoints from simply disabled ones)
@@ -316,7 +319,7 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
         return icon;
       }
     }
-    return getType().getEnabledIcon();
+    return null;
   }
 
   public Icon getIcon() {
@@ -374,26 +377,19 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
     }
 
     @Nullable
+    @Override
+    public AnAction getRightButtonClickAction() {
+      return new EditBreakpointAction.ContextAction(this, XBreakpointBase.this, DebuggerSupport.getDebuggerSupport(XDebuggerSupport.class));
+    }
+
+    @Override
+    public Alignment getAlignment() {
+      return Alignment.RIGHT;
+    }
+
+    @Nullable
     public ActionGroup getPopupMenuActions() {
-      DefaultActionGroup group = new DefaultActionGroup();
-      final XDebuggerManager debuggerManager = XDebuggerManager.getInstance(getProject());
-
-
-      group.add(new EditBreakpointAction.ContextAction(this, XBreakpointBase.this, DebuggerSupport.getDebuggerSupport(XDebuggerSupport.class)));
-
-      group.add(new Separator());
-
-      if (!debuggerManager.getBreakpointManager().isDefaultBreakpoint(XBreakpointBase.this)) {
-        group.add(new RemoveBreakpointGutterIconAction(XBreakpointBase.this));
-      }
-      group.add(new ToggleBreakpointGutterIconAction(XBreakpointBase.this));
-      for (AnAction action : getAdditionalPopupMenuActions(debuggerManager.getCurrentSession())) {
-        group.add(action);
-      }
-      group.add(new Separator());
-
-      group.add(new ViewBreakpointsAction(ActionsBundle.actionText(XDebuggerActions.VIEW_BREAKPOINTS), XBreakpointBase.this));
-      return group;
+      return null;
     }
 
     @Nullable

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.ui.RowIcon;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityIcons;
 import com.intellij.util.containers.ContainerUtil;
@@ -331,8 +332,11 @@ public abstract class GrTypeDefinitionImpl extends GrStubElementBase<GrTypeDefin
   private List<GrField> getSyntheticFields() {
     List<GrField> fields = AST_TRANSFORM_FIELD.getCachedValue(this);
     if (fields == null) {
+      final RecursionGuard.StackStamp stamp = ourGuard.markStack();
       fields = AstTransformContributor.runContributorsForFields(this);
-      fields = AST_TRANSFORM_FIELD.putCachedValue(this, fields);
+      if (stamp.mayCacheNow()) {
+        fields = AST_TRANSFORM_FIELD.putCachedValue(this, fields);
+      }
     }
 
     return fields;
@@ -773,7 +777,7 @@ public abstract class GrTypeDefinitionImpl extends GrStubElementBase<GrTypeDefin
       }
       if (psiElement instanceof GrField) {
         //add field with modifiers which are in its parent
-        int i = ArrayUtil.find(((GrVariableDeclaration)psiElement.getParent()).getVariables(), psiElement);
+        int i = ArrayUtilRt.find(((GrVariableDeclaration)psiElement.getParent()).getVariables(), psiElement);
         psiElement = body.addBefore(psiElement.getParent(), anchor);
         GrVariable[] vars = ((GrVariableDeclaration)psiElement).getVariables();
         for (int j = 0; j < vars.length; j++) {
@@ -834,18 +838,4 @@ public abstract class GrTypeDefinitionImpl extends GrStubElementBase<GrTypeDefin
     }
     return body.getRBrace();
   }
-
-
-  public <T extends GrMembersDeclaration> T addMemberDeclaration(@NotNull T decl, PsiElement anchorBefore)
-    throws IncorrectOperationException {
-
-    if (anchorBefore == null) {
-      return (T)add(decl);
-    }
-
-    GrTypeDefinitionBody body = getBody();
-    if (body == null) throw new IncorrectOperationException("Type definition without a body");
-    return  (T)body.addBefore(decl, anchorBefore);
-  }
-
 }

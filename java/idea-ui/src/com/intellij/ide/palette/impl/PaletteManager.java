@@ -51,9 +51,9 @@ public class PaletteManager implements ProjectComponent {
   private final FileEditorManager myFileEditorManager;
   private PaletteWindow myPaletteWindow;
   private ToolWindow myPaletteToolWindow;
-  private final List<KeyListener> myKeyListeners = ContainerUtil.createEmptyCOWList();
-  private final List<PaletteDragEventListener> myDragEventListeners = ContainerUtil.createEmptyCOWList();
-  private final List<ListSelectionListener> mySelectionListeners = ContainerUtil.createEmptyCOWList();
+  private final List<KeyListener> myKeyListeners = ContainerUtil.createLockFreeCopyOnWriteList();
+  private final List<PaletteDragEventListener> myDragEventListeners = ContainerUtil.createLockFreeCopyOnWriteList();
+  private final List<ListSelectionListener> mySelectionListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   public PaletteManager(Project project, FileEditorManager fileEditorManager) {
     myProject = project;
@@ -205,15 +205,15 @@ public class PaletteManager implements ProjectComponent {
   }
 
   private class MyFileEditorManagerListener implements FileEditorManagerListener {
-    public void fileOpened(FileEditorManager source, VirtualFile file) {
+    public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
       processFileEditorChange(file);
     }
 
-    public void fileClosed(FileEditorManager source, VirtualFile file) {
+    public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
       processFileEditorChange(null);
     }
 
-    public void selectionChanged(FileEditorManagerEvent event) {
+    public void selectionChanged(@NotNull FileEditorManagerEvent event) {
       processFileEditorChange(event.getNewFile());
     }
   }

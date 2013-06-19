@@ -41,6 +41,7 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.ArrayFactory;
 import com.intellij.util.text.CharArrayCharSequence;
+import com.intellij.util.text.StringFactory;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -249,12 +250,13 @@ public class CompositeElement extends TreeElement {
   @Override
   @NotNull
   public String getText() {
-    return new String(textToCharArray());
+    return StringFactory.createShared(textToCharArray());
   }
 
   @Override
   public CharSequence getChars() {
-    return new CharArrayCharSequence(textToCharArray());
+    return getText();
+    //return new CharArrayCharSequence(textToCharArray());
   }
 
   @Override
@@ -315,7 +317,12 @@ public class CompositeElement extends TreeElement {
     @NonNls String msg = "";
     msg += ";\n changed=" + (startStamp != myModificationsCount);
     msg += ";\n buffer=" + text;
-    msg += ";\n this=" + this;
+    try {
+      msg += ";\n this=" + this;
+    }
+    catch (StackOverflowError e) {
+      msg += ";\n this.toString produces SOE";
+    }
     int shitStart = textMatches(text, 0);
     msg += ";\n matches until " + shitStart;
     LeafElement leaf = findLeafElementAt(Math.abs(shitStart));
@@ -821,7 +828,7 @@ public class CompositeElement extends TreeElement {
   public void rawAddChildrenWithoutNotifications(TreeElement first) {
     final TreeElement last = getLastChildNode();
     if (last == null){
-      first.rawRemoveUpToWithoutNotifications(null);
+      first.rawRemoveUpToWithoutNotifications(null, false);
       setFirstChildNode(first);
       while(true){
         final TreeElement treeNext = first.getTreeNext();

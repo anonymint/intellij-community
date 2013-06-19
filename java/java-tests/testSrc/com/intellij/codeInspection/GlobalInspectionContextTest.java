@@ -21,9 +21,9 @@ import com.intellij.codeInsight.CodeInsightTestCase;
 import com.intellij.codeInspection.actions.RunInspectionIntention;
 import com.intellij.codeInspection.ex.*;
 import com.intellij.codeInspection.visibility.VisibilityInspection;
-import com.intellij.profile.codeInspection.InspectionProfileManager;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * @author Dmitry Avdeev
@@ -55,17 +55,18 @@ public class GlobalInspectionContextTest extends CodeInsightTestCase {
   }
 
   public void testRunInspectionContext() throws Exception {
-    InspectionProfile profile = (InspectionProfile)InspectionProfileManager.getInstance().getRootProfile();
-    InspectionProfileEntry[] tools = profile.getInspectionTools(null);
-    for (InspectionProfileEntry tool : tools) {
-      if (!tool.isEnabledByDefault()) {
-        GlobalInspectionContextImpl context = RunInspectionIntention.createContext(tool, (InspectionManagerEx)InspectionManager.getInstance(myProject), null);
-        context.initializeTools(new ArrayList<Tools>(), new ArrayList<Tools>(), new ArrayList<Tools>());
+    InspectionProfile profile = new InspectionProfileImpl("foo");
+    InspectionToolWrapper[] tools = (InspectionToolWrapper[])profile.getInspectionTools(null);
+    for (InspectionToolWrapper toolWrapper : tools) {
+      if (!toolWrapper.isEnabledByDefault()) {
+        InspectionManagerEx instance = (InspectionManagerEx)InspectionManager.getInstance(myProject);
+        GlobalInspectionContextImpl context = RunInspectionIntention.createContext(toolWrapper, instance, null);
+        context.initializeTools(new ArrayList<Tools>(), new ArrayList<Tools>(), new ArrayList<Tools>(), new ArrayList<Tools>());
         assertEquals(1, context.getTools().size());
         return;
       }
     }
-    fail("No disabled tools found");
+    fail("No disabled tools found: " + Arrays.asList(tools));
   }
 
   @Override

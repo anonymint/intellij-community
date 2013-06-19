@@ -22,7 +22,6 @@ import com.intellij.openapi.util.Getter;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.FilePathImpl;
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.AsynchConsumer;
@@ -35,6 +34,7 @@ import git4idea.config.GitConfigUtil;
 import git4idea.history.GitHistoryUtils;
 import git4idea.history.wholeTree.AbstractHash;
 import git4idea.history.wholeTree.CommitHashPlusParents;
+import git4idea.repo.GitBranchTrackInfo;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryFiles;
 import git4idea.repo.GitRepositoryImpl;
@@ -76,7 +76,10 @@ public class LowLevelAccessImpl implements LowLevelAccess {
         parameters.add(startingPoint);
       }
     } else {
-      parameters.add("--all");
+      parameters.add("HEAD");
+      parameters.add("--branches");
+      parameters.add("--remotes");
+      parameters.add("--tags");
     }
     if (useMaxCnt > 0) {
       parameters.add("--max-count=" + useMaxCnt);
@@ -91,56 +94,56 @@ public class LowLevelAccessImpl implements LowLevelAccess {
   }
 
   @Override
-  public List<GitCommit> getCommitDetails(final Collection<String> commitIds, SymbolicRefsI refs) throws VcsException {
+  public List<GitHeavyCommit> getCommitDetails(final Collection<String> commitIds, SymbolicRefsI refs) throws VcsException {
     return GitHistoryUtils.commitsDetails(myProject, new FilePathImpl(myRoot), refs, commitIds);
-  }
-
-  public void loadCommits(final Collection<String> startingPoints, final Date beforePoint, final Date afterPoint,
-                             final Collection<ChangesFilter.Filter> filtersIn, final AsynchConsumer<GitCommit> consumer,
-                             int maxCnt, SymbolicRefsI refs, final boolean topoOrder) throws VcsException {
-    final Collection<ChangesFilter.Filter> filters = new ArrayList<ChangesFilter.Filter>(filtersIn);
-    if (beforePoint != null) {
-      filters.add(new ChangesFilter.BeforeDate(new Date(beforePoint.getTime() - 1)));
-    }
-    if (afterPoint != null) {
-      filters.add(new ChangesFilter.AfterDate(afterPoint));
-    }
-
-    loadCommits(startingPoints, Collections.<String>emptyList(), filters, consumer, maxCnt, null, refs, topoOrder);
   }
 
   // uses cached version
   public CachedRefs getRefs() throws VcsException {
     final CachedRefs refs = new CachedRefs();
-    GitRepository repository = myProject == null || myProject.isDefault() ? null : GitUtil.getRepositoryManager(myProject).getRepositoryForRoot(myRoot);
-    if (repository == null) {
-      final File child = new File(myRoot.getPath(), GitUtil.DOT_GIT);
-      if (! child.exists()) {
-        throw new VcsException("No git repository in " + myRoot.getPath());
-      }
-      repository = GitRepositoryImpl.getLightInstance(myRoot, myProject, ServiceManager.getService(myProject, GitPlatformFacade.class), myProject);
-      repository.update();
-      repository.getBranches();
-    }
+    GitRepository repository = getRepositoryWise(myProject, myRoot);
     GitBranchesCollection branches = repository.getBranches();
     refs.setCollection(branches);
     final GitBranch current = repository.getCurrentBranch();
     refs.setCurrentBranch(current);
     if (current != null) {
-      GitBranch tracked = GitBranchUtil.tracked(myProject, myRoot, current.getName());
-      String fullName = tracked == null ? null : tracked.getFullName();
-      fullName = fullName != null && fullName.startsWith(GitBranch.REFS_REMOTES_PREFIX) ? fullName.substring(GitBranch.REFS_REMOTES_PREFIX.length()) : fullName;
-      refs.setTrackedRemoteName(fullName);
+      final Collection<GitBranchTrackInfo> infos = repository.getBranchTrackInfos();
+      for (GitBranchTrackInfo info : infos) {
+        if (info.getLocalBranch().equals(current)) {
+          String fullName = info.getRemoteBranch().getFullName();
+          fullName = fullName.startsWith(GitBranch.REFS_REMOTES_PREFIX)
+                     ? fullName.substring(GitBranch.REFS_REMOTES_PREFIX.length()) : fullName;
+          refs.setTrackedRemoteName(fullName);
+          break;
+        }
+      }
     }
     refs.setUsername(GitConfigUtil.getValue(myProject, myRoot, GitConfigUtil.USER_NAME));
-    final VcsRevisionNumber head = GitHistoryUtils.getCurrentRevision(myProject, new FilePathImpl(myRoot), "HEAD", true);
-    refs.setHeadHash(AbstractHash.create(head.asString()));
+    final String head = repository.getCurrentRevision();
+    if (head != null) {
+      refs.setHeadHash(AbstractHash.create(head));
+    }
     return refs;
+  }
+
+  private static GitRepository getRepositoryWise(final Project project, final VirtualFile root) throws VcsException {
+    GitRepository repository = project == null || project.isDefault() ? null : GitUtil.getRepositoryManager(project).getRepositoryForRoot(root);
+    if (repository == null) {
+      final File child = new File(root.getPath(), GitUtil.DOT_GIT);
+      if (! child.exists()) {
+        throw new VcsException("No git repository in " + root.getPath());
+      }
+      repository = GitRepositoryImpl
+        .getLightInstance(root, project, ServiceManager.getService(project, GitPlatformFacade.class), project);
+      repository.update();
+      repository.getBranches();
+    }
+    return repository;
   }
 
   public void loadCommits(final @NotNull Collection<String> startingPoints, @NotNull final Collection<String> endPoints,
                           @NotNull final Collection<ChangesFilter.Filter> filters,
-                          @NotNull final AsynchConsumer<GitCommit> consumer,
+                          @NotNull final AsynchConsumer<GitHeavyCommit> consumer,
                           int useMaxCnt,
                           Getter<Boolean> isCanceled, SymbolicRefsI refs, final boolean topoOrder)
     throws VcsException {
@@ -158,7 +161,10 @@ public class LowLevelAccessImpl implements LowLevelAccess {
         parameters.add(startingPoint);
       }
     } else {
-      parameters.add("--all");
+      parameters.add("HEAD");
+      parameters.add("--branches");
+      parameters.add("--remotes");
+      parameters.add("--tags");
     }
     if (topoOrder) {
       parameters.add("--topo-order");
@@ -188,15 +194,6 @@ public class LowLevelAccessImpl implements LowLevelAccess {
     return result;
   }
 
-  public void loadAllBranches(List<String> sink) throws VcsException {
-    sink.addAll(listAsStrings(myProject, myRoot, true, false, null));
-    sink.addAll(listAsStrings(myProject, myRoot, false, true, null));
-  }
-
-  public void loadAllTags(Collection<String> sink) throws VcsException {
-    GitTag.listAsStrings(myProject, myRoot, sink, null);
-  }
-
   @NotNull
   private static Collection<String> listAsStrings(@NotNull Project project, @NotNull VirtualFile root, boolean localWanted,
                                                  boolean remoteWanted, @Nullable String containingCommit) throws VcsException {
@@ -210,7 +207,6 @@ public class LowLevelAccessImpl implements LowLevelAccess {
                                            @Nullable String containingCommit) throws VcsException {
     // preparing native command executor
     final GitSimpleHandler handler = new GitSimpleHandler(project, root, GitCommand.BRANCH);
-    handler.setNoSSH(true);
     handler.setSilent(true);
     handler.addParameters("--no-color");
     boolean remoteOnly = false;
@@ -276,7 +272,7 @@ public class LowLevelAccessImpl implements LowLevelAccess {
       }
       GitBranch branch = null;
       if (isRemote) {
-        GitRepository repository = GitUtil.getRepositoryForRootOrLogError(project, root);
+        GitRepository repository = getRepositoryWise(project, root);
         if (repository != null) {
           branch = GitBranchUtil.parseRemoteBranch(b, GitBranch.DUMMY_HASH, repository.getRemotes());
         }

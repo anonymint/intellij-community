@@ -46,8 +46,8 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.util.Alarm;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.ThrowableRunnable;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.io.ZipUtil;
 import com.intellij.util.ui.UIUtil;
@@ -65,9 +65,11 @@ import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.event.InvocationEvent;
 import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.StringWriter;
+import java.lang.ref.SoftReference;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -82,7 +84,6 @@ import static org.junit.Assert.assertNotNull;
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class PlatformTestUtil {
   public static final boolean COVERAGE_ENABLED_BUILD = "true".equals(System.getProperty("idea.coverage.enabled.build"));
-  public static final CvsVirtualFileFilter CVS_FILE_FILTER = new CvsVirtualFileFilter();
 
   public static <T> void registerExtension(final ExtensionPointName<T> name, final T t, final Disposable parentDisposable) {
     registerExtension(Extensions.getRootArea(), name, t, parentDisposable);
@@ -111,12 +112,10 @@ public class PlatformTestUtil {
         return presentation;
       }
     }
-    else if (node == null) {
+    if (node == null) {
       return "NULL";
     }
-    else {
-      return node.toString();
-    }
+    return node.toString();
   }
 
   public static String print(JTree tree, boolean withSelection) {
@@ -127,7 +126,7 @@ public class PlatformTestUtil {
     StringBuilder buffer = new StringBuilder();
     final Collection<String> strings = printAsList(tree, withSelection, nodePrintCondition);
     for (String string : strings) {
-      buffer.append(string).append("\n");  
+      buffer.append(string).append("\n");
     }
     return buffer.toString();
   }
@@ -158,37 +157,32 @@ public class PlatformTestUtil {
 
     if (nodePrintCondition != null && !nodePrintCondition.value(nodeText)) return;
 
-    final StringBuilder buff = StringBuilderSpinAllocator.alloc();
-    try {
-      StringUtil.repeatSymbol(buff, ' ', level);
+    final StringBuilder buff = new StringBuilder();
+    StringUtil.repeatSymbol(buff, ' ', level);
 
-      final boolean expanded = tree.isExpanded(new TreePath(defaultMutableTreeNode.getPath()));
-      if (!defaultMutableTreeNode.isLeaf()) {
-        buff.append(expanded ? "-" : "+");
-      }
-
-      final boolean selected = tree.getSelectionModel().isPathSelected(new TreePath(defaultMutableTreeNode.getPath()));
-      if (withSelection && selected) {
-        buff.append("[");
-      }
-
-      buff.append(nodeText);
-
-      if (withSelection && selected) {
-        buff.append("]");
-      }
-
-      strings.add(buff.toString());
-
-      int childCount = tree.getModel().getChildCount(root);
-      if (expanded) {
-        for (int i = 0; i < childCount; i++) {
-          printImpl(tree, tree.getModel().getChild(root, i), strings, level + 1, withSelection, nodePrintCondition);
-        }
-      }
+    final boolean expanded = tree.isExpanded(new TreePath(defaultMutableTreeNode.getPath()));
+    if (!defaultMutableTreeNode.isLeaf()) {
+      buff.append(expanded ? "-" : "+");
     }
-    finally {
-      StringBuilderSpinAllocator.dispose(buff);
+
+    final boolean selected = tree.getSelectionModel().isPathSelected(new TreePath(defaultMutableTreeNode.getPath()));
+    if (withSelection && selected) {
+      buff.append("[");
+    }
+
+    buff.append(nodeText);
+
+    if (withSelection && selected) {
+      buff.append("]");
+    }
+
+    strings.add(buff.toString());
+
+    int childCount = tree.getModel().getChildCount(root);
+    if (expanded) {
+      for (int i = 0; i < childCount; i++) {
+        printImpl(tree, tree.getModel().getChild(root, i), strings, level + 1, withSelection, nodePrintCondition);
+      }
     }
   }
 
@@ -289,7 +283,7 @@ public class PlatformTestUtil {
                                     int maxRowCount,
                                     char paddingChar,
                                     @Nullable Queryable.PrintInfo printInfo) {
-    StringBuilder buffer = StringBuilderSpinAllocator.alloc();
+    StringBuilder buffer = new StringBuilder();
     doPrint(buffer, currentLevel, node, structure, comparator, maxRowCount, 0, paddingChar, printInfo);
     return buffer;
   }
@@ -372,7 +366,6 @@ public class PlatformTestUtil {
     if (COVERAGE_ENABLED_BUILD) return;
 
     final long expectedOnMyMachine = Math.max(1, expectedMs * Timings.MACHINE_TIMING / Timings.ETALON_TIMING);
-    final double acceptableChangeFactor = 1.1;
 
     // Allow 10% more in case of test machine is busy.
     String logMessage = message;
@@ -388,6 +381,7 @@ public class PlatformTestUtil {
                   ", I/O=" + Timings.IO_TIMING + "." +
                   " (" + (int)(Timings.MACHINE_TIMING*1.0/Timings.ETALON_TIMING*100) + "% of the Standard)" +
                   ".";
+    final double acceptableChangeFactor = 1.1;
     if (actual < expectedOnMyMachine) {
       System.out.println(logMessage);
       TeamCityLogger.info(logMessage);
@@ -488,21 +482,22 @@ public class PlatformTestUtil {
         if (adjustForIO) {
           expectedOnMyMachine = adjust(expectedOnMyMachine, Timings.IO_TIMING, Timings.ETALON_IO_TIMING);
         }
-        final double acceptableChangeFactor = 1.1;
 
         // Allow 10% more in case of test machine is busy.
         String logMessage = message;
         if (duration > expectedOnMyMachine) {
           int percentage = (int)(100.0 * (duration - expectedOnMyMachine) / expectedOnMyMachine);
-          logMessage += ". (" + percentage + "% longer)";
+          logMessage += ": " + percentage + "% longer";
         }
-        logMessage += ". Expected: " + expectedOnMyMachine + ". Actual: " + duration + "." + Timings.getStatistics() ;
+        logMessage +=
+          ". Expected: " + formatTime(expectedOnMyMachine) + ". Actual: " + formatTime(duration) + "." + Timings.getStatistics();
+        final double acceptableChangeFactor = 1.1;
         if (duration < expectedOnMyMachine) {
           int percentage = (int)(100.0 * (expectedOnMyMachine - duration) / expectedOnMyMachine);
-          logMessage = "(" + percentage + "% faster). " + logMessage;
+          logMessage = percentage + "% faster. " + logMessage;
 
           TeamCityLogger.info(logMessage);
-          System.out.println("SUCCESS: "+logMessage);
+          System.out.println("SUCCESS: " + logMessage);
         }
         else if (duration < expectedOnMyMachine * acceptableChangeFactor) {
           TeamCityLogger.warning(logMessage, null);
@@ -537,6 +532,18 @@ public class PlatformTestUtil {
         }
         break;
       }
+    }
+
+    private static String formatTime(long millis) {
+      String hint = "";
+      DecimalFormat format = new DecimalFormat("#.0", DecimalFormatSymbols.getInstance(Locale.US));
+      if (millis >= 60 * 1000) hint = format.format(millis / 60 / 1000.f) + "m";
+      if (millis >= 1000) hint += (hint.isEmpty() ? "" : " ") + format.format(millis / 1000.f) + "s";
+      String result = millis + "ms";
+      if (!hint.isEmpty()) {
+        result = result + " (" + hint + ")";
+      }
+      return result;
     }
 
     private static int adjust(int expectedOnMyMachine, long thisTiming, long ethanolTiming) {
@@ -591,6 +598,10 @@ public class PlatformTestUtil {
     return map;
   }
 
+  public static void assertDirectoriesEqual(VirtualFile dirAfter, VirtualFile dirBefore) throws IOException {
+    assertDirectoriesEqual(dirAfter, dirBefore, null);
+  }
+
   @SuppressWarnings("UnsafeVfsRecursion")
   public static void assertDirectoriesEqual(VirtualFile dirAfter, VirtualFile dirBefore, @Nullable VirtualFileFilter fileFilter) throws IOException {
     FileDocumentManager.getInstance().saveAllDocuments();
@@ -612,7 +623,7 @@ public class PlatformTestUtil {
 
     Set<String> keySetAfter = mapAfter.keySet();
     Set<String> keySetBefore = mapBefore.keySet();
-    assertEquals(keySetAfter, keySetBefore);
+    assertEquals(dirAfter.getPath(), keySetAfter, keySetBefore);
 
     for (String name : keySetAfter) {
       VirtualFile fileAfter = mapAfter.get(name);
@@ -694,8 +705,8 @@ public class PlatformTestUtil {
       try {
         tempDirectory1 = PlatformTestCase.createTempDir("tmp1");
         tempDirectory2 = PlatformTestCase.createTempDir("tmp2");
-        ZipUtil.extract(jarFile1, tempDirectory1, CVS_FILE_FILTER);
-        ZipUtil.extract(jarFile2, tempDirectory2, CVS_FILE_FILTER);
+        ZipUtil.extract(jarFile1, tempDirectory1, null);
+        ZipUtil.extract(jarFile2, tempDirectory2, null);
       }
       finally {
         jarFile2.close();
@@ -716,7 +727,7 @@ public class PlatformTestUtil {
         dirBefore.refresh(false, true);
       }
     });
-    assertDirectoriesEqual(dirAfter, dirBefore, CVS_FILE_FILTER);
+    assertDirectoriesEqual(dirAfter, dirBefore);
   }
 
   public static void assertElementsEqual(final Element expected, final Element actual) throws IOException {
@@ -729,18 +740,6 @@ public class PlatformTestUtil {
     final StringWriter writer = new StringWriter();
     JDOMUtil.writeElement(element, writer, "\n");
     return writer.getBuffer().toString();
-  }
-
-  public static class CvsVirtualFileFilter implements VirtualFileFilter, FilenameFilter {
-    @Override
-    public boolean accept(VirtualFile file) {
-      return !file.isDirectory() || !"CVS".equals(file.getName());
-    }
-
-    @Override
-    public boolean accept(File dir, String name) {
-      return !name.contains("CVS");
-    }
   }
 
   public static String getCommunityPath() {
@@ -771,5 +770,12 @@ public class PlatformTestUtil {
   @NotNull
   public static String loadFileText(@NotNull String fileName) throws IOException {
     return StringUtil.convertLineSeparators(FileUtil.loadFile(new File(fileName)));
+  }
+
+  public static void tryGcSoftlyReachableObjects() {
+    List<Object> list = ContainerUtil.newArrayList();
+    for (int i = 0; i < 100; i++) {
+      list.add(new SoftReference<byte[]>(new byte[(int)Runtime.getRuntime().freeMemory() / 2]));
+    }
   }
 }

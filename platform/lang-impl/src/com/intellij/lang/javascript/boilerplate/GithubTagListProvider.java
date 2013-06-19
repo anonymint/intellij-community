@@ -65,12 +65,13 @@ public class GithubTagListProvider {
       public void run() {
         final String[] urls = formatTagListDownloadUrls();
         String firstErrorMessage = null;
-        String errorMessage = null;
         for (String url : urls) {
+          String errorMessage;
           try {
             final ImmutableSet<GithubTagInfo> tags = fetchGithubTagsByUrl(url);
             LOG.info(getGeneratorName() + "Cache has been successfully updated");
             UIUtil.invokeLaterIfNeeded(new Runnable() {
+              @Override
               public void run() {
                 peer.onTagsUpdated(tags);
               }

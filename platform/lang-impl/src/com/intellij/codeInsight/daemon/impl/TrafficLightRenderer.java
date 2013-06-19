@@ -43,6 +43,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.ui.LayeredIcon;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.UIUtil;
 import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -79,29 +80,34 @@ public class TrafficLightRenderer implements ErrorStripeRenderer, Disposable {
     myDaemonCodeAnalyzer = project == null ? null : (DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(project);
     myDocument = document;
     myFile = file;
-    mySeverityRegistrar = SeverityRegistrar.getInstance(myProject);
+    mySeverityRegistrar = SeverityUtil.getSeverityRegistrar(myProject);
     refresh();
 
     if (project != null) {
-      MarkupModelEx model = (MarkupModelEx)DocumentMarkupModel.forDocument(document, project, true);
+      final MarkupModelEx model = (MarkupModelEx)DocumentMarkupModel.forDocument(document, project, true);
       model.addMarkupModelListener(this, new MarkupModelListener() {
         @Override
         public void afterAdded(@NotNull RangeHighlighterEx highlighter) {
           incErrorCount(highlighter, 1);
         }
-  
+
         @Override
         public void beforeRemoved(@NotNull RangeHighlighterEx highlighter) {
           incErrorCount(highlighter, -1);
         }
-  
+
         @Override
         public void attributesChanged(@NotNull RangeHighlighterEx highlighter) {
         }
       });
-      for (RangeHighlighter rangeHighlighter : model.getAllHighlighters()) {
-        incErrorCount(rangeHighlighter, 1);
-      }
+      UIUtil.invokeLaterIfNeeded(new Runnable() {
+        @Override
+        public void run() {
+          for (RangeHighlighter rangeHighlighter : model.getAllHighlighters()) {
+            incErrorCount(rangeHighlighter, 1);
+          }
+        }
+      });
     }
   }
 

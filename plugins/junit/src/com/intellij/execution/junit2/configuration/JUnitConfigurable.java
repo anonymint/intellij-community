@@ -31,6 +31,7 @@ import com.intellij.execution.ui.ClassBrowser;
 import com.intellij.execution.ui.CommonJavaParametersPanel;
 import com.intellij.execution.ui.ConfigurationModuleSelector;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.fileTypes.PlainTextLanguage;
 import com.intellij.ui.ListCellRendererWrapper;
 import com.intellij.ide.util.ClassFilter;
 import com.intellij.ide.util.PackageChooserDialog;
@@ -382,7 +383,9 @@ public class JUnitConfigurable extends SettingsEditor<JUnitConfiguration> implem
     }));
 
     myMethod = new LabeledComponent<EditorTextFieldWithBrowseButton>();
-    final EditorTextFieldWithBrowseButton textFieldWithBrowseButton = new EditorTextFieldWithBrowseButton(myProject, true);
+    final EditorTextFieldWithBrowseButton textFieldWithBrowseButton = new EditorTextFieldWithBrowseButton(myProject, true, 
+                                                                                                          JavaCodeFragment.VisibilityChecker.EVERYTHING_VISIBLE, 
+                                                                                                          PlainTextLanguage.INSTANCE.getAssociatedFileType());
     new TextFieldCompletionProvider() {
       @Override
       protected void addCompletionVariants(@NotNull String text, int offset, @NotNull String prefix, @NotNull CompletionResultSet result) {
@@ -436,7 +439,7 @@ public class JUnitConfigurable extends SettingsEditor<JUnitConfiguration> implem
       getTestLocation(i).setEnabled(enabledFields.contains(i));
     /*if (newType == JUnitConfigurationModel.PATTERN) {
       myModule.setEnabled(false);
-    } else */if (newType != JUnitConfigurationModel.ALL_IN_PACKAGE && newType != JUnitConfigurationModel.PATTERN) {
+    } else */if (newType != JUnitConfigurationModel.ALL_IN_PACKAGE) {
       myModule.setEnabled(true);
     }
     else {
@@ -486,7 +489,11 @@ public class JUnitConfigurable extends SettingsEditor<JUnitConfiguration> implem
   }
 
   private void onScopeChanged() {
-    myModule.setEnabled(!myWholeProjectScope.isSelected());
+    final boolean allInPackageAllInProject = ((Integer)myTypeChooser.getSelectedItem()) == JUnitConfigurationModel.ALL_IN_PACKAGE && myWholeProjectScope.isSelected();
+    myModule.setEnabled(!allInPackageAllInProject);
+    if (allInPackageAllInProject) {
+      myModule.getComponent().setSelectedItem(null);
+    }
   }
 
   private class TestClassBrowser extends ClassBrowser {

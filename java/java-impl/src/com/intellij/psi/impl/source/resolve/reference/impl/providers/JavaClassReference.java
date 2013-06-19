@@ -31,6 +31,8 @@ import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
@@ -277,7 +279,12 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
       }
     }
 
-    final PsiClass[] classes = aPackage.getClasses(scope);
+    final List<PsiClass> classes = ContainerUtil.filter(aPackage.getClasses(scope), new Condition<PsiClass>() {
+      @Override
+      public boolean value(PsiClass psiClass) {
+        return StringUtil.isNotEmpty(psiClass.getName());
+      }
+    });
     final Map<CustomizableReferenceProvider.CustomizationKey, Object> options = getOptions();
     if (options != null) {
       final boolean instantiatable = JavaClassReferenceProvider.INSTANTIATABLE.getBooleanValue(options);
@@ -293,7 +300,7 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
       }
     }
     else {
-      ContainerUtil.addAll(list, classes);
+      list.addAll(classes);
     }
     return list.toArray();
   }
@@ -341,8 +348,9 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
   @Override
   @NotNull
   public JavaResolveResult advancedResolve(boolean incompleteCode) {
-    final ResolveCache resolveCache = ResolveCache.getInstance(getElement().getProject());
-    return (JavaResolveResult) resolveCache.resolveWithCaching(this, MyResolver.INSTANCE, false, false)[0];
+    PsiFile file = getElement().getContainingFile();
+    final ResolveCache resolveCache = ResolveCache.getInstance(file.getProject());
+    return (JavaResolveResult) resolveCache.resolveWithCaching(this, MyResolver.INSTANCE, false, false,file)[0];
   }
 
   private JavaResolveResult doAdvancedResolve() {
@@ -411,7 +419,7 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
           if (containingFile == null) return JavaResolveResult.EMPTY;
         }
 
-        final ClassResolverProcessor processor = new ClassResolverProcessor(getCanonicalText(), psiElement);
+        final ClassResolverProcessor processor = new ClassResolverProcessor(getCanonicalText(), psiElement, containingFile);
         containingFile.processDeclarations(processor, ResolveState.initial(), null, psiElement);
 
         if (processor.getResult().length == 1) {
@@ -439,13 +447,14 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
   }
 
   private GlobalSearchScope getScope() {
-    final GlobalSearchScope scope = myJavaClassReferenceSet.getProvider().getScope(getElement().getProject());
+    Project project = getElement().getProject();
+    GlobalSearchScope scope = myJavaClassReferenceSet.getProvider().getScope(project);
     if (scope == null) {
       final Module module = ModuleUtilCore.findModuleForPsiElement(getElement());
       if (module != null) {
         return module.getModuleWithDependenciesAndLibrariesScope(true);
       }
-      return GlobalSearchScope.allScope(getElement().getProject());
+      return GlobalSearchScope.allScope(project);
     }
     return scope;
   }
@@ -583,6 +592,7 @@ public class JavaClassReference extends GenericReference implements PsiJavaRefer
     return myJavaClassReferenceSet;
   }
 
+  @NotNull
   @Override
   public String getUnresolvedMessagePattern() {
     return myJavaClassReferenceSet.getUnresolvedMessagePattern(myIndex);

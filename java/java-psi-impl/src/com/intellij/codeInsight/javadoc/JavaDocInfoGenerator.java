@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiFormatUtilBase;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.IncorrectOperationException;
 import org.jdom.Document;
 import org.jdom.Element;
@@ -415,7 +416,7 @@ public class JavaDocInfoGenerator {
       final PsiModifierList modifierList = docOwner.getModifierList();
       if (modifierList != null) {
         final PsiElement parent = modifierList.getParent();
-        if (parent instanceof PsiDocCommentOwner) {
+        if (parent instanceof PsiDocCommentOwner && parent.getNavigationElement() instanceof PsiDocCommentOwner) {
           return ((PsiDocCommentOwner)parent.getNavigationElement()).getDocComment();
         }
       }
@@ -466,8 +467,19 @@ public class JavaDocInfoGenerator {
       generateEpilogue(buffer);
   }
 
+  public static void enumConstantOrdinal(StringBuilder buffer, PsiField field, PsiClass parentClass, final String newLine) {
+    if (parentClass != null && field instanceof PsiEnumConstant) {
+      final PsiField[] fields = parentClass.getFields();
+      final int idx = ArrayUtilRt.find(fields, field);
+      if (idx >= 0) {
+        buffer.append(newLine);
+        buffer.append("Enum constant ordinal: ").append(idx);
+      }
+    }
+  }
+
   // not a javadoc in fact..
-  private void generateVariableJavaDoc(@NonNls StringBuilder buffer, PsiVariable variable, boolean generatePrologueAndEpilogue) {
+  private static void generateVariableJavaDoc(@NonNls StringBuilder buffer, PsiVariable variable, boolean generatePrologueAndEpilogue) {
     if (generatePrologueAndEpilogue)
       generatePrologue(buffer);
 
@@ -604,7 +616,7 @@ public class JavaDocInfoGenerator {
     }
   }
 
-  private void generateAnnotations (@NonNls StringBuilder buffer, PsiModifierListOwner owner) {
+  private static void generateAnnotations(@NonNls StringBuilder buffer, PsiModifierListOwner owner) {
     final PsiModifierList ownerModifierList = owner.getModifierList();
     if (ownerModifierList == null) return;
     PsiAnnotation[] annotations = ownerModifierList.getAnnotations();
@@ -645,6 +657,11 @@ public class JavaDocInfoGenerator {
           }
           buffer.append("&nbsp;");
         }
+      } else {
+        buffer.append("<font color=red>");
+        buffer.append(annotation.getText());
+        buffer.append("</font>");
+        buffer.append("&nbsp;");
       }
     }
   }
@@ -1859,6 +1876,11 @@ public class JavaDocInfoGenerator {
 
     @Override
     public void visitLiteralExpression(PsiLiteralExpression expression) {
+      myBuffer.append(expression.getText());
+    }
+
+    @Override
+    public void visitReferenceExpression(PsiReferenceExpression expression) {
       myBuffer.append(expression.getText());
     }
   }

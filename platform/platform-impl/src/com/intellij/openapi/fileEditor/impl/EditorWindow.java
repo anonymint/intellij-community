@@ -40,7 +40,6 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.LayeredIcon;
-import com.intellij.ui.tabs.TabInfo;
 import com.intellij.util.IconUtil;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.ui.EmptyIcon;
@@ -74,7 +73,7 @@ public class EditorWindow {
 
   private boolean myIsDisposed = false;
   public static final Key<Integer> INITIAL_INDEX_KEY = Key.create("initial editor index");
-  private Stack<Pair<String, Integer>> myRemovedTabs = new Stack<Pair<String, Integer>>(UISettings.getInstance().EDITOR_TAB_LIMIT) {
+  private Stack<Pair<String, Integer>> myRemovedTabs = new Stack<Pair<String, Integer>>() {
     @Override
     public void push(Pair<String, Integer> pair) {
       if (size() >= UISettings.getInstance().EDITOR_TAB_LIMIT) {
@@ -93,7 +92,7 @@ public class EditorWindow {
     myTabbedPane = null;
 
     final int tabPlacement = UISettings.getInstance().EDITOR_TAB_PLACEMENT;
-    if (tabPlacement != UISettings.TABS_NONE) {
+    if (tabPlacement != UISettings.TABS_NONE && !UISettings.getInstance().PRESENTATION_MODE) {
       createTabs(tabPlacement);
     }
 
@@ -445,7 +444,7 @@ public class EditorWindow {
   }
 
   public void setTabsPlacement(final int tabPlacement) {
-    if (tabPlacement != UISettings.TABS_NONE) {
+    if (tabPlacement != UISettings.TABS_NONE && !UISettings.getInstance().PRESENTATION_MODE) {
       if (myTabbedPane == null) {
         final EditorWithProviderComposite editor = getSelectedEditor();
         myPanel.removeAll();
@@ -1038,7 +1037,6 @@ public class EditorWindow {
   }
 
   public boolean isFilePinned(final VirtualFile file) {
-    ApplicationManager.getApplication().assertIsDispatchThread();
     final EditorComposite editorComposite = findFileComposite(file);
     if (editorComposite == null) {
       throw new IllegalArgumentException("file is not open: " + file.getPath());

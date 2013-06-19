@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.progress.impl;
 
+import com.intellij.concurrency.JobScheduler;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -39,6 +40,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ProgressManagerImpl extends ProgressManager implements Disposable{
@@ -49,29 +52,20 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
   private final AtomicInteger myCurrentModalProgressCount = new AtomicInteger(0);
 
   private static volatile int ourLockedCheckCounter = 0;
-  @NonNls private static final String NAME = "Progress Cancel Checker";
   private static final boolean DISABLED = "disabled".equals(System.getProperty(PROCESS_CANCELED_EXCEPTION));
-
-  private volatile boolean enabled = true;
+  private final ScheduledFuture<?> myCheckCancelledFuture;
 
   public ProgressManagerImpl(Application application) {
     if (/*!application.isUnitTestMode() && */!DISABLED) {
-      final Thread thread = new Thread(NAME) {
+      myCheckCancelledFuture = JobScheduler.getScheduler().scheduleWithFixedDelay(new Runnable() {
         @Override
         public void run() {
-          while (enabled) {
-            try {
-              sleep(10);
-            }
-            catch (InterruptedException ignored) {
-            }
-            ourNeedToCheckCancel = true;
-            ProgressIndicatorProvider.ourNeedToCheckCancel = true;
-          }
+          ourNeedToCheckCancel = true;
+          ProgressIndicatorProvider.ourNeedToCheckCancel = true;
         }
-      };
-      thread.setPriority(Thread.MAX_PRIORITY - 1);
-      thread.start();
+      }, 0, 10, TimeUnit.MILLISECONDS);
+    } else {
+      myCheckCancelledFuture = null;
     }
   }
 
@@ -222,7 +216,10 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
     ProgressIndicator oldIndicator = null;
 
     boolean set = progress != null && progress != (oldIndicator = myThreadIndicator.get());
-    if (set) myThreadIndicator.set(progress);
+    if (set) {
+      progress.checkCanceled();
+      myThreadIndicator.set(progress);
+    }
 
     boolean modal = progress != null && progress.isModal();
     if (modal) myCurrentModalProgressCount.incrementAndGet();
@@ -382,14 +379,15 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
     else {
       progressIndicator = new BackgroundableProcessIndicator(task);
     }
-    runProcessWithProgressAsynchronously(task, progressIndicator);
-  }
-
-  public static void runProcessWithProgressAsynchronously(@NotNull final Task.Backgroundable task, @NotNull final ProgressIndicator progressIndicator) {
     runProcessWithProgressAsynchronously(task, progressIndicator, null);
   }
 
-  public static void runProcessWithProgressAsynchronously(@NotNull final Task.Backgroundable task, @NotNull final ProgressIndicator progressIndicator,
+  public void runProcessWithProgressAsynchronously(@NotNull Task.Backgroundable task, @NotNull ProgressIndicator progressIndicator) {
+    runProcessWithProgressAsynchronously(task, progressIndicator, null);
+  }
+
+  public static void runProcessWithProgressAsynchronously(@NotNull final Task.Backgroundable task,
+                                                          @NotNull final ProgressIndicator progressIndicator,
                                                           @Nullable final Runnable continuation) {
     if (progressIndicator instanceof Disposable) {
       Disposer.register(ApplicationManager.getApplication(), (Disposable)progressIndicator);
@@ -419,7 +417,7 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
             }
           }, ModalityState.NON_MODAL);
         }
-        else if (!canceled) {
+        else {
           final Task.NotificationInfo notificationInfo = task.notifyFinished();
           if (notificationInfo != null && time > 5000) { // snow notification if process took more than 5 secs
             final Component window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
@@ -451,11 +449,14 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
   @Override
   public void run(@NotNull final Task task) {
     if (task.isHeadless()) {
-      new TaskRunnable(task, new EmptyProgressIndicator()).run();
-      return;
+      if (ApplicationManager.getApplication().isDispatchThread()) {
+        runProcessWithProgressSynchronously(task, null);
+      }
+      else {
+        new TaskRunnable(task, new EmptyProgressIndicator()).run();
+      }
     }
-
-    if (task.isModal()) {
+    else if (task.isModal()) {
       runProcessWithProgressSynchronously(task.asModal(), null);
     }
     else {
@@ -488,7 +489,7 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
     private TaskRunnable(@NotNull Task task, @NotNull ProgressIndicator indicator) {
       this(task, indicator, null);
     }
-    
+
     private TaskRunnable(@NotNull Task task, @NotNull ProgressIndicator indicator, @Nullable Runnable continuation) {
       super(task);
       myIndicator = indicator;
@@ -517,7 +518,7 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
 
   @Override
   public void dispose() {
-    enabled = false;
+    if (myCheckCancelledFuture != null) myCheckCancelledFuture.cancel(false);
   }
 
   //for debugging
@@ -525,12 +526,6 @@ public class ProgressManagerImpl extends ProgressManager implements Disposable{
   @SuppressWarnings({"UnusedDeclaration"})
   private static void stopCheckCanceled() {
     ((ProgressManagerImpl)getInstance()).dispose();
-  }
-
-  @TestOnly
-  public static void setNeedToCheckCancel(boolean needToCheckCancel) {
-    ourNeedToCheckCancel = needToCheckCancel;
-    ProgressIndicatorProvider.ourNeedToCheckCancel = true;
   }
 
   @TestOnly

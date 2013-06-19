@@ -80,6 +80,7 @@ public class CompilerTask extends Task.Backgroundable {
   private final String myContentName;
   private final boolean myHeadlessMode;
   private final boolean myForceAsyncExecution;
+  private final boolean myWaitForPreviousSession;
   private int myErrorCount = 0;
   private int myWarningCount = 0;
   private boolean myMessagesAutoActivated = false;
@@ -88,12 +89,22 @@ public class CompilerTask extends Task.Backgroundable {
   private Runnable myCompileWork;
   private final AtomicBoolean myMessageViewWasPrepared = new AtomicBoolean(false);
   private Runnable myRestartWork;
+  private final boolean myCompilationStartedAutomatically;
 
-  public CompilerTask(@NotNull Project project, String contentName, final boolean headlessMode, boolean forceAsync) {
+  @Deprecated
+  public CompilerTask(@NotNull Project project, String contentName, final boolean headlessMode, boolean forceAsync,
+                      boolean waitForPreviousSession) {
+    this(project, contentName, headlessMode, forceAsync, waitForPreviousSession, false);
+  }
+
+  public CompilerTask(@NotNull Project project, String contentName, final boolean headlessMode, boolean forceAsync,
+                      boolean waitForPreviousSession, boolean compilationStartedAutomatically) {
     super(project, contentName);
     myContentName = contentName;
     myHeadlessMode = headlessMode;
     myForceAsyncExecution = forceAsync;
+    myWaitForPreviousSession = waitForPreviousSession;
+    myCompilationStartedAutomatically = compilationStartedAutomatically;
   }
 
   public void setContentIdKey(Key<Key<?>> contentIdKey) {
@@ -136,7 +147,10 @@ public class CompilerTask extends Task.Backgroundable {
 
       try {
         while (!acquired) {
-          acquired = semaphore.tryAcquire(500, TimeUnit.MILLISECONDS);
+          acquired = semaphore.tryAcquire(300, TimeUnit.MILLISECONDS);
+          if (!acquired && !myWaitForPreviousSession) {
+            return;
+          }
           if (indicator.isCanceled()) {
             // give up obtaining the semaphore,
             // let compile work begin in order to stop gracefuly on cancel event
@@ -214,7 +228,7 @@ public class CompilerTask extends Task.Backgroundable {
               if (myErrorCount > 0) {
                 appIcon.setErrorBadge(myProject, String.valueOf(myErrorCount));
                 appIcon.requestAttention(myProject, true);
-              } else {
+              } else if (!myCompilationStartedAutomatically) {
                 appIcon.setOkBadge(myProject, true);
                 appIcon.requestAttention(myProject, false);
               }

@@ -21,11 +21,16 @@ import com.intellij.execution.RunnerRegistry;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.process.OSProcessHandler;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.runners.ProgramRunner;
+import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.util.ExecutionErrorDialog;
 import com.intellij.ide.macro.Macro;
 import com.intellij.ide.macro.MacroManager;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -192,8 +197,10 @@ public class Tool implements SchemeElement {
 
   public void setOutputFilters(FilterInfo[] filters) {
     myOutputFilters = new ArrayList<FilterInfo>();
-    for (int i = 0; i < filters.length; i++) {
-      myOutputFilters.add(filters[i]);
+    if (filters != null) {
+      for (int i = 0; i < filters.length; i++) {
+        myOutputFilters.add(filters[i]);
+      }
     }
   }
 
@@ -246,7 +253,7 @@ public class Tool implements SchemeElement {
   }
 
   public String getActionId() {
-    StringBuffer name = new StringBuffer(ACTION_ID_PREFIX);
+    StringBuilder name = new StringBuilder(getActionIdPrefix());
     if (myGroup != null) {
       name.append(myGroup);
       name.append('_');
@@ -257,10 +264,13 @@ public class Tool implements SchemeElement {
     return name.toString();
   }
 
-  public void execute(DataContext dataContext) {
+  /**
+   * @return <code>true</code> if task has been started successfully
+   */
+  public boolean execute(AnActionEvent event, DataContext dataContext, long executionId, @Nullable final ProcessListener processListener) {
     final Project project = PlatformDataKeys.PROJECT.getData(dataContext);
     if (project == null) {
-      return;
+      return false;
     }
     FileDocumentManager.getInstance().saveAllDocuments();
     try {
@@ -269,50 +279,42 @@ public class Tool implements SchemeElement {
         final ProgramRunner runner = RunnerRegistry.getInstance().getRunner(DefaultRunExecutor.EXECUTOR_ID, profile);
         assert runner != null;
 
-        runner.execute(new DefaultRunExecutor(), new ExecutionEnvironment(profile, project, null, null, null));
+        ExecutionEnvironment executionEnvironment = new ExecutionEnvironmentBuilder().setRunProfile(profile).setProject(project).build();
+        executionEnvironment.setExecutionId(executionId);
+        runner.execute(new DefaultRunExecutor(), executionEnvironment, new ProgramRunner.Callback() {
+          @Override
+          public void processStarted(RunContentDescriptor descriptor) {
+            ProcessHandler processHandler = descriptor.getProcessHandler();
+            if (processHandler != null && processListener != null) {
+              processHandler.addProcessListener(processListener);
+            }
+          }
+        });
+        return true;
       }
       else {
         GeneralCommandLine commandLine = createCommandLine(dataContext);
         if (commandLine == null) {
-          return;
+          return false;
         }
         OSProcessHandler handler = new OSProcessHandler(commandLine.createProcess(), commandLine.getCommandLineString());
         handler.addProcessListener(new ToolProcessAdapter(project, synchronizeAfterExecution(), getName()));
-        handler.startNotify();
-        /*
-        ContentManager contentManager = RunManager.getInstance(project).getViewProvider();
-        ExecutionView.Descriptor descriptor = new ExecutionView.Descriptor(project, getName(), contentManager,
-                                                                           ToolWindowId.RUN);
-        descriptor.canBreak = false;
-        Content contentToReuse = RunManager.getInstance(project).getContentToReuse();
-        executionView = ExecutionView.openExecutionView(descriptor, contentToReuse, true, DefaultConsoleViewFactory.getInstance());
-        executionView.addAction(new EditToolAction(executionView), 1);
-        WindowManager.getInstance().getStatusBar(project).setInfo("External tool '" + getName() + "' started");
-        if (executionView.enterCriticalSection()) {
-          OSProcessHandler handler = commandLine.createProcessHandler();
-          executionView.getConsoleView().print(handler.getCommandLine() + "\n", ConsoleViewContentType.SYSTEM_OUTPUT);
-          executionView.setProcessHandler(handler);
-          handler.addProcessListener(new MyProcessAdapter(executionView, project));
-          // Add filters;
-          for (int i = 0; i < myOutputFilters.size(); i++) {
-            RegexpFilter filter = myOutputFilters.get(i);
-            if (filter != null) {
-              executionView.getConsoleView().addMessageFilter(filter);
-            }
-          }
-          handler.startNotify();
+        if (processListener != null) {
+          handler.addProcessListener(processListener);
         }
-        */
+        handler.startNotify();
+        return true;
       }
     }
     catch (ExecutionException ex) {
       ExecutionErrorDialog.show(ex, ToolsBundle.message("tools.process.start.error"), project);
     }
+    return false;
   }
 
   @Nullable
-  GeneralCommandLine createCommandLine(DataContext dataContext) {
-    if (getWorkingDirectory() != null && getWorkingDirectory().trim().length() == 0) {
+  public GeneralCommandLine createCommandLine(DataContext dataContext) {
+    if (StringUtil.isEmpty(getWorkingDirectory())) {
       setWorkingDirectory(null);
     }
 
@@ -346,14 +348,17 @@ public class Tool implements SchemeElement {
     return commandLine;
   }
 
+  @Override
   public void setGroupName(final String name) {
     setGroup(name);
   }
 
+  @Override
   public String getKey() {
     return getName();
   }
 
+  @Override
   public SchemeElement copy() {
     Tool copy = new Tool();
     copy.copyFrom(this);
@@ -363,5 +368,9 @@ public class Tool implements SchemeElement {
   @Override
   public String toString() {
     return myGroup + ": " + myName;
+  }
+
+  public String getActionIdPrefix() {
+    return ACTION_ID_PREFIX;
   }
 }

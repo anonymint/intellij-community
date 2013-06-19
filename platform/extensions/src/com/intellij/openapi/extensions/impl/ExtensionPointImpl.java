@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.*;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.StringInterner;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -51,19 +53,23 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
   private final PluginDescriptor myDescriptor;
 
   private final Set<ExtensionComponentAdapter> myExtensionAdapters = new LinkedHashSet<ExtensionComponentAdapter>();
-  private final List<ExtensionPointListener<T>> myEPListeners = ContainerUtil.createEmptyCOWList();
+  private final List<ExtensionPointListener<T>> myEPListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final List<ExtensionComponentAdapter> myLoadedAdapters = new ArrayList<ExtensionComponentAdapter>();
 
   private Class<T> myExtensionClass;
 
-  public ExtensionPointImpl(String name,
-                            String className,
-                            Kind kind,
-                            ExtensionsAreaImpl owner,
+  private static final StringInterner INTERNER = new StringInterner();
+
+  public ExtensionPointImpl(@NotNull String name,
+                            @NotNull String className,
+                            @NotNull Kind kind,
+                            @NotNull ExtensionsAreaImpl owner,
                             AreaInstance area,
-                            LogProvider logger,
-                            PluginDescriptor descriptor) {
-    myName = name;
+                            @NotNull LogProvider logger,
+                            @NotNull PluginDescriptor descriptor) {
+    synchronized (INTERNER) {
+      myName = INTERNER.intern(name);
+    }
     myClassName = className;
     myKind = kind;
     myOwner = owner;
@@ -72,6 +78,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     myDescriptor = descriptor;
   }
 
+  @NotNull
   @Override
   public String getName() {
     return myName;
@@ -82,16 +89,19 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     return myArea;
   }
 
+  @NotNull
   @Override
   public String getBeanClassName() {
     return myClassName;
   }
 
+  @NotNull
   @Override
   public String getClassName() {
     return myClassName;
   }
 
+  @NotNull
   @Override
   public Kind getKind() {
     return myKind;
@@ -102,6 +112,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     registerExtension(extension, LoadingOrder.ANY);
   }
 
+  @NotNull
   public PluginDescriptor getDescriptor() {
     return myDescriptor;
   }
@@ -130,7 +141,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     clearCache();
   }
 
-  private void internalRegisterExtension(T extension, ExtensionComponentAdapter adapter, int index, boolean runNotifications) {
+  private void internalRegisterExtension(@NotNull T extension, @NotNull ExtensionComponentAdapter adapter, int index, boolean runNotifications) {
     if (myExtensions.contains(extension)) {
       myLogger.error("Extension was already added: " + extension);
       return;
@@ -152,7 +163,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     }
   }
 
-  private void notifyListenersOnAdd(T extension, final PluginDescriptor pluginDescriptor) {
+  private void notifyListenersOnAdd(@NotNull T extension, final PluginDescriptor pluginDescriptor) {
     for (ExtensionPointListener<T> listener : myEPListeners) {
       try {
         listener.extensionAdded(extension, pluginDescriptor);
@@ -172,15 +183,15 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
         result = myExtensionsCache;
         if (result == null) {
           processAdapters();
-          final Class<T> extensionClass = getExtensionClass();
-          //noinspection unchecked
-          result = myExtensions.toArray((T[])Array.newInstance(extensionClass, myExtensions.size()));
+          Class<T> extensionClass = getExtensionClass();
+          @SuppressWarnings("unchecked") T[] a = (T[])Array.newInstance(extensionClass, myExtensions.size());
+          result = myExtensions.toArray(a);
 
           for (int i = result.length - 1; i >= 0; i--) {
             T t = result[i];
             if (i > 0 && result[i] == result[i - 1]) {
               LOG.error("Duplicate extension found: " + t + "; " +
-                        " Result:      " + Arrays.asList(result) + ";\n" +
+                        " Result:      " + Arrays.toString(result) + ";\n" +
                         " extensions: " + myExtensions + ";\n" +
                         " getExtensionClass(): " + extensionClass + ";\n" +
                         " size:" + myExtensions.size() + ";" + result.length);
@@ -225,12 +236,16 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
       myLoadedAdapters.clear();
       ExtensionComponentAdapter[] adapters = allAdapters.toArray(new ExtensionComponentAdapter[myExtensionAdapters.size()]);
       LoadingOrder.sort(adapters);
+      final List<T> extensions = new ArrayList<T>();
       for (ExtensionComponentAdapter adapter : adapters) {
-        //noinspection unchecked
-        T extension = (T)adapter.getExtension();
+        @SuppressWarnings("unchecked") T extension = (T)adapter.getExtension();
         assertClass(extension.getClass());
+        extensions.add(extension);
+      }
 
-        internalRegisterExtension(extension, adapter, myExtensions.size(), ArrayUtil.find(loadedAdapters, adapter) == -1);
+      for (int i = 0; i < extensions.size(); i++) {
+        T extension = extensions.get(i);
+        internalRegisterExtension(extension, adapters[i], myExtensions.size(), ArrayUtilRt.find(loadedAdapters, adapters[i]) == -1);
       }
       myExtensionAdapters.clear();
     }
@@ -273,7 +288,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     return i;
   }
 
-  private void internalUnregisterExtension(T extension, PluginDescriptor pluginDescriptor) {
+  private void internalUnregisterExtension(@NotNull T extension, PluginDescriptor pluginDescriptor) {
     int index = getExtensionIndex(extension);
     myExtensions.remove(index);
 
@@ -294,7 +309,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     }
   }
 
-  private void notifyListenersOnRemove(T extensionObject, PluginDescriptor pluginDescriptor) {
+  private void notifyListenersOnRemove(@NotNull T extensionObject, PluginDescriptor pluginDescriptor) {
     for (ExtensionPointListener<T> listener : myEPListeners) {
       try {
         listener.extensionRemoved(extensionObject, pluginDescriptor);
@@ -323,8 +338,8 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     if (myEPListeners.add(listener)) {
       for (ExtensionComponentAdapter componentAdapter : myLoadedAdapters.toArray(new ExtensionComponentAdapter[myLoadedAdapters.size()])) {
         try {
-          //noinspection unchecked
-          listener.extensionAdded((T)componentAdapter.getExtension(), componentAdapter.getPluginDescriptor());
+          @SuppressWarnings("unchecked") T extension = (T)componentAdapter.getExtension();
+          listener.extensionAdded(extension, componentAdapter.getPluginDescriptor());
         }
         catch (Throwable e) {
           myLogger.error(e);
@@ -337,8 +352,8 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
   public synchronized void removeExtensionPointListener(@NotNull ExtensionPointListener<T> listener) {
     for (ExtensionComponentAdapter componentAdapter : myLoadedAdapters.toArray(new ExtensionComponentAdapter[myLoadedAdapters.size()])) {
       try {
-        //noinspection unchecked
-        listener.extensionRemoved((T)componentAdapter.getExtension(), componentAdapter.getPluginDescriptor());
+        @SuppressWarnings("unchecked") T extension = (T)componentAdapter.getExtension();
+        listener.extensionRemoved(extension, componentAdapter.getPluginDescriptor());
       }
       catch (Throwable e) {
         myLogger.error(e);
@@ -358,6 +373,7 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     }
   }
 
+  @NotNull
   @Override
   public Class<T> getExtensionClass() {
     // racy single-check: we don't care whether the access to 'myExtensionClass' is thread-safe
@@ -367,10 +383,9 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
     if (extensionClass == null) {
       try {
         ClassLoader pluginClassLoader = myDescriptor.getPluginClassLoader();
-        //noinspection unchecked
-        myExtensionClass = extensionClass = pluginClassLoader == null
-                                            ? (Class<T>)Class.forName(myClassName)
-                                            : (Class<T>)Class.forName(myClassName, true, pluginClassLoader);
+        @SuppressWarnings("unchecked") Class<T> extClass = pluginClassLoader == null
+            ? (Class<T>)Class.forName(myClassName) : (Class<T>)Class.forName(myClassName, true, pluginClassLoader);
+        myExtensionClass = extensionClass = extClass;
       }
       catch (ClassNotFoundException e) {
         throw new RuntimeException(e);
@@ -390,14 +405,14 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
 
   private void assertClass(@NotNull Class<?> extensionClass) {
     Class<T> expectedClass = getExtensionClass();
-    assert expectedClass.isAssignableFrom(extensionClass) : "Expected: "+ expectedClass +"; Actual: "+ extensionClass;
+    assert expectedClass.isAssignableFrom(extensionClass) : "Expected: " + expectedClass + "; Actual: " + extensionClass;
   }
 
   private void clearCache() {
     myExtensionsCache = null;
   }
 
-  synchronized boolean unregisterComponentAdapter(final ExtensionComponentAdapter componentAdapter) {
+  synchronized boolean unregisterComponentAdapter(@NotNull ExtensionComponentAdapter componentAdapter) {
     try {
       if (myExtensionAdapters.remove(componentAdapter)) {
         return true;
@@ -410,8 +425,8 @@ public class ExtensionPointImpl<T> implements ExtensionPoint<T> {
           pluginContainer.unregisterComponent(componentKey);
         }
 
-        //noinspection unchecked
-        internalUnregisterExtension((T)componentAdapter.getExtension(), componentAdapter.getPluginDescriptor());
+        @SuppressWarnings("unchecked") T extension = (T)componentAdapter.getExtension();
+        internalUnregisterExtension(extension, componentAdapter.getPluginDescriptor());
         return true;
       }
       return false;

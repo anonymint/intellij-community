@@ -14,7 +14,14 @@ package org.zmlx.hg4idea.util;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditor;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.ShutDownTracker;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.*;
@@ -24,6 +31,9 @@ import com.intellij.openapi.vcs.history.VcsFileRevisionEx;
 import com.intellij.openapi.vcs.vfs.VcsVirtualFile;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.StatusBar;
+import com.intellij.openapi.wm.WindowManager;
+import com.intellij.openapi.wm.impl.status.StatusBarUtil;
 import com.intellij.ui.GuiUtils;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
@@ -33,20 +43,25 @@ import org.zmlx.hg4idea.command.HgRemoveCommand;
 import org.zmlx.hg4idea.command.HgStatusCommand;
 import org.zmlx.hg4idea.command.HgWorkingCopyRevisionsCommand;
 import org.zmlx.hg4idea.provider.HgChangeProvider;
+import org.zmlx.hg4idea.repo.HgRepository;
 
 import java.awt.*;
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * HgUtil is a collection of static utility methods for Mercurial.
  */
 public abstract class HgUtil {
 
+  public static final Pattern URL_WITH_PASSWORD = Pattern.compile("(?:.+)://(?:.+)(:.+)@(?:.+)");      //http(s)://username:password@url
   public static final int MANY_FILES = 100;
   private static final Logger LOG = Logger.getInstance(HgUtil.class);
+  public static final String DOT_HG = ".hg";
 
   public static File copyResourceToTempFile(String basename, String extension) throws IOException {
     final InputStream in = HgUtil.class.getClassLoader().getResourceAsStream("python/" + basename + extension);
@@ -200,7 +215,7 @@ public abstract class HgUtil {
    * Checks if the given directory is an hg root.
    */
   public static boolean isHgRoot(VirtualFile dir) {
-    return dir.findChild(".hg") != null;
+    return dir.findChild(DOT_HG) != null;
   }
 
   /**
@@ -223,7 +238,7 @@ public abstract class HgUtil {
    * @see #getHgRootOrNull(com.intellij.openapi.project.Project, com.intellij.openapi.vcs.FilePath)
    */
   @Nullable
-  public static VirtualFile getHgRootOrNull(Project project, VirtualFile file) {
+  public static VirtualFile getHgRootOrNull(Project project, @NotNull VirtualFile file) {
     return getHgRootOrNull(project, VcsUtil.getFilePath(file.getPath()));
   }
 
@@ -246,6 +261,52 @@ public abstract class HgUtil {
     return getHgRootOrThrow(project, VcsUtil.getFilePath(file.getPath()));
   }
 
+  /**
+   * Returns the currently selected file, based on which HgBranch components will identify the current repository root.
+   */
+  @Nullable
+  public static VirtualFile getSelectedFile(@NotNull Project project) {
+    StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
+    final FileEditor fileEditor = StatusBarUtil.getCurrentFileEditor(project, statusBar);
+    VirtualFile result = null;
+    if (fileEditor != null) {
+      if (fileEditor instanceof TextEditor) {
+        Document document = ((TextEditor)fileEditor).getEditor().getDocument();
+        result = FileDocumentManager.getInstance().getFile(document);
+      }
+    }
+
+    if (result == null) {
+      final FileEditorManager manager = FileEditorManager.getInstance(project);
+      if (manager != null) {
+        Editor editor = manager.getSelectedTextEditor();
+        if (editor != null) {
+          result = FileDocumentManager.getInstance().getFile(editor.getDocument());
+        }
+      }
+    }
+    return result;
+  }
+
+  @Nullable
+  public static VirtualFile getRootForSelectedFile(@NotNull Project project) {
+    VirtualFile selectedFile = getSelectedFile(project);
+    if (selectedFile != null) {
+      return getHgRootOrNull(project, selectedFile);
+    }
+    return null;
+  }
+
+
+  /**
+    * Shows a message dialog to enter the name of new branch.
+    * @return name of new branch or {@code null} if user has cancelled the dialog.
+    */
+   @Nullable
+   public static String getNewBranchNameFromUser(@NotNull Project project,
+                                                 @NotNull String dialogTitle) {
+     return Messages.showInputDialog(project, "Enter the name of new branch:", dialogTitle, Messages.getQuestionIcon());
+   }
   /**
    * Checks is a merge operation is in progress on the given repository.
    * Actually gets the number of parents of the current revision. If there are 2 parents, then a merge is going on. Otherwise there is
@@ -282,10 +343,7 @@ public abstract class HgUtil {
 
 
   public static HgFile getFileNameInTargetRevision(Project project, HgRevisionNumber vcsRevisionNumber, HgFile localHgFile) {
-    HgStatusCommand statCommand = new HgStatusCommand(project);
-    statCommand.setIncludeUnknown(false);
-    statCommand.setBaseRevision(vcsRevisionNumber);
-    statCommand.setIncludeCopySource(true);
+    HgStatusCommand statCommand = new HgStatusCommand.Builder(true).unknown(false).baseRevision(vcsRevisionNumber).build(project);
 
     Set<HgChange> changes = statCommand.execute(localHgFile.getRepo());
 
@@ -399,17 +457,18 @@ public abstract class HgUtil {
                                      @NotNull final FilePath path,
                                      @Nullable final HgFileRevision rev1,
                                      @Nullable final HgFileRevision rev2) {
-    HgStatusCommand statusCommand = new HgStatusCommand(project);
-    statusCommand.setIncludeCopySource(false);
+    HgStatusCommand statusCommand;
     HgRevisionNumber revNumber1 = null;
     if (rev1 != null) {
       revNumber1 = rev1.getRevisionNumber();
-      statusCommand.setBaseRevision(revNumber1);
-      statusCommand.setTargetRevision(rev2 != null ? rev2.getRevisionNumber() : null);   //rev2==null means "compare with local version"
+      //rev2==null means "compare with local version"
+      statusCommand = new HgStatusCommand.Builder(true).copySource(false).baseRevision(revNumber1)
+        .targetRevision(rev2 != null ? rev2.getRevisionNumber() : null).build(project);
     }
     else {
       LOG.assertTrue(rev2 != null, "revision1 and revision2 can't both be null. Path: " + path); //rev1 and rev2 can't be null both//
-      statusCommand.setBaseRevision(rev2.getRevisionNumber());     //get initial changes//
+      //get initial changes//
+      statusCommand = new HgStatusCommand.Builder(true).copySource(false).baseRevision(rev2.getRevisionNumber()).build(project);
     }
 
     Collection<HgChange> hgChanges = statusCommand.execute(root, Collections.singleton(path));
@@ -471,5 +530,22 @@ public abstract class HgUtil {
     else {
       return FileStatus.UNKNOWN;
     }
+  }
+
+  public static String removePasswordIfNeeded(@NotNull String path) {
+    Matcher matcher = URL_WITH_PASSWORD.matcher(path);
+    if (matcher.matches()) {
+      return path.substring(0, matcher.start(1)) + path.substring(matcher.end(1), path.length());
+    }
+    return path;
+  }
+
+  public static String getDisplayableBranchText(HgRepository repository) {
+    HgRepository.State state = repository.getState();
+    String branchText = "";
+    if (state == HgRepository.State.MERGING) {
+      branchText += state.toString() + " ";
+    }
+    return branchText + repository.getCurrentBranch();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.generation.OverrideImplementUtil;
 import com.intellij.codeInsight.template.Template;
@@ -30,6 +30,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * @author mike
@@ -51,7 +53,8 @@ public class CreateConstructorFromCallFix extends CreateFromUsageBaseFix {
   @Override
   protected void invokeImpl(final PsiClass targetClass) {
     final Project project = myConstructorCall.getProject();
-    PsiElementFactory elementFactory = JavaPsiFacade.getInstance(project).getElementFactory();
+    JVMElementFactory elementFactory = JVMElementFactories.getFactory(targetClass.getLanguage(), project);
+    if (elementFactory == null) elementFactory = JavaPsiFacade.getElementFactory(project);
 
     try {
       PsiMethod constructor = (PsiMethod)targetClass.add(elementFactory.createConstructor());
@@ -62,10 +65,10 @@ public class CreateConstructorFromCallFix extends CreateFromUsageBaseFix {
                                                  getTargetSubstitutor(myConstructorCall));
       final PsiMethod superConstructor = CreateClassFromNewFix.setupSuperCall(targetClass, constructor, templateBuilder);
 
-      constructor = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(constructor);
+      constructor = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(constructor);
       Template template = templateBuilder.buildTemplate();
-      if (targetClass == null) return;
       final Editor editor = positionCursor(project, targetClass.getContainingFile(), targetClass);
+      if (editor == null) return;
       final TextRange textRange = constructor.getTextRange();
       editor.getDocument().deleteString(textRange.getStartOffset(), textRange.getEndOffset());
       editor.getCaretModel().moveToOffset(textRange.getStartOffset());
@@ -140,7 +143,9 @@ public class CreateConstructorFromCallFix extends CreateFromUsageBaseFix {
     PsiConstructorCall constructorCall = (PsiConstructorCall)element;
     PsiMethod method = constructorCall.resolveConstructor();
     PsiExpressionList argumentList = constructorCall.getArgumentList();
-    PsiClass targetClass = getTargetClasses(constructorCall).get(0);
+    List<PsiClass> targetClasses = getTargetClasses(constructorCall);
+    if (targetClasses.isEmpty()) return false;
+    PsiClass targetClass = targetClasses.get(0);
 
     return !CreateFromUsageUtils.shouldCreateConstructor(targetClass, argumentList, method);
   }

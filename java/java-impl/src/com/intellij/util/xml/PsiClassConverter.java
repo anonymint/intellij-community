@@ -16,15 +16,10 @@
 
 package com.intellij.util.xml;
 
-import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ProjectFileIndex;
-import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.JavaClassReferenceProvider;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -38,13 +33,11 @@ import org.jetbrains.annotations.Nullable;
 public class PsiClassConverter extends Converter<PsiClass> implements CustomReferenceConverter<PsiClass> {
 
   public PsiClass fromString(final String s, final ConvertContext context) {
-    return findClass(s, context);
-  }
+    if (StringUtil.isEmptyOrSpaces(s)) return null;
 
-  public static PsiClass findClass(String s, ConvertContext context) {
     final DomElement element = context.getInvocationElement();
-    final GlobalSearchScope scope = element instanceof GenericDomValue ? getSearchScope(context) : null;
-    return DomJavaUtil.findClass(s, context.getFile(), context.getModule(), scope);
+    final GlobalSearchScope scope = element instanceof GenericDomValue ? getScope(context) : null;
+    return DomJavaUtil.findClass(s.trim(), context.getFile(), context.getModule(), scope);
   }
 
   @Nullable
@@ -64,7 +57,8 @@ public class PsiClassConverter extends Converter<PsiClass> implements CustomRefe
     return provider.getReferencesByElement(element);
   }
 
-  protected JavaClassReferenceProvider createClassReferenceProvider(final GenericDomValue<PsiClass> genericDomValue, final ConvertContext context,
+  protected JavaClassReferenceProvider createClassReferenceProvider(final GenericDomValue<PsiClass> genericDomValue,
+                                                                    final ConvertContext context,
                                                                     ExtendClass extendClass) {
     return createJavaClassReferenceProvider(genericDomValue, extendClass, new JavaClassReferenceProvider() {
 
@@ -99,7 +93,6 @@ public class PsiClassConverter extends Converter<PsiClass> implements CustomRefe
         provider.setOption(JavaClassReferenceProvider.JVM_FORMAT, Boolean.TRUE);
       }
       provider.setAllowEmpty(extendClass.allowEmpty());
-
     }
 
     ClassTemplate template = genericDomValue.getAnnotation(ClassTemplate.class);
@@ -114,22 +107,9 @@ public class PsiClassConverter extends Converter<PsiClass> implements CustomRefe
     return provider;
   }
 
-  public static GlobalSearchScope getSearchScope(@NotNull ConvertContext context) {
-    final Module module = context.getModule();
-    if (module == null) return null;
-    PsiFile file = context.getFile();
-    file = file.getOriginalFile();
-    VirtualFile virtualFile = file.getVirtualFile();
-    if (virtualFile == null) return null;
-    ProjectFileIndex fileIndex = ProjectRootManager.getInstance(file.getProject()).getFileIndex();
-    boolean tests = fileIndex.isInTestSourceContent(virtualFile);
-    return module.getModuleRuntimeScope(tests);
-
-  }
-
   @Nullable
-  protected  GlobalSearchScope getScope(@NotNull ConvertContext context) {
-    return getSearchScope(context);
+  protected GlobalSearchScope getScope(@NotNull ConvertContext context) {
+    return context.getSearchScope();
   }
 
   public static class AnnotationType extends PsiClassConverter {

@@ -41,6 +41,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.MessageType;
+import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.*;
@@ -115,6 +116,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
   @NonNls private static final String WIDTH_ATTR = "width";
   @NonNls private static final String HEIGHT_ATTR = "height";
   @NonNls private static final String EXTENDED_STATE_ATTR = "extended-state";
+  @NonNls private static final String LAYOUT_TO_RESTORE = "layout-to-restore";
 
   private final FileEditorManager myFileEditorManager;
   private final LafManager myLafManager;
@@ -198,11 +200,11 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
 
     project.getMessageBus().connect().subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
       @Override
-      public void fileOpened(FileEditorManager source, VirtualFile file) {
+      public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
       }
 
       @Override
-      public void fileClosed(FileEditorManager source, VirtualFile file) {
+      public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
         getFocusManagerImpl(myProject).doWhenFocusSettlesDown(new ExpirableRunnable.ForProject(myProject) {
           @Override
           public void run() {
@@ -214,7 +216,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
       }
 
       @Override
-      public void selectionChanged(FileEditorManagerEvent event) {
+      public void selectionChanged(@NotNull FileEditorManagerEvent event) {
       }
     });
 
@@ -405,14 +407,12 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
     appendUpdateToolWindowsPaneCmd(commandsList);
 
     myFrame.setTitle(FrameTitleBuilder.getInstance().getProjectTitle(myProject));
-
-    FileEditorManagerEx editorManager = FileEditorManagerEx.getInstanceEx(myProject);
-    final JComponent editorComponent = editorManager.getComponent();
+    JComponent editorComponent = createEditorComponent(myProject);
     myEditorComponentFocusWatcher.install(editorComponent);
 
     appendSetEditorComponentCmd(editorComponent, commandsList);
-    if (myEditorWasActive) {
-      activateEditorComponentImpl(editorManager.getSplitters(), commandsList, true);
+    if (myEditorWasActive && editorComponent instanceof EditorsSplitters) {
+      activateEditorComponentImpl(FileEditorManagerEx.getInstanceEx(myProject).getSplitters(), commandsList, true);
     }
     execute(commandsList);
 
@@ -459,6 +459,10 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
     }, myProject);
   }
 
+  private JComponent createEditorComponent(Project project) {
+    return FrameEditorComponentProvider.EP.getExtensions()[0].createEditorComponent(project);
+  }
+
   private void registerToolWindowsFromBeans() {
     ToolWindowEP[] beans = Extensions.getExtensions(ToolWindowEP.EP_NAME);
     for (final ToolWindowEP bean : beans) {
@@ -500,6 +504,11 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
         }
       }
       toolWindow.setIcon(icon);
+    }
+
+    WindowInfoImpl info = getInfo(bean.id);
+    if (!info.isSplit() && bean.secondary && !info.wasRead()) {
+      toolWindow.setSplitMode(bean.secondary, null);
     }
 
     final ActionCallback activation = toolWindow.setActivation(new ActionCallback());
@@ -563,7 +572,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
   }
 
   /**
-   * This is helper method. It delegated its fuctionality to the WindowManager.
+   * This is helper method. It delegated its functionality to the WindowManager.
    * Before delegating it fires state changed.
    */
   public void execute(final ArrayList<FinalizableCommand> commandList) {
@@ -612,6 +621,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
         @Override
         public void run() {
           requestor.requestFocus(new FocusCommand() {
+            @NotNull
             @Override
             public ActionCallback run() {
               runnable.run();
@@ -648,6 +658,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
       public void run() {
         if (forced) {
           getFocusManagerImpl(myProject).requestFocus(new FocusCommand() {
+            @NotNull
             @Override
             public ActionCallback run() {
               final ArrayList<FinalizableCommand> cmds = new ArrayList<FinalizableCommand>();
@@ -987,6 +998,14 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
         }
       }
     }
+    //todo[kb] it's just a temporary solution due a number of focus issues in JDK 7
+    if (SystemInfo.isJavaVersionAtLeast("1.7")) {
+      if (hasOpenEditorFiles()) {
+        activateEditorComponentImpl(getSplittersFromFocus(), commandList, false);
+      } else {
+        focusToolWinowByDefault(id);
+      }
+    }
 
     execute(commandList);
   }
@@ -1104,8 +1123,8 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
   public ToolWindow registerToolWindow(@NotNull final String id,
                                        final boolean canCloseContent,
                                        @NotNull final ToolWindowAnchor anchor,
-                                       final boolean sideTool) {
-    return registerToolWindow(id, null, anchor, sideTool, canCloseContent, false);
+                                       final boolean secondary) {
+    return registerToolWindow(id, null, anchor, secondary, canCloseContent, false);
   }
 
 
@@ -1415,75 +1434,79 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
     });
     Disposer.register(getProject(), balloon);
 
-    final StripeButton button = stripe.getButtonFor(toolWindowId);
-    LOG.assertTrue(button != null, "Button was not found, popup won't be shown. Toolwindow id: " +
-                                   toolWindowId +
-                                   ", message: " +
-                                   text +
-                                   ", message type: " +
-                                   type);
-    if (button == null) return;
-
-    final Runnable show = new Runnable() {
+    execute(new ArrayList<FinalizableCommand>(Arrays.<FinalizableCommand>asList(new FinalizableCommand(null) {
       @Override
       public void run() {
-        if (button.isShowing()) {
-          PositionTracker<Balloon> tracker = new PositionTracker<Balloon>(button) {
-            @Override
-            @Nullable
-            public RelativePoint recalculateLocation(Balloon object) {
-              Stripe twStripe = myToolWindowsPane.getStripeFor(toolWindowId);
-              StripeButton twButton = twStripe != null ? twStripe.getButtonFor(toolWindowId) : null;
+        final StripeButton button = stripe.getButtonFor(toolWindowId);
+        LOG.assertTrue(button != null, "Button was not found, popup won't be shown. Toolwindow id: " +
+                                       toolWindowId +
+                                       ", message: " +
+                                       text +
+                                       ", message type: " +
+                                       type);
+        if (button == null) return;
 
-              if (twButton == null) return null;
+        final Runnable show = new Runnable() {
+          @Override
+          public void run() {
+            if (button.isShowing()) {
+              PositionTracker<Balloon> tracker = new PositionTracker<Balloon>(button) {
+                @Override
+                @Nullable
+                public RelativePoint recalculateLocation(Balloon object) {
+                  Stripe twStripe = myToolWindowsPane.getStripeFor(toolWindowId);
+                  StripeButton twButton = twStripe != null ? twStripe.getButtonFor(toolWindowId) : null;
 
-              if (getToolWindow(toolWindowId).getAnchor() != anchor) {
-                object.hide();
-                return null;
+                  if (twButton == null) return null;
+
+                  if (getToolWindow(toolWindowId).getAnchor() != anchor) {
+                    object.hide();
+                    return null;
+                  }
+
+                  final Point point = new Point(twButton.getBounds().width / 2, twButton.getHeight() / 2 - 2);
+                  return new RelativePoint(twButton, point);
+                }
+              };
+              if (!balloon.isDisposed()) {
+                balloon.show(tracker, position.get());
               }
-
-              final Point point = new Point(twButton.getBounds().width / 2, twButton.getHeight() / 2 - 2);
-              return new RelativePoint(twButton, point);
             }
-          };
-          if (!balloon.isDisposed()) {
-            balloon.show(tracker, position.get());
+            else {
+              final Rectangle bounds = myToolWindowsPane.getBounds();
+              final Point target = UIUtil.getCenterPoint(bounds, new Dimension(1, 1));
+              if (ToolWindowAnchor.TOP == anchor) {
+                target.y = 0;
+              }
+              else if (ToolWindowAnchor.BOTTOM == anchor) {
+                target.y = bounds.height - 3;
+              }
+              else if (ToolWindowAnchor.LEFT == anchor) {
+                target.x = 0;
+              }
+              else if (ToolWindowAnchor.RIGHT == anchor) {
+                target.x = bounds.width;
+              }
+              if (!balloon.isDisposed()) {
+                balloon.show(new RelativePoint(myToolWindowsPane, target), position.get());
+              }
+            }
           }
+        };
+
+        if (!button.isValid()) {
+          SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+              show.run();
+            }
+          });
         }
         else {
-          final Rectangle bounds = myToolWindowsPane.getBounds();
-          final Point target = UIUtil.getCenterPoint(bounds, new Dimension(1, 1));
-          if (ToolWindowAnchor.TOP == anchor) {
-            target.y = 0;
-          }
-          else if (ToolWindowAnchor.BOTTOM == anchor) {
-            target.y = bounds.height - 3;
-          }
-          else if (ToolWindowAnchor.LEFT == anchor) {
-            target.x = 0;
-          }
-          else if (ToolWindowAnchor.RIGHT == anchor) {
-            target.x = bounds.width;
-          }
-          if (!balloon.isDisposed()) {
-            balloon.show(new RelativePoint(myToolWindowsPane, target), position.get());
-          }
-        }
-      }
-    };
-
-    if (!button.isValid()) {
-      SwingUtilities.invokeLater(new Runnable() {
-        @Override
-        public void run() {
           show.run();
         }
-      });
-    }
-    else {
-      show.run();
-    }
-
+      }
+    })));
   }
 
   @Override
@@ -1779,7 +1802,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
   /**
    * @see com.intellij.openapi.wm.impl.ToolWindowsPane#createSetEditorComponentCmd
    */
-  private void appendSetEditorComponentCmd(@Nullable final JComponent component, final List<FinalizableCommand> commandsList) {
+  public void appendSetEditorComponentCmd(@Nullable final JComponent component, final List<FinalizableCommand> commandsList) {
     final CommandProcessor commandProcessor = myWindowManager.getCommandProcessor();
     final FinalizableCommand command = myToolWindowsPane.createSetEditorComponentCmd(component, commandProcessor);
     commandsList.add(command);
@@ -1856,6 +1879,10 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
       else if (DesktopLayout.TAG.equals(e.getName())) { // read layout of tool windows
         myLayout.readExternal(e);
       }
+      else if (LAYOUT_TO_RESTORE.equals(e.getName())) {
+        myLayoutToRestoreLater = new DesktopLayout();
+        myLayoutToRestoreLater.readExternal(e);
+      }
     }
   }
 
@@ -1894,6 +1921,11 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
     final Element layoutElement = new Element(DesktopLayout.TAG);
     element.addContent(layoutElement);
     myLayout.writeExternal(layoutElement);
+    if (myLayoutToRestoreLater != null) {
+      Element layoutToRestoreElement = new Element(LAYOUT_TO_RESTORE);
+      element.addContent(layoutToRestoreElement);
+      myLayoutToRestoreLater.writeExternal(layoutToRestoreElement);
+    }
   }
 
   public void setDefaultState(@NotNull final ToolWindowImpl toolWindow,
@@ -2155,16 +2187,27 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
         }
       }
       else { // docked and sliding windows
+        float size =
+          ToolWindowAnchor.TOP == info.getAnchor() || ToolWindowAnchor.BOTTOM == info.getAnchor() ? source.getWidth() : source.getHeight();
+        if (source.getParent() instanceof Splitter) {
+          Splitter splitter = (Splitter)source.getParent();
+          if (splitter.getSecondComponent() == source) {
+            size += splitter.getDividerWidth();
+          }
+        }
+
         if (ToolWindowAnchor.TOP == info.getAnchor() || ToolWindowAnchor.BOTTOM == info.getAnchor()) {
           info.setWeight((float)source.getHeight() / (float)myToolWindowsPane.getMyLayeredPane().getHeight());
-          float newSideWeight = (float)source.getWidth() / (float)myToolWindowsPane.getMyLayeredPane().getWidth();
+
+
+          float newSideWeight = size / (float)myToolWindowsPane.getMyLayeredPane().getWidth();
           if (newSideWeight < 1.0f) {
             info.setSideWeight(newSideWeight);
           }
         }
         else {
           info.setWeight((float)source.getWidth() / (float)myToolWindowsPane.getMyLayeredPane().getWidth());
-          float newSideWeight = (float)source.getHeight() / (float)myToolWindowsPane.getMyLayeredPane().getHeight();
+          float newSideWeight = size / (float)myToolWindowsPane.getMyLayeredPane().getHeight();
           if (newSideWeight < 1.0f) {
             info.setSideWeight(newSideWeight);
           }
@@ -2222,6 +2265,7 @@ public final class ToolWindowManagerImpl extends ToolWindowManagerEx implements 
 
   public ActionCallback requestDefaultFocus(final boolean forced) {
     return getFocusManagerImpl(myProject).requestFocus(new FocusCommand() {
+      @NotNull
       @Override
       public ActionCallback run() {
         return processDefaultFocusRequest(forced);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,16 @@
  */
 package com.intellij.psi.impl.source.resolve;
 
+import com.intellij.codeInsight.ExceptionUtil;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.JavaVersionService;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.RecursionGuard;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.infos.CandidateInfo;
@@ -28,9 +34,7 @@ import com.intellij.psi.scope.processor.MethodCandidatesProcessor;
 import com.intellij.psi.scope.processor.MethodResolverProcessor;
 import com.intellij.psi.scope.util.PsiScopesUtil;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.PsiUtil;
-import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.psi.util.*;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.HashMap;
@@ -39,7 +43,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public class PsiResolveHelperImpl implements PsiResolveHelper {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.resolve.PsiResolveHelperImpl");
@@ -91,7 +94,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     final PsiJavaParserFacade parserFacade = JavaPsiFacade.getInstance(myManager.getProject()).getParserFacade();
     try {
       final PsiJavaCodeReferenceElement ref = parserFacade.createReferenceFromText(referenceText, context);
-      LOG.assertTrue(ref.isValid());
+      LOG.assertTrue(ref.isValid(), referenceText);
       return ResolveClassUtil.resolveClass(ref);
     }
     catch (IncorrectOperationException e) {
@@ -130,12 +133,12 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
 
   @Override
   public boolean isAccessible(@NotNull PsiMember member,
-                              PsiModifierList modifierList,
+                              @Nullable PsiModifierList modifierList,
                               @NotNull PsiElement place,
                               @Nullable PsiClass accessObjectClass,
-                              final PsiElement currentFileResolveScope) {
-    return JavaResolveUtil.isAccessible(member, member.getContainingClass(), modifierList, place, accessObjectClass,
-                                        currentFileResolveScope);
+                              @Nullable PsiElement currentFileResolveScope) {
+    PsiClass containingClass = member.getContainingClass();
+    return JavaResolveUtil.isAccessible(member, containingClass, modifierList, place, accessObjectClass, currentFileResolveScope);
   }
 
   @Override
@@ -151,20 +154,26 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     return processor.getCandidates();
   }
 
-  private static Pair<PsiType, ConstraintType> inferTypeForMethodTypeParameterInner(final PsiTypeParameter typeParameter,
-                                                                                    final PsiParameter[] parameters,
-                                                                                    final PsiExpression[] arguments,
-                                                                                    final PsiSubstitutor partialSubstitutor,
+  private static Pair<PsiType, ConstraintType> inferTypeForMethodTypeParameterInner(@NotNull PsiTypeParameter typeParameter,
+                                                                                    @NotNull PsiParameter[] parameters,
+                                                                                    @NotNull PsiExpression[] arguments,
+                                                                                    @NotNull PsiSubstitutor partialSubstitutor,
                                                                                     final PsiElement parent,
                                                                                     final ParameterTypeInferencePolicy policy) {
     PsiType[] paramTypes = new PsiType[arguments.length];
     PsiType[] argTypes = new PsiType[arguments.length];
     if (parameters.length > 0) {
       for (int j = 0; j < argTypes.length; j++) {
-        PsiExpression argument = arguments[j];
+        final PsiExpression argument = arguments[j];
         if (argument == null) continue;
         if (argument instanceof PsiMethodCallExpression && ourGuard.currentStack().contains(argument)) continue;
+
+        final RecursionGuard.StackStamp stackStamp = PsiDiamondType.ourDiamondGuard.markStack();
         argTypes[j] = argument.getType();
+        if (!stackStamp.mayCacheNow()) {
+          argTypes[j] = null;
+          continue;
+        }
 
         final PsiParameter parameter = parameters[Math.min(j, parameters.length - 1)];
         if (j >= parameters.length && !parameter.isVarArgs()) break;
@@ -182,10 +191,10 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     return inferTypeForMethodTypeParameterInner(typeParameter, paramTypes, argTypes, partialSubstitutor, parent, policy);
   }
 
-  private static Pair<PsiType, ConstraintType> inferTypeForMethodTypeParameterInner(final PsiTypeParameter typeParameter,
-                                                                                    final PsiType[] paramTypes,
-                                                                                    PsiType[] argTypes,
-                                                                                    PsiSubstitutor partialSubstitutor,
+  private static Pair<PsiType, ConstraintType> inferTypeForMethodTypeParameterInner(@NotNull PsiTypeParameter typeParameter,
+                                                                                    @NotNull PsiType[] paramTypes,
+                                                                                    @NotNull PsiType[] argTypes,
+                                                                                    @NotNull PsiSubstitutor partialSubstitutor,
                                                                                     @Nullable PsiElement parent,
                                                                                     final ParameterTypeInferencePolicy policy) {
     PsiWildcardType wildcardToCapture = null;
@@ -196,6 +205,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
       sortLambdaExpressionsLast(paramTypes, argTypes);
       boolean rawType = false;
       boolean nullPassed = false;
+      boolean lambdaRaw = false;
       for (int j = 0; j < argTypes.length; j++) {
         PsiType argumentType = argTypes[j];
         if (argumentType == null) continue;
@@ -214,14 +224,20 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
         }
         final Pair<PsiType,ConstraintType> currentSubstitution;
         if (argumentType instanceof PsiLambdaExpressionType) {
-          currentSubstitution = inferSubstitutionFromLambda(typeParameter, (PsiLambdaExpressionType)argumentType, lowerBound);
+          currentSubstitution = inferSubstitutionFromLambda(typeParameter, (PsiLambdaExpressionType)argumentType, lowerBound, partialSubstitutor);
           if (rawType) {
-            if (currentSubstitution == FAILED_INFERENCE || (currentSubstitution == null && lowerBound == PsiType.NULL)) return RAW_INFERENCE;
+            if (currentSubstitution == FAILED_INFERENCE || currentSubstitution == null && lowerBound == PsiType.NULL) return RAW_INFERENCE;
           }
           if (nullPassed && currentSubstitution == null) return RAW_INFERENCE;
+          if (currentSubstitution != null && currentSubstitution.first == null) {
+            lambdaRaw = true;
+          }
+          if (currentSubstitution == null && lambdaRaw) {
+            return new Pair<PsiType, ConstraintType>(PsiType.getJavaLangObject(typeParameter.getManager(), typeParameter.getResolveScope()), ConstraintType.EQUALS);
+          }
         } else if (argumentType instanceof PsiMethodReferenceType) {
           final PsiMethodReferenceExpression referenceExpression = ((PsiMethodReferenceType)argumentType).getExpression();
-          currentSubstitution = inferConstraintFromFunctionalInterfaceMethod(typeParameter, referenceExpression, partialSubstitutor.substitute(parameterType));
+          currentSubstitution = inferConstraintFromFunctionalInterfaceMethod(typeParameter, referenceExpression, partialSubstitutor.substitute(parameterType), partialSubstitutor, policy);
         }
         else {
           currentSubstitution = getSubstitutionForTypeParameterConstraint(typeParameter, parameterType,
@@ -298,7 +314,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     return null;
   }
 
-  private static void sortLambdaExpressionsLast(PsiType[] paramTypes, PsiType[] argTypes) {
+  private static void sortLambdaExpressionsLast(@NotNull PsiType[] paramTypes, @NotNull PsiType[] argTypes) {
     for (int i = 0; i < argTypes.length; i++) {
       PsiType argType = argTypes[i];
       if ((argType instanceof PsiLambdaExpressionType || argType instanceof PsiMethodReferenceType) && i < argTypes.length - 1) {
@@ -315,7 +331,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     }
   }
 
-  private static Pair<PsiType, ConstraintType> getFailedInferenceConstraint(final PsiTypeParameter typeParameter) {
+  private static Pair<PsiType, ConstraintType> getFailedInferenceConstraint(@NotNull PsiTypeParameter typeParameter) {
     return new Pair<PsiType, ConstraintType>(JavaPsiFacade.getInstance(typeParameter.getProject()).getElementFactory().createType(typeParameter), ConstraintType.EQUALS);
   }
 
@@ -344,17 +360,24 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     PsiType[] substitutions = new PsiType[typeParameters.length];
     @SuppressWarnings("unchecked")
     Pair<PsiType, ConstraintType>[] constraints = new Pair[typeParameters.length];
+    PsiFile file = parent.getContainingFile();
+    final PsiManager manager = file.getManager();
+    final LanguageLevel languageLevel = PsiUtil.getLanguageLevel(file);
     for (int i = 0; i < typeParameters.length; i++) {
+      if (substitutions[i] != null) continue;
       final Pair<PsiType, ConstraintType> constraint =
         inferTypeForMethodTypeParameterInner(typeParameters[i], parameters, arguments, partialSubstitutor, null, policy);
       constraints[i] = constraint;
       if (constraint != null && constraint.getSecond() != ConstraintType.SUBTYPE) {
         substitutions[i] = constraint.getFirst();
+
+        if (substitutions[i] != null && languageLevel.isAtLeast(LanguageLevel.JDK_1_8)) { //try once more
+          partialSubstitutor = partialSubstitutor.put(typeParameters[i], substitutions[i]);
+          i = -1;
+        }
       }
     }
 
-    final LanguageLevel languageLevel = PsiUtil.getLanguageLevel(parent);
-    final PsiManager manager = parent.getManager();
     for (int i = 0; i < typeParameters.length; i++) {
       PsiTypeParameter typeParameter = typeParameters[i];
       if (substitutions[i] == null) {
@@ -375,6 +398,9 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
               final ConstraintType currentConstraintType = currentConstraint.getSecond();
               if (currentConstraintType == ConstraintType.EQUALS) {
                 substitutionFromBounds = currentSubstitution;
+                if (currentSubstitution == null) {
+                  constraints[i] = FAILED_INFERENCE;
+                }
                 break OtherParameters;
               }
               else if (currentConstraintType == ConstraintType.SUPERTYPE) {
@@ -402,35 +428,40 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
       }
     }
 
-    for (int i = 0; i < typeParameters.length; i++) {
-      PsiTypeParameter typeParameter = typeParameters[i];
-      PsiType substitution = substitutions[i];
-      if (substitution != null) continue;
+    try {
+      for (int i = 0; i < typeParameters.length; i++) {
+        PsiTypeParameter typeParameter = typeParameters[i];
+        PsiType substitution = substitutions[i];
+        if (substitution != null) continue;
 
-      Pair<PsiType, ConstraintType> constraint = constraints[i];
-      if (constraint == null) {
-        constraint = inferMethodTypeParameterFromParent(typeParameter, partialSubstitutor, parent, policy);
-      }
-      else if (constraint.getSecond() == ConstraintType.SUBTYPE) {
-        Pair<PsiType, ConstraintType> otherConstraint = inferMethodTypeParameterFromParent(typeParameter, partialSubstitutor, parent, policy);
-        if (otherConstraint != null) {
-          if (otherConstraint.getSecond() == ConstraintType.EQUALS || otherConstraint.getSecond() == ConstraintType.SUPERTYPE) {
-            constraint = otherConstraint;
+        Pair<PsiType, ConstraintType> constraint = constraints[i];
+        if (constraint == null) {
+          constraint = inferMethodTypeParameterFromParent(typeParameter, partialSubstitutor, parent, policy);
+        }
+        else if (constraint.getSecond() == ConstraintType.SUBTYPE) {
+          Pair<PsiType, ConstraintType> otherConstraint = inferMethodTypeParameterFromParent(typeParameter, partialSubstitutor, parent, policy);
+          if (otherConstraint != null) {
+            if (otherConstraint.getSecond() == ConstraintType.EQUALS || otherConstraint.getSecond() == ConstraintType.SUPERTYPE) {
+              constraint = otherConstraint;
+            }
           }
         }
-      }
 
-      if (constraint != null) {
-        substitution = constraint.getFirst();
-      }
+        if (constraint != null) {
+          substitution = constraint.getFirst();
+        }
 
-      if (substitution == null) {
-        PsiElementFactory factory = JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
-        return factory.createRawSubstitutor(partialSubstitutor, typeParameters);
+        if (substitution == null) {
+          PsiElementFactory factory = JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
+          return factory.createRawSubstitutor(partialSubstitutor, typeParameters);
+        }
+        if (substitution != PsiType.NULL) {
+          partialSubstitutor = partialSubstitutor.put(typeParameter, substitution);
+        }
       }
-      else if (substitution != PsiType.NULL) {
-        partialSubstitutor = partialSubstitutor.put(typeParameter, substitution);
-      }
+    }
+    finally {
+      GraphInferencePolicy.forget(parent);
     }
     return partialSubstitutor;
   }
@@ -504,7 +535,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     Pair<PsiType, ConstraintType> substitution = null;
     if (owner instanceof PsiMethod && parent instanceof PsiCallExpression) {
       PsiCallExpression methodCall = (PsiCallExpression)parent;
-      substitution = inferMethodTypeParameterFromParent(skipParenthesizedExprUp(methodCall.getParent()), methodCall, typeParameter, substitutor, policy);
+      substitution = inferMethodTypeParameterFromParent(PsiUtil.skipParenthesizedExprUp(methodCall.getParent()), methodCall, typeParameter, substitutor, policy);
     }
     return substitution;
   }
@@ -546,7 +577,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
       if (arg == null ||
           arg.getDeepComponentType() instanceof PsiPrimitiveType ||
           arg instanceof PsiIntersectionType ||
-          (psiClass != null && (isContraVariantPosition || !CommonClassNames.JAVA_LANG_OBJECT.equals(psiClass.getQualifiedName())))) {
+          (psiClass != null && (isContraVariantPosition || !CommonClassNames.JAVA_LANG_OBJECT.equals(psiClass.getQualifiedName()) || (arg instanceof PsiArrayType)))) {
         PsiType bound = intersectAllExtends(typeParam, arg);
         return new Pair<PsiType, ConstraintType>(bound, ConstraintType.SUPERTYPE);
       }
@@ -582,10 +613,11 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
   @Nullable
   private static Pair<PsiType, ConstraintType> inferSubstitutionFromLambda(PsiTypeParameter typeParam,
                                                                            PsiLambdaExpressionType arg,
-                                                                           PsiType lowerBound) {
+                                                                           PsiType lowerBound,
+                                                                           PsiSubstitutor partialSubstitutor) {
     final PsiLambdaExpression lambdaExpression = arg.getExpression();
     if (PsiUtil.getLanguageLevel(lambdaExpression).isAtLeast(LanguageLevel.JDK_1_8)) {
-      final PsiElement parent = skipParenthesizedExprUp(lambdaExpression.getParent());
+      final PsiElement parent = PsiUtil.skipParenthesizedExprUp(lambdaExpression.getParent());
       if (parent instanceof PsiExpressionList) {
         final PsiExpressionList expressionList = (PsiExpressionList)parent;
         final Map<PsiElement, Pair<PsiMethod, PsiSubstitutor>> methodMap = MethodCandidateInfo.CURRENT_CANDIDATE.get();
@@ -595,11 +627,14 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
           if (i < 0) return null;
           final PsiParameter[] parameters = pair.first.getParameterList().getParameters();
           if (parameters.length <= i) return null;
-          return inferConstraintFromFunctionalInterfaceMethod(typeParam, lambdaExpression, pair.second.substitute(parameters[i].getType()), lowerBound);
+          final PsiSubstitutor combinedSubst = pair.second.putAll(partialSubstitutor);
+          methodMap.put(expressionList, Pair.create(pair.first, combinedSubst));
+          return inferConstraintFromFunctionalInterfaceMethod(typeParam, lambdaExpression, combinedSubst.substitute(parameters[i].getType()), lowerBound);
         }
       }
       else {
-        return inferConstraintFromFunctionalInterfaceMethod(typeParam, lambdaExpression, lambdaExpression.getFunctionalInterfaceType(), lowerBound);
+        return inferConstraintFromFunctionalInterfaceMethod(typeParam, lambdaExpression,
+                                                            partialSubstitutor.substitute(lambdaExpression.getFunctionalInterfaceType()), lowerBound);
       }
     }
     return null;
@@ -608,7 +643,9 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
   @Nullable
   private static Pair<PsiType, ConstraintType> inferConstraintFromFunctionalInterfaceMethod(final PsiTypeParameter typeParam,
                                                                                             final PsiMethodReferenceExpression methodReferenceExpression,
-                                                                                            final PsiType functionalInterfaceType) {
+                                                                                            final PsiType functionalInterfaceType,
+                                                                                            final PsiSubstitutor partialSubstitutor,
+                                                                                            final ParameterTypeInferencePolicy policy) {
     final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
     final PsiMethod functionalInterfaceMethod = LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
     if (functionalInterfaceMethod != null) {
@@ -669,13 +706,20 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
           } else {
             argType = methReferenceResolveResult.getSubstitutor().substitute(subst.substitute(method.getReturnType()));
           }
-          return getSubstitutionForTypeParameterConstraint(typeParam, functionalInterfaceReturnType, argType, true, PsiUtil.getLanguageLevel(functionalInterfaceMethod));
+          final Pair<PsiType, ConstraintType> typeParameterConstraint =
+            getSubstitutionForTypeParameterConstraint(typeParam, functionalInterfaceReturnType, argType, true, PsiUtil.getLanguageLevel(functionalInterfaceMethod));
+          if (typeParameterConstraint != null && typeParameterConstraint.getSecond() != ConstraintType.EQUALS && method.isConstructor()) {
+            final Pair<PsiType, ConstraintType> constraintFromParent =
+              inferMethodTypeParameterFromParent(typeParam, partialSubstitutor, methodReferenceExpression.getParent().getParent(), policy);
+            if (constraintFromParent != null && constraintFromParent.getSecond() == ConstraintType.EQUALS) return constraintFromParent;
+          }
+          return typeParameterConstraint;
         }
       }
     }
     return null;
   }
-  
+
   @Nullable
   private static Pair<PsiType, ConstraintType> inferConstraintFromFunctionalInterfaceMethod(PsiTypeParameter typeParam,
                                                                                             final PsiLambdaExpression lambdaExpression,
@@ -690,14 +734,6 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
 
       final PsiParameter[] methodParameters = method.getParameterList().getParameters();
       if (methodParamsDependOn(typeParam, lambdaExpression, functionalInterfaceType, methodParameters, subst)) {
-        if (lowerBound != PsiType.NULL) {
-          return null;
-        }
-        return getFailedInferenceConstraint(typeParam);
-      }
-
-      final Set<PsiParameterList> lists = LambdaUtil.ourParams.get();
-      if (lists != null && lists.contains(lambdaExpression.getParameterList())){
         return null;
       }
 
@@ -706,14 +742,20 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
         Pair<PsiType, ConstraintType> constraint = null;
         final List<PsiExpression> expressions = LambdaUtil.getReturnExpressions(lambdaExpression);
         for (final PsiExpression expression : expressions) {
-          final boolean independent = LambdaUtil.isFreeFromTypeInferenceArgs(methodParameters, lambdaExpression, expression, subst, functionalInterfaceType, typeParam);
+          final boolean independent = lambdaExpression.hasFormalParameterTypes() || LambdaUtil.isFreeFromTypeInferenceArgs(methodParameters, lambdaExpression, expression, subst, functionalInterfaceType, typeParam);
           if (!independent) {
             if (lowerBound != PsiType.NULL) {
               return null;
             }
             continue;
           }
-          PsiType exprType = expression.getType();
+          if (expression instanceof PsiReferenceExpression && ((PsiReferenceExpression)expression).resolve() == null) continue;
+          PsiType exprType = ourGraphGuard.doPreventingRecursion(expression, true, new Computable<PsiType>() {
+            @Override
+            public PsiType compute() {
+              return expression.getType();
+            }
+          });
           if (exprType instanceof PsiLambdaParameterType) {
             final PsiParameter parameter = ((PsiLambdaParameterType)exprType).getParameter();
             final int parameterIndex = lambdaExpression.getParameterList().getParameterIndex(parameter);
@@ -723,6 +765,8 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
           } else if (exprType instanceof PsiLambdaExpressionType) {
             return inferConstraintFromFunctionalInterfaceMethod(typeParam, ((PsiLambdaExpressionType)exprType).getExpression(), returnType,
                                                                 lowerBound);
+          } else if (exprType == null && independent) {
+            return null;
           }
 
           if (exprType == null){
@@ -777,7 +821,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     final PsiParameter[] methodParameters = method.getParameterList().getParameters();
     PsiType[] methodParamTypes = new PsiType[methodParameters.length];
     for (int i = 0; i < methodParameters.length; i++) {
-      methodParamTypes[i] = subst.substitute(methodParameters[i].getType());
+      methodParamTypes[i] = GenericsUtil.eliminateWildcards(subst.substitute(methodParameters[i].getType()));
     }
     return inferTypeForMethodTypeParameterInner(typeParam, methodParamTypes, lambdaArgs, subst, null, DefaultParameterTypeInferencePolicy.INSTANCE);
   }
@@ -882,7 +926,9 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
 
       PsiClassType.ClassResolveResult argResult = ((PsiClassType)arg).resolveGenerics();
       PsiClass argClass = argResult.getElement();
-      if (argClass != paramClass) return null;
+      if (argClass != paramClass) {
+        return inferBySubtypingConstraint(patternType, constraintType, depth, paramClass, argClass);
+      }
 
       Pair<PsiType,ConstraintType> wildcardCaptured = null;
       for (PsiTypeParameter typeParameter : PsiUtil.typeParametersIterable(paramClass)) {
@@ -918,51 +964,104 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     return null;
   }
 
-  private static Pair<PsiType, ConstraintType> inferMethodTypeParameterFromParent(PsiElement parent,
-                                                                                  PsiCallExpression methodCall,
+  private static final Key<Boolean> inferSubtyping = Key.create("infer.subtyping.marker");
+  private static Pair<PsiType, ConstraintType> inferBySubtypingConstraint(PsiType patternType,
+                                                                          ConstraintType constraintType,
+                                                                          int depth,
+                                                                          PsiClass paramClass,
+                                                                          PsiClass argClass) {
+    if (argClass instanceof PsiTypeParameter && paramClass instanceof PsiTypeParameter && PsiUtil.isLanguageLevel8OrHigher(argClass)) {
+      final Boolean alreadyInferBySubtyping = paramClass.getCopyableUserData(inferSubtyping);
+      if (alreadyInferBySubtyping != null) return null;
+      final PsiClassType[] argExtendsListTypes = argClass.getExtendsListTypes();
+      final PsiClassType[] paramExtendsListTypes = paramClass.getExtendsListTypes();
+      if (argExtendsListTypes.length == paramExtendsListTypes.length) {
+        try {
+          paramClass.putCopyableUserData(inferSubtyping, true);
+          for (int i = 0; i < argExtendsListTypes.length; i++) {
+            PsiClassType argBoundType = argExtendsListTypes[i];
+            PsiClassType paramBoundType = paramExtendsListTypes[i];
+            final PsiClassType.ClassResolveResult argResolveResult = argBoundType.resolveGenerics();
+            final PsiClassType.ClassResolveResult paramResolveResult = paramBoundType.resolveGenerics();
+            final PsiClass paramBoundClass = paramResolveResult.getElement();
+            final PsiClass argBoundClass = argResolveResult.getElement();
+            if (argBoundClass != null && paramBoundClass != null && paramBoundClass != argBoundClass) {
+              if (argBoundClass.isInheritor(paramBoundClass, true)) {
+                final PsiSubstitutor superClassSubstitutor =
+                  TypeConversionUtil.getSuperClassSubstitutor(paramBoundClass, argBoundClass, argResolveResult.getSubstitutor());
+                argBoundType = JavaPsiFacade.getElementFactory(argClass.getProject()).createType(paramBoundClass, superClassSubstitutor);
+              } else {
+                return null;
+              }
+            }
+            final Pair<PsiType, ConstraintType> constraint =
+              getSubstitutionForTypeParameterInner(paramBoundType, argBoundType, patternType, constraintType, depth);
+            if (constraint != null) {
+              return constraint;
+            }
+          }
+        }
+        finally {
+          paramClass.putCopyableUserData(inferSubtyping, null);
+        }
+      }
+    }
+    return null;
+  }
+
+  private static Pair<PsiType, ConstraintType> inferMethodTypeParameterFromParent(final PsiElement parent,
+                                                                                  PsiExpression methodCall,
                                                                                   final PsiTypeParameter typeParameter,
                                                                                   PsiSubstitutor substitutor,
                                                                                   ParameterTypeInferencePolicy policy) {
     Pair<PsiType, ConstraintType> constraint = null;
-    PsiType expectedType = null;
+    PsiType expectedType = PsiTypesUtil.getExpectedTypeByParent(methodCall);
 
-    if (parent instanceof PsiVariable) {
-      if (methodCall.equals(skipParenthesizedExprDown(((PsiVariable)parent).getInitializer()))) {
-        expectedType = ((PsiVariable)parent).getType();
-      }
-    }
-    else if (parent instanceof PsiAssignmentExpression) {
-      if (methodCall.equals(skipParenthesizedExprDown(((PsiAssignmentExpression)parent).getRExpression()))) {
-        expectedType = ((PsiAssignmentExpression)parent).getLExpression().getType();
-      }
-    }
-    else if (parent instanceof PsiReturnStatement) {
-      final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(parent, PsiLambdaExpression.class);
-      if (lambdaExpression != null) {
-        expectedType = LambdaUtil.getFunctionalInterfaceReturnType(lambdaExpression.getFunctionalInterfaceType());
-        if (expectedType == null) {
+    if (expectedType == null) {
+      if (parent instanceof PsiReturnStatement) {
+        final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(parent, PsiLambdaExpression.class);
+        if (lambdaExpression != null) {
           return getFailedInferenceConstraint(typeParameter);
         }
-      } else {
-        PsiMethod method = PsiTreeUtil.getParentOfType(parent, PsiMethod.class);
-        if (method != null) {
-          expectedType = method.getReturnType();
+      }
+      else if (parent instanceof PsiExpressionList) {
+        final PsiElement pParent = parent.getParent();
+        if (pParent instanceof PsiCallExpression && parent.equals(((PsiCallExpression)pParent).getArgumentList())) {
+          constraint = policy.inferTypeConstraintFromCallContext(methodCall, (PsiExpressionList)parent, (PsiCallExpression)pParent, typeParameter);
+          if (constraint == null && PsiUtil.isLanguageLevel8OrHigher(methodCall)) {
+            constraint = graphInferenceFromCallContext(methodCall, typeParameter, (PsiCallExpression)pParent);
+            if (constraint != null) {
+              final PsiType constraintFirst = constraint.getFirst();
+              if (constraintFirst == null || constraintFirst.equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
+                constraint = null;
+              }
+            }
+          }
+        }
+      } else if (parent instanceof PsiLambdaExpression) {
+        expectedType = ourGraphGuard.doPreventingRecursion(methodCall, true, new Computable<PsiType>() {
+          @Override
+          public PsiType compute() {
+            return LambdaUtil.getFunctionalInterfaceReturnType(((PsiLambdaExpression)parent).getFunctionalInterfaceType());
+          }
+        });
+        if (expectedType == null) {
+          return null;
+        }
+        expectedType = GenericsUtil.eliminateWildcards(expectedType);
+      } else if (parent instanceof PsiConditionalExpression) {
+        if (PsiUtil.isLanguageLevel8OrHigher(parent)) {
+          try {
+            final Pair<PsiType, ConstraintType> pair = inferFromConditionalExpression(parent, methodCall, typeParameter, substitutor, policy);
+            if (pair != null) {
+              return pair;
+            }
+          }
+          finally {
+            GraphInferencePolicy.forget(parent);
+          }
         }
       }
-    }
-    else if (parent instanceof PsiExpressionList) {
-      final PsiElement pParent = parent.getParent();
-      if (pParent instanceof PsiCallExpression && parent.equals(((PsiCallExpression)pParent).getArgumentList())) {
-        constraint = policy.inferTypeConstraintFromCallContext(methodCall, (PsiExpressionList)parent, (PsiCallExpression)pParent,
-                                                               typeParameter);
-      }
-    } else if (parent instanceof PsiLambdaExpression) {
-      expectedType = LambdaUtil.getFunctionalInterfaceReturnType(((PsiLambdaExpression)parent).getFunctionalInterfaceType());
-      if (expectedType == null) {
-        return getFailedInferenceConstraint(typeParameter);
-      }
-    } else if (parent instanceof PsiTypeCastExpression) {
-      expectedType = ((PsiTypeCastExpression)parent).getType();
     }
 
     final PsiManager manager = typeParameter.getManager();
@@ -970,7 +1069,7 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
     PsiType returnType = null;
     if (constraint == null) {
       if (expectedType == null) {
-        expectedType = policy.getDefaultExpectedType(methodCall);
+        expectedType = methodCall instanceof PsiCallExpression ? policy.getDefaultExpectedType((PsiCallExpression)methodCall) : null;
       }
 
       returnType = ((PsiMethod)typeParameter.getOwner()).getReturnType();
@@ -995,77 +1094,176 @@ public class PsiResolveHelperImpl implements PsiResolveHelper {
 
     final Pair<PsiType, ConstraintType> result;
     if (constraint == null) {
-
-      final PsiExpressionList argumentList = methodCall.getArgumentList();
-      if (argumentList != null && PsiUtil.getLanguageLevel(argumentList).isAtLeast(LanguageLevel.JDK_1_8)) {
-        for (PsiExpression expression : argumentList.getExpressions()) {
-          if (expression instanceof PsiLambdaExpression || expression instanceof PsiMethodReferenceExpression) {
-            final PsiType functionalInterfaceType = LambdaUtil.getFunctionalInterfaceType(expression, false);
-            if (functionalInterfaceType == null || PsiUtil.resolveClassInType(functionalInterfaceType) == typeParameter){
-              return getFailedInferenceConstraint(typeParameter);
-            }
-            final PsiMethod method = LambdaUtil.getFunctionalInterfaceMethod(functionalInterfaceType);
-
-            final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
-            if (method == null || methodParamsDependOn(typeParameter, expression, 
-                                                       functionalInterfaceType, method.getParameterList().getParameters(),
-                                                       LambdaUtil.getSubstitutor(method, resolveResult))) {
-              if (expression instanceof PsiMethodReferenceExpression) {
+      if (methodCall instanceof PsiCallExpression) {
+        final PsiExpressionList argumentList = ((PsiCallExpression)methodCall).getArgumentList();
+        if (argumentList != null && PsiUtil.getLanguageLevel(argumentList).isAtLeast(LanguageLevel.JDK_1_8)) {
+          for (PsiExpression expression : argumentList.getExpressions()) {
+            if (expression instanceof PsiLambdaExpression || expression instanceof PsiMethodReferenceExpression) {
+              final PsiType functionalInterfaceType = LambdaUtil.getFunctionalInterfaceType(expression, false);
+              if (functionalInterfaceType == null || PsiUtil.resolveClassInType(functionalInterfaceType) == typeParameter){
                 return getFailedInferenceConstraint(typeParameter);
               }
-              return null;
+              final PsiMethod method = LambdaUtil.getFunctionalInterfaceMethod(functionalInterfaceType);
+
+              final PsiClassType.ClassResolveResult resolveResult = PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
+              if (method == null || methodParamsDependOn(typeParameter, expression,
+                                                         functionalInterfaceType, method.getParameterList().getParameters(),
+                                                         LambdaUtil.getSubstitutor(method, resolveResult))) {
+                if (expression instanceof PsiMethodReferenceExpression) {
+                  return getFailedInferenceConstraint(typeParameter);
+                }
+                return null;
+              }
+              final Pair<PsiType, ConstraintType> inferredExceptionTypeConstraint = inferExceptionConstrains(typeParameter, expression, method, resolveResult.getSubstitutor());
+              if (inferredExceptionTypeConstraint != null) {
+                return inferredExceptionTypeConstraint;
+              }
             }
           }
         }
+
+        PsiClassType[] superTypes = typeParameter.getSuperTypes();
+        if (superTypes.length == 0) return null;
+        PsiType superType = substitutor.substitute(superTypes[0]);
+        if (superType instanceof PsiClassType && ((PsiClassType)superType).isRaw()) {
+          superType = TypeConversionUtil.erasure(superType);
+        }
+        if (superType == null) superType = PsiType.getJavaLangObject(manager, scope);
+        if (superType == null) return null;
+        return policy.getInferredTypeWithNoConstraint(manager, superType);
       }
-
-      final PsiSubstitutor finalSubstitutor = substitutor.put(typeParameter, null);
-      PsiClassType[] superTypes = typeParameter.getSuperTypes();
-      if (superTypes.length == 0) return null;
-      PsiType superType = finalSubstitutor.substitute(superTypes[0]);
-      if (superType == null) superType = PsiType.getJavaLangObject(manager, scope);
-      if (superType == null) return null;
-      return policy.getInferredTypeWithNoConstraint(manager, superType);
+      return null;
     }
-    else {
-      PsiType guess = constraint.getFirst();
-      guess = policy.adjustInferredType(manager, guess, constraint.getSecond());
+    PsiType guess = constraint.getFirst();
+    guess = policy.adjustInferredType(manager, guess, constraint.getSecond());
 
-      //The following code is the result of deep thought, do not shit it out before discussing with [ven]
-      if (returnType instanceof PsiClassType && typeParameter.equals(((PsiClassType)returnType).resolve())) {
-        PsiClassType[] extendsTypes = typeParameter.getExtendsListTypes();
-        PsiSubstitutor newSubstitutor = substitutor.put(typeParameter, guess);
-        for (PsiClassType extendsType1 : extendsTypes) {
-          PsiType extendsType = newSubstitutor.substitute(extendsType1);
-          if (guess != null && !extendsType.isAssignableFrom(guess)) {
-            if (guess.isAssignableFrom(extendsType)) {
-              guess = extendsType;
-              newSubstitutor = substitutor.put(typeParameter, guess);
-            }
-            else {
-              break;
-            }
+    //The following code is the result of deep thought, do not shit it out before discussing with [ven]
+    if (returnType instanceof PsiClassType && typeParameter.equals(((PsiClassType)returnType).resolve())) {
+      PsiClassType[] extendsTypes = typeParameter.getExtendsListTypes();
+      PsiSubstitutor newSubstitutor = substitutor.put(typeParameter, guess);
+      for (PsiClassType extendsType1 : extendsTypes) {
+        PsiType extendsType = newSubstitutor.substitute(extendsType1);
+        if (guess != null && !extendsType.isAssignableFrom(guess)) {
+          if (guess.isAssignableFrom(extendsType)) {
+            guess = extendsType;
+            newSubstitutor = substitutor.put(typeParameter, guess);
+          }
+          else {
+            break;
           }
         }
       }
-
-      result = new Pair<PsiType, ConstraintType>(guess, constraint.getSecond());
     }
+
+    result = new Pair<PsiType, ConstraintType>(guess, constraint.getSecond());
     return result;
   }
 
-  @Nullable
-  public static PsiExpression skipParenthesizedExprDown(PsiExpression initializer) {
-    while (initializer instanceof PsiParenthesizedExpression) {
-      initializer = ((PsiParenthesizedExpression)initializer).getExpression();
-    }
-    return initializer;
+  private static boolean checkSameExpression(PsiExpression templateExpr, final PsiExpression expression) {
+    return templateExpr.equals(PsiUtil.skipParenthesizedExprDown(expression));
   }
 
-  public static PsiElement skipParenthesizedExprUp(PsiElement parent) {
-    while (parent instanceof PsiParenthesizedExpression) {
-      parent = parent.getParent();
+  private static Pair<PsiType, ConstraintType> inferExceptionConstrains(PsiTypeParameter typeParameter,
+                                                                        PsiExpression expression,
+                                                                        PsiMethod method,
+                                                                        PsiSubstitutor substitutor) {
+    final PsiClassType[] declaredExceptions = method.getThrowsList().getReferencedTypes();
+    for (PsiClassType exception : declaredExceptions) {
+      final PsiType substitute = substitutor.substitute(exception);
+      if (PsiUtil.resolveClassInType(substitute) == typeParameter) {
+        if (expression instanceof PsiLambdaExpression) {
+          final PsiElement body = ((PsiLambdaExpression)expression).getBody();
+          if (body != null) {
+            final List<PsiClassType> unhandledExceptions = ExceptionUtil.getUnhandledExceptions(body);
+            if (unhandledExceptions.isEmpty()) {
+              return inferUncheckedException(typeParameter, exception, method);
+            }
+          }
+        }
+        else if (expression instanceof PsiMethodReferenceExpression) {
+          final PsiElement resolve = ((PsiMethodReferenceExpression)expression).resolve();
+          if (resolve instanceof PsiMethod) {
+            final PsiClassType[] declaredThrowsList = ((PsiMethod)resolve).getThrowsList().getReferencedTypes();
+            for (PsiClassType psiClassType : declaredThrowsList) {
+              if (!ExceptionUtil.isUncheckedException(psiClassType)) return null;
+            }
+            return inferUncheckedException(typeParameter, exception, method);
+          }
+        }
+        break;
+      }
     }
-    return parent;
+    return null;
+  }
+
+  private static Pair<PsiType, ConstraintType> inferUncheckedException(PsiTypeParameter typeParameter,
+                                                                       PsiClassType exception,
+                                                                       PsiMethod method) {
+    final Project project = typeParameter.getProject();
+    final PsiClass runtimeException = JavaPsiFacade.getInstance(project).findClass(CommonClassNames.JAVA_LANG_RUNTIME_EXCEPTION, method.getResolveScope());
+    if (runtimeException != null) {
+      for (PsiType superType : exception.getSuperTypes()) {
+        if (!InheritanceUtil.isInheritorOrSelf(runtimeException, PsiUtil.resolveClassInType(superType), true)) {
+          return getFailedInferenceConstraint(typeParameter);
+        }
+      }
+      return Pair.<PsiType, ConstraintType>create(JavaPsiFacade.getElementFactory(project).createType(runtimeException, PsiSubstitutor.EMPTY), ConstraintType.EQUALS);
+    }
+    return null;
+  }
+
+  private static Pair<PsiType, ConstraintType> inferFromConditionalExpression(PsiElement parent,
+                                                                              PsiExpression methodCall,
+                                                                              PsiTypeParameter typeParameter,
+                                                                              PsiSubstitutor substitutor,
+                                                                              ParameterTypeInferencePolicy policy) {
+    Pair<PsiType, ConstraintType> pair =
+      inferMethodTypeParameterFromParent(PsiUtil.skipParenthesizedExprUp(parent.getParent()), (PsiExpression)parent, typeParameter, substitutor, policy);
+    if (pair == null) {
+      final PsiExpression thenExpression = ((PsiConditionalExpression)parent).getThenExpression();
+      final PsiExpression elseExpression = ((PsiConditionalExpression)parent).getElseExpression();
+      final PsiType[] paramTypes = {((PsiMethod)typeParameter.getOwner()).getReturnType()};
+      if (methodCall.equals(PsiUtil.skipParenthesizedExprDown(elseExpression)) && thenExpression != null) {
+        final PsiType thenType = ourGraphGuard.doPreventingRecursion(parent, true, new Computable<PsiType>() {
+          @Override
+          public PsiType compute() {
+            return thenExpression.getType();
+          }
+        });
+        if (thenType != null) {
+          pair = inferTypeForMethodTypeParameterInner(typeParameter, paramTypes, new PsiType[] {thenType}, substitutor, null, policy);
+        }
+      } else if (methodCall.equals(PsiUtil.skipParenthesizedExprDown(thenExpression)) && elseExpression != null) {
+        final PsiType elseType = ourGraphGuard.doPreventingRecursion(parent, true, new Computable<PsiType>() {
+          @Override
+          public PsiType compute() {
+            return elseExpression.getType();
+          }
+        });
+        if (elseType != null) {
+          pair = inferTypeForMethodTypeParameterInner(typeParameter, paramTypes, new PsiType[] {elseType}, substitutor, null, policy);
+        }
+      }
+    }
+    return pair;
+  }
+
+  private static final ProcessCandidateParameterTypeInferencePolicy GRAPH_INFERENCE_POLICY = new GraphInferencePolicy();
+
+  private static Pair<PsiType, ConstraintType> graphInferenceFromCallContext(@NotNull final PsiExpression methodCall,
+                                                                             @NotNull final PsiTypeParameter typeParameter,
+                                                                             @NotNull final PsiCallExpression parentCall) {
+    if (Registry.is("disable.graph.inference", false)) return null;
+    final PsiExpressionList argumentList = parentCall.getArgumentList();
+    if (PsiDiamondType.ourDiamondGuard.currentStack().contains(parentCall)) {
+      PsiDiamondType.ourDiamondGuard.prohibitResultCaching(parentCall);
+      return FAILED_INFERENCE;
+    }
+    return ourGraphGuard.doPreventingRecursion(methodCall, true, new Computable<Pair<PsiType, ConstraintType>>() {
+      @Override
+      public Pair<PsiType, ConstraintType> compute() {
+        return GRAPH_INFERENCE_POLICY.inferTypeConstraintFromCallContext(methodCall, argumentList, parentCall, typeParameter);
+      }
+    });
   }
 }

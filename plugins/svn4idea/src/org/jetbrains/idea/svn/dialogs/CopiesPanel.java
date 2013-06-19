@@ -28,14 +28,17 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.DottedBorder;
+import com.intellij.ui.JBColor;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.ui.components.labels.LinkListener;
-import com.intellij.ui.table.JBTable;
+import com.intellij.util.Consumer;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.io.EqualityPolicy;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.NestedCopyType;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.WorkingCopyFormat;
@@ -43,6 +46,7 @@ import org.jetbrains.idea.svn.actions.CleanupWorker;
 import org.jetbrains.idea.svn.actions.SelectBranchPopup;
 import org.jetbrains.idea.svn.branchConfig.SvnBranchConfigurationNew;
 import org.jetbrains.idea.svn.checkout.SvnCheckoutProvider;
+import org.jetbrains.idea.svn.integrate.QuickMergeInteractionImpl;
 import org.tmatesoft.svn.core.SVNDepth;
 import org.tmatesoft.svn.core.internal.util.SVNPathUtil;
 import org.tmatesoft.svn.core.wc.SVNRevision;
@@ -51,15 +55,14 @@ import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableColumn;
 import java.awt.*;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.File;
-import java.util.*;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class CopiesPanel {
@@ -122,14 +125,23 @@ public class CopiesPanel {
         ApplicationManager.getApplication().invokeLater(runnable, ModalityState.NON_MODAL);
       }
     };
-    final Runnable refreshOnPooled = new Runnable() {
+    final Consumer<Boolean> refreshOnPooled = new Consumer<Boolean>() {
       @Override
-      public void run() {
-        if (ApplicationManager.getApplication().isUnitTestMode()) {
-          refreshView.run();
-        }
-        else {
-          ApplicationManager.getApplication().executeOnPooledThread(refreshView);
+      public void consume(Boolean somethingNew) {
+        if (Boolean.TRUE.equals(somethingNew)) {
+          if (ApplicationManager.getApplication().isUnitTestMode()) {
+            refreshView.run();
+          }
+          else {
+            ApplicationManager.getApplication().executeOnPooledThread(refreshView);
+          }
+        } else {
+          ApplicationManager.getApplication().invokeLater(new Runnable() {
+            @Override
+            public void run() {
+              myRefreshLabel.setEnabled(true);
+            }
+          }, ModalityState.NON_MODAL);
         }
       }
     };
@@ -146,7 +158,7 @@ public class CopiesPanel {
       @Override
       public void linkSelected(LinkLabel aSource, Object aLinkData) {
         if (myRefreshLabel.isEnabled()) {
-          myVcs.invokeRefreshSvnRoots(true);
+          myVcs.invokeRefreshSvnRoots();
           myRefreshLabel.setEnabled(false);
         }
       }
@@ -158,7 +170,7 @@ public class CopiesPanel {
     vBar.setUnitIncrement(vBar.getUnitIncrement() * 5);
     myHolder.setBorder(null);
     setFocusableForLinks(myRefreshLabel);
-    refreshOnPooled.run();
+    refreshOnPooled.consume(true);
     initView();
   }
 
@@ -197,7 +209,7 @@ public class CopiesPanel {
               final int result =
                 Messages.showOkCancelDialog(myVcs.getProject(), "You are going to checkout into '" + wcInfo.getPath() + "' with 'infinity' depth.\n" +
                                                         "This will update your working copy to HEAD revision as well.",
-                                    "Set working copy infinity depth",
+                                    "Set Working Copy Infinity Depth",
                                     Messages.getWarningIcon());
               if (result == 0) {
                 // update of view will be triggered by roots changed event
@@ -250,6 +262,7 @@ public class CopiesPanel {
     myPanel.repaint();
   }
 
+  @SuppressWarnings("MethodMayBeStatic")
   private String formatWc(WCInfo info) {
     final StringBuilder sb = new StringBuilder().append("<html><head>").append(UIUtil.getCssFontDeclaration(UIUtil.getLabelFont()))
       .append("</head><body><table bgColor=\"").append(ColorUtil.toHex(UIUtil.getPanelBackground())).append("\">");
@@ -289,17 +302,18 @@ public class CopiesPanel {
     return sb.toString();
   }
 
-  private void mergeFrom(final WCInfo wcInfo, final VirtualFile root, final Component mergeLabel) {
+  private void mergeFrom(@NotNull final WCInfo wcInfo, @NotNull final VirtualFile root, @Nullable final Component mergeLabel) {
     SelectBranchPopup.showForBranchRoot(myProject, root, new SelectBranchPopup.BranchSelectedCallback() {
       @Override
       public void branchSelected(Project project, SvnBranchConfigurationNew configuration, String url, long revision) {
-        new QuickMerge(project, url, wcInfo, SVNPathUtil.tail(url), root).execute();
+        new QuickMerge(project, url, wcInfo, SVNPathUtil.tail(url), root).execute(new QuickMergeInteractionImpl(myProject));
       }
     }, "Select branch", mergeLabel);
   }
 
+  @SuppressWarnings("MethodMayBeStatic")
   private void setFocusableForLinks(final LinkLabel label) {
-    final Border border = new DottedBorder(new Insets(1,2,1,1), Color.black);
+    final Border border = new DottedBorder(new Insets(1,2,1,1), JBColor.BLACK);
     label.setFocusable(true);
     label.addFocusListener(new FocusAdapter() {
       @Override
@@ -326,7 +340,7 @@ public class CopiesPanel {
 
   private void changeFormat(final WCInfo wcInfo) {
     ChangeFormatDialog dialog = new ChangeFormatDialog(myProject, new File(wcInfo.getPath()), false, ! wcInfo.isIsWcRoot());
-    dialog.setData(true, wcInfo.getFormat().getOption());
+    dialog.setData(wcInfo.getFormat().getOption());
     dialog.show();
     if (! dialog.isOK()) {
       return;

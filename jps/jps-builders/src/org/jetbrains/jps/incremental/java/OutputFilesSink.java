@@ -41,7 +41,6 @@ import java.util.Set;
 */
 class OutputFilesSink implements OutputFileConsumer {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.jps.incremental.java.OutputFilesSink");
-
   private final CompileContext myContext;
   private final ModuleLevelBuilder.OutputConsumer myOutputConsumer;
   private final Callbacks.Backend myMappingsCallback;
@@ -87,16 +86,29 @@ class OutputFilesSink implements OutputFileConsumer {
 
       if (!isTemp && outKind == JavaFileObject.Kind.CLASS && !Utils.errorsDetected(myContext)) {
         // register in mappings any non-temp class file
-        final ClassReader reader = new ClassReader(content.getBuffer(), content.getOffset(), content.getLength());
-        myMappingsCallback.associate(FileUtil.toSystemIndependentName(fileObject.getFile().getPath()), sourcePath, reader);
+        try {
+          final ClassReader reader = new ClassReader(content.getBuffer(), content.getOffset(), content.getLength());
+          myMappingsCallback.associate(FileUtil.toSystemIndependentName(fileObject.getFile().getPath()), sourcePath, reader);
+        }
+        catch (Throwable e) {
+          // need this to make sure that unexpected errors in, for example, ASM will not ruin the compilation  
+          final String message = "Class dependency information may be incomplete! Error parsing generated class " + fileObject.getFile().getPath();
+          LOG.info(message, e);
+          myContext.processMessage(new CompilerMessage(
+            JavaBuilder.BUILDER_NAME, BuildMessage.Kind.WARNING, message + "\n" + CompilerMessage.getTextFromThrowable(e), sourcePath)
+          );
+        }
       }
     }
 
-    try {
-      writeToDisk(fileObject, isTemp);
-    }
-    catch (IOException e) {
-      myContext.processMessage(new CompilerMessage(JavaBuilder.BUILDER_NAME, BuildMessage.Kind.ERROR, e.getMessage()));
+    if (outKind == JavaFileObject.Kind.CLASS) {
+      // generated sources and resources are handled separately
+      try {
+        writeToDisk(fileObject, isTemp);
+      }
+      catch (IOException e) {
+        myContext.processMessage(new CompilerMessage(JavaBuilder.BUILDER_NAME, BuildMessage.Kind.ERROR, e.getMessage()));
+      }
     }
   }
 

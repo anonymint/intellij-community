@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ public class ChooseByNamePopup extends ChooseByNameBase implements ChooseByNameP
       if (selEnd > selStart) {
         myTextField.select(selStart, selEnd);
       }
-      rebuildList(myInitialIndex, 0, null, ModalityState.current());
+      rebuildList(myInitialIndex, 0, ModalityState.current(), null);
     }
     if (myOldFocusOwner != null) {
       myPreviouslyFocusedComponent = myOldFocusOwner;
@@ -348,12 +348,14 @@ public class ChooseByNamePopup extends ChooseByNameBase implements ChooseByNameP
       regex = patternToDetectLinesAndColumns;
     }
 
-    if (pattern.indexOf('#') != -1) {
-      regex = patternToDetectMembers;
-    }
+    if (getModel() instanceof GotoClassModel2) {
+      if (pattern.indexOf('#') != -1) {
+        regex = patternToDetectMembers;
+      }
 
-    if (pattern.indexOf('$') != -1) {
-      regex = patternToDetectAnonymousClasses;
+      if (pattern.indexOf('$') != -1) {
+        regex = patternToDetectAnonymousClasses;
+      }
     }
 
     if (regex != null) {

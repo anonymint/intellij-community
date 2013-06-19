@@ -23,12 +23,12 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComponentWithActions;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentManagerAdapter;
 import com.intellij.ui.content.ContentManagerEvent;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.io.File;
@@ -48,9 +48,18 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
   private final Map<AdditionalTabComponent, Content> myAdditionalContent = new HashMap<AdditionalTabComponent, Content>();
 
   private ExecutionEnvironment myEnvironment;
+  private final GlobalSearchScope mySearchScope;
 
+  /**
+   * @deprecated use {@link #LogConsoleManagerBase(com.intellij.openapi.project.Project, com.intellij.psi.search.GlobalSearchScope)}
+   */
   protected LogConsoleManagerBase(@NotNull Project project) {
+    this(project, GlobalSearchScope.allScope(project));
+  }
+
+  protected LogConsoleManagerBase(@NotNull Project project, @NotNull GlobalSearchScope searchScope) {
     myProject = project;
+    mySearchScope = searchScope;
   }
 
   protected final Project getProject() {
@@ -71,7 +80,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
   }
 
   public void addLogConsole(final String name, final String path, @NotNull Charset charset, final long skippedContent, Icon icon) {
-    doAddLogConsole(new LogConsoleImpl(myProject, new File(path), charset, skippedContent, name, false) {
+    doAddLogConsole(new LogConsoleImpl(myProject, new File(path), charset, skippedContent, name, false, mySearchScope) {
 
       @Override
       public boolean isActive() {
@@ -90,7 +99,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
                                        reader,
                                        name,
                                        false,
-                                       new DefaultLogFilterModel(myProject)) {
+                                       new DefaultLogFilterModel(myProject), mySearchScope) {
 
       @Override
       public boolean isActive() {
@@ -109,6 +118,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
     addAdditionalTabComponent(log, id, icon);
 
     getUi().addListener(new ContentManagerAdapter() {
+      @Override
       public void selectionChanged(final ContentManagerEvent event) {
         log.activate();
       }
@@ -120,6 +130,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
     return content != null && content.isSelected();
   }
 
+  @Override
   public void removeLogConsole(final String path) {
     final Content content = getUi().findContent(path);
     if (content != null) {
@@ -128,6 +139,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
     }
   }
 
+  @Override
   public void addAdditionalTabComponent(final AdditionalTabComponent tabComponent, final String id) {
     addAdditionalTabComponent(tabComponent, id, getDefaultIcon());
   }
@@ -144,6 +156,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
                                  tabComponent.getPreferredFocusableComponent());
   }
 
+  @Override
   public void removeAdditionalTabComponent(AdditionalTabComponent component) {
     Disposer.dispose(component);
     final Content content = myAdditionalContent.remove(component);
@@ -152,6 +165,7 @@ public abstract class LogConsoleManagerBase implements LogConsoleManager, Dispos
     }
   }
 
+  @Override
   public void dispose() {
     for (AdditionalTabComponent component : ArrayUtil.toObjectArray(myAdditionalContent.keySet(), AdditionalTabComponent.class)) {
       removeAdditionalTabComponent(component);

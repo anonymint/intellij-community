@@ -31,9 +31,13 @@ import com.intellij.openapi.roots.ex.ProjectRootManagerEx;
 import com.intellij.openapi.roots.impl.DirectoryIndex;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.containers.WeakList;
 import com.intellij.util.indexing.FileBasedIndex;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Maintains a list of files marked as plain text in a local environment (configuration). Every time a project is loaded/open, it reads
@@ -44,8 +48,7 @@ import java.util.*;
  */
 @State(name = "EnforcedPlainTextFileTypeManager", storages = {@Storage( file = StoragePathMacros.APP_CONFIG + "/plainTextFiles.xml")})
 public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager implements ProjectManagerListener {
-
-  private Set<Project> myProcessedProjects = new HashSet<Project>();
+  private final Collection<Project> myProcessedProjects = new WeakList<Project>();
   private boolean myNeedsSync = true;
 
   public EnforcedPlainTextFileTypeManager() {
@@ -54,32 +57,26 @@ public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager i
 
   public boolean isMarkedAsPlainText(VirtualFile file) {
     if (myNeedsSync) {
-      myNeedsSync = !syncWithOpenProject();
+      myNeedsSync = !syncWithOpenProjects();
     }
     return containsFile(file);
   }
 
-  public boolean syncWithOpenProject() {
+  private boolean syncWithOpenProjects() {
+    boolean success = true;
     Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
-    if (openProjects.length > 0) {
-      Project firstOpenProject = openProjects[0];
-      if (!myProcessedProjects.contains(firstOpenProject)) {
-        return syncWithProject(firstOpenProject);
+    for (Project openProject : openProjects) {
+      if (!myProcessedProjects.contains(openProject)) {
+        if (!syncWithProject(openProject)) success = false;
       }
-      return true;
     }
-    return false;
+    return success;
   }
 
-  public static boolean isApplicableFor(VirtualFile file) {
+  public static boolean isApplicableFor(@NotNull VirtualFile file) {
     if (file.isDirectory()) return false;
     FileType originalType = FileTypeManager.getInstance().getFileTypeByFileName(file.getName());
-    if (originalType.isBinary() ||
-        originalType == FileTypes.PLAIN_TEXT ||
-        originalType == StdFileTypes.JAVA) {
-      return false;
-    }
-    return true;
+    return !originalType.isBinary() && originalType != FileTypes.PLAIN_TEXT && originalType != StdFileTypes.JAVA;
   }
 
   public void markAsPlainText(VirtualFile... files) {
@@ -92,7 +89,7 @@ public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager i
     }
     fireRootsChanged(filesToSync, true);
   }
-  
+
   public void unmarkPlainText(VirtualFile... files) {
     List<VirtualFile> filesToSync = new ArrayList<VirtualFile>();
     for (VirtualFile file : files) {
@@ -126,13 +123,12 @@ public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager i
     });
   }
 
-  private static EnforcedPlainTextFileTypeManager ourInstance;
+  private static class EnforcedPlainTextFileTypeManagerHolder {
+    private static final EnforcedPlainTextFileTypeManager ourInstance = ServiceManager.getService(EnforcedPlainTextFileTypeManager.class);
+  }
 
   public static EnforcedPlainTextFileTypeManager getInstance() {
-    if (ourInstance == null) {
-      ourInstance = ServiceManager.getService(EnforcedPlainTextFileTypeManager.class);
-    }
-    return ourInstance;
+    return EnforcedPlainTextFileTypeManagerHolder.ourInstance;
   }
 
   @Override
@@ -147,9 +143,7 @@ public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager i
 
   @Override
   public void projectClosed(Project project) {
-    if (myProcessedProjects.contains(project)) {
-      myProcessedProjects.remove(project);
-    }
+    myProcessedProjects.remove(project);
   }
 
   @Override
@@ -157,18 +151,19 @@ public class EnforcedPlainTextFileTypeManager extends PersistentFileSetManager i
   }
 
   private boolean syncWithProject(Project project) {
-    if (!DirectoryIndex.getInstance(project).isInitialized()) return false;
-    myProcessedProjects.add(project);
+    if (project.isDisposed()) return false;
     ProjectPlainTextFileTypeManager projectPlainTextFileTypeManager = ProjectPlainTextFileTypeManager.getInstance(project);
     if (projectPlainTextFileTypeManager == null) return true;
     for (VirtualFile file : projectPlainTextFileTypeManager.getFiles()) {
       addFile(file);
     }
+    if (!DirectoryIndex.getInstance(project).isInitialized()) return false;
     for (VirtualFile file : getFiles()) {
       if (projectPlainTextFileTypeManager.hasProjectContaining(file)) {
         projectPlainTextFileTypeManager.addFile(file);
       }
     }
+    myProcessedProjects.add(project);
     return true;
   }
 }

@@ -22,6 +22,7 @@
  */
 package com.intellij.ide.plugins;
 
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ui.ColumnInfo;
 
 import javax.swing.*;
@@ -46,6 +47,7 @@ public class AvailablePluginsTableModel extends PluginTableModel {
 
   public static final String JETBRAINS_REPO = "JetBrains";
   private String myRepository = ALL;
+  private String myVendor = null;
 
   public AvailablePluginsTableModel() {
     super.columns = new ColumnInfo[] {
@@ -73,11 +75,23 @@ public class AvailablePluginsTableModel extends PluginTableModel {
     filter(filter);
   }
 
+  public void setVendor(String vendor) {
+    myVendor = vendor;
+    filter("");
+  }
+
   @Override
   public boolean isPluginDescriptorAccepted(IdeaPluginDescriptor descriptor) {
     final String category = descriptor.getCategory();
     if (category != null){
       if (!ALL.equals(myCategory) && !category.equals(myCategory)) return false;
+    }
+
+    if (myVendor != null) {
+      final String vendor = descriptor.getVendor();
+      if (vendor == null || !StringUtil.containsIgnoreCase(vendor, myVendor)) {
+        return false;
+      }
     }
 
     final String repositoryName = ((PluginNode)descriptor).getRepositoryName();

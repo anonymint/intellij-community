@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ public class GroovyHighlightingTest extends GrHighlightingTestBase {
     doTest();
   }
 
-  public void testShouldntImplementGroovyObjectMethods() {
+  public void testShouldNotImplementGroovyObjectMethods() {
     addGroovyObject();
     myFixture.addFileToProject("Foo.groovy", "class Foo {}");
     myFixture.testHighlighting(false, false, false, getTestName(false) + ".java");
@@ -81,9 +81,9 @@ public class GroovyHighlightingTest extends GrHighlightingTestBase {
 
   public void testAnonymousClassAbstractMethod() { doTest(); }
 
-  public void _testAnonymousClassStaticMethod() { doTest(); }
+  //public void _testAnonymousClassStaticMethod() { doTest(); }
 
-  public void testAnonymousClassShoudImplementMethods() { doTest(); }
+  public void testAnonymousClassShouldImplementMethods() { doTest(); }
 
   public void testAnonymousClassShouldImplementSubstitutedMethod() { doTest(); }
 
@@ -112,7 +112,7 @@ public class GroovyHighlightingTest extends GrHighlightingTestBase {
     doTest();
   }
 
-  public void testRawOverridedMethod() { doTest(); }
+  public void testRawOverriddenMethod() { doTest(); }
 
   public void testFQNJavaClassesUsages() {
     doTest();
@@ -128,7 +128,7 @@ public class GroovyHighlightingTest extends GrHighlightingTestBase {
     myFixture.configureByText('a.groovy', '''\
 class A {
   def foo(int... x){}
-  def foo(<error descr="Ellipsis type is not allowed here">int...</error> x, double y) {}
+  def foo(int<error descr="Ellipsis type is not allowed here">...</error> x, double y) {}
 }
 ''')
     myFixture.checkHighlighting(true, false, false)
@@ -214,9 +214,9 @@ class A {
     doTest();
   }
 
-  public void _testTestMarkupStubs() {
-    doRefTest()
-  }
+  //public void _testTestMarkupStubs() {
+  //  doRefTest()
+  //}
 
   public void testGdslWildcardTypes() {
     myFixture.configureByText("a.groovy",
@@ -245,9 +245,9 @@ class A {
     doTest();
   }
 
-  public void _testBuilderMembersAreNotUnresolved() {
-    doRefTest();
-  }
+  //public void _testBuilderMembersAreNotUnresolved() {
+  //  doRefTest();
+  //}
 
   public void testRecursiveConstructors() {
     doTest();
@@ -331,7 +331,7 @@ import pack.Foo;
 
 class Abc {
   void foo() {
-    System.out.print(new <error descr="'pack.Foo' has private access in 'pack'">Foo</error>());
+    System.out.print(new Foo()); // top-level Groovy class can't be private
   }
 }
 ''')
@@ -427,7 +427,7 @@ catch (<warning descr="Exception 'java.io.IOException' has already been caught">
     testHighlighting('''\
 try {}
 catch (e){}
-catch (<warning descr="Exception 'java.lang.Throwable' has already been caught">e</warning>){}
+catch (<warning descr="Exception 'java.lang.Exception' has already been caught">e</warning>){}
 ''')
   }
 
@@ -504,7 +504,7 @@ class A {
   static bar() {
     this.toString()
     this.getFields()
-    this.<warning descr="Cannot reference nonstatic symbol 'foo' from static context">foo</warning>()
+    this.<warning descr="Cannot reference non-static symbol 'foo' from static context">foo</warning>()
   }
 }
 ''', GrUnresolvedAccessInspection)
@@ -568,7 +568,7 @@ int method(x, y, z) {
         42
     }
     else if (z) {
-      return <error descr="Cannot assign 'String' to 'int'">'abc'</error>
+      <error descr="Cannot assign 'String' to 'int'">return</error> 'abc'
     }
     else {
       return 43
@@ -788,7 +788,7 @@ class A {
   class B {}
 }
 
-A.B foo = new <error descr="Cannot reference nonstatic symbol 'A.B' from static context">A.B</error>()
+A.B foo = new <error descr="Cannot reference non-static symbol 'A.B' from static context">A.B</error>()
 ''')
   }
 
@@ -972,6 +972,458 @@ class AgentInfo extends NodeInfo {}
 
 print new HashSet<TrackerEventsListener<AgentInfo, NodeEvent<AgentInfo>>>() //correct
 print new HashSet<TrackerEventsListener<AgentInfo, <warning descr="Type parameter 'NodeEvent<java.lang.Object>' is not in its bound; should extend 'NodeEvent<N>'">NodeEvent<Object></warning>>>() //incorrect
+''')
+  }
+
+  void testTypeInConstructor() {
+    testHighlighting('''\
+class X {
+  public <error descr="Return type element is not allowed in constructor">void</error> X() {}
+}
+''')
+  }
+
+  void testFinalMethodOverriding() {
+    testHighlighting('''\
+class A {
+    final void foo() {}
+}
+
+class B extends A{
+    <error descr="Method 'foo()' cannot override method 'foo()' in 'A'; overridden method is final">void foo()</error> {}
+}
+''')
+  }
+
+  void testWeakerMethodAccess0() {
+    testHighlighting('''\
+class A {
+    void foo() {}
+}
+
+class B extends A{
+    <error descr="Method 'foo()' cannot have weaker access privileges ('protected') than 'foo()' in 'A' ('public')">protected</error> void foo() {}
+}
+''')
+  }
+
+  void testWeakerMethodAccess1() {
+    testHighlighting('''\
+class A {
+    void foo() {}
+}
+
+class B extends A{
+    <error descr="Method 'foo()' cannot have weaker access privileges ('private') than 'foo()' in 'A' ('public')">private</error> void foo() {}
+}
+''')
+  }
+
+  void testWeakerMethodAccess2() {
+    testHighlighting('''\
+class A {
+    public void foo() {}
+}
+
+class B extends A{
+    void foo() {} //don't highlight anything
+}
+''')
+  }
+
+  void testWeakerMethodAccess3() {
+    testHighlighting('''\
+class A {
+    protected void foo() {}
+}
+
+class B extends A{
+    <error descr="Method 'foo()' cannot have weaker access privileges ('private') than 'foo()' in 'A' ('protected')">private</error> void foo() {}
+}
+''')
+  }
+
+  void testOverriddenProperty() {
+    testHighlighting('''\
+class A {
+    final foo = 2
+}
+
+class B extends A {
+    <error descr="Method 'getFoo()' cannot override method 'getFoo()' in 'A'; overridden method is final">def getFoo()</error>{5}
+}
+''')
+  }
+
+  void testUnresolvedQualifierHighlighting() {
+    testHighlighting('''\
+<error descr="Cannot resolve symbol 'Abc'">Abc</error>.Cde abc
+''')
+  }
+
+  void testVarargParameterWithoutTypeElement() {
+    testHighlighting('''\
+def foo(def <error descr="Ellipsis type is not allowed here">...</error> vararg, def last) {}
+''')
+  }
+
+  void testTupleInstanceCreatingInDefaultConstructor() {
+    testHighlighting('''
+class Book {
+    String title
+    Author author
+
+    String toString() { "$title by $author.name" }
+}
+
+class Author {
+    String name
+}
+
+def book = new Book(title: "Other Title", author: [name: "Other Name"])
+
+assert book.toString() == 'Other Title by Other Name'
+''')
+  }
+
+  void testArrayAccessForMapProperty() {
+
+    testHighlighting('''\
+def bar() {
+    return [list:[1, 2, 3]]
+}
+
+def testConfig = bar()
+print testConfig.list[0]
+print testConfig.<warning descr="Cannot resolve symbol 'foo'">foo</warning>()
+''', true, false, false, GrUnresolvedAccessInspection)
+  }
+
+  void testGStringInjectionLFs() {
+    testHighlighting('''\
+print "<error descr="GString injection must not contain line feeds">${
+}</error>"
+
+print """${
+}"""
+
+print "<error descr="GString injection must not contain line feeds">${ """
+"""}</error>"
+''')
+  }
+
+  void testListOrMapErrors() {
+    testHighlighting('''\
+print([1])
+print([1:2])
+print(<error descr="Collection literal contains named and expression arguments at the same time">[1:2, 4]</error>)
+''')
+  }
+
+  void testDelegatesToApplicability() {
+    testHighlighting('''
+      def with(@DelegatesTo.Target Object target, @DelegatesTo Closure arg) {
+        arg.delegate = target
+        arg()
+      }
+
+      def with2(Object target, @<error descr="Missed attributes: value">DelegatesTo</error> Closure arg) {
+        arg.delegate = target
+        arg()
+      }
+''')
+  }
+
+  void testClosureParameterInferenceDoesNotWorkIfComplieStatic() {
+    addCompileStatic()
+    myFixture.enableInspections(GrUnresolvedAccessInspection)
+    testHighlighting('''
+@groovy.transform.CompileStatic
+def foo() {
+    final collector = [1, 2].find {a ->
+        a.<error descr="Cannot resolve symbol 'intValue'">intValue</error>()
+    }
+}
+''')
+  }
+
+  void testIllegalLiteralName() {
+    testHighlighting('''
+def <error descr="Illegal escape character in string literal">'a\\obc'</error>() {
+
+}
+''')
+  }
+
+  void testExceptionParameterAlreadyDeclared() {
+    testHighlighting('''
+      int missing() {
+        InputStream i = null
+
+        try {
+          return 1
+        }
+        catch(Exception <error descr="Variable 'i' already defined">i</error>) {
+          return 2
+        }
+      }
+    ''')
+  }
+
+  void testInnerAnnotationType() {
+    testHighlighting('''
+      class A {
+        @interface <error descr="Annotation type cannot be inner">X</error> {}
+      }
+    ''')
+  }
+
+  void testDuplicatingAnnotations() {
+    testHighlighting('''\
+@interface A {
+  String value()
+}
+
+@A('a')
+@A('a')
+class X{}
+
+@A('a')
+@A('ab')
+class Y{}
+
+<error descr="Duplicate modifier 'public'">public public</error> class Z {}
+''')
+  }
+
+  void testAnnotationAttribute() {
+    testHighlighting('''\
+@interface A {
+  String value() default 'a'
+  String[] values() default []
+}
+
+
+@A('abc')
+def x
+
+@A(<error descr="Expected ''abc' + 'cde'' to be an inline constant">'abc' + 'cde'</error>)
+def y
+
+class C {
+  final static String CONST1 = 'ABC'
+  final static String CONST2 = 'ABC' + 'CDE'
+  final        String CONST3 = 'ABC'
+}
+
+@A(C.CONST1)
+def z
+
+@A(<error descr="Expected ''ABC' + 'CDE'' to be an inline constant">C.CONST2</error>)
+def a
+
+@A(C.CONST3)
+def b
+
+@A(values=['a'])
+def c
+
+@A(values=<error descr="Expected ''a'+'b'' to be an inline constant">['a'+'b']</error>)
+def d
+
+@A(values=[C.CONST1])
+def e
+
+@A(values=<error descr="Expected ''ABC' + 'CDE'' to be an inline constant">[C.CONST1, C.CONST2]</error>)
+def f
+
+@interface X {
+  Class value()
+}
+
+@X(String.class)
+def g
+''')
+  }
+
+  void testDuplicateMethodsWithGenerics() {
+    testHighlighting('''\
+class A<T, E> {
+  <error descr="Method with signature foo(Object) is already defined in the class 'A'">def foo(T t)</error> {}
+  <error descr="Method with signature foo(Object) is already defined in the class 'A'">def foo(E e)</error> {}
+}
+
+class B {
+  <error descr="Method with signature foo(Object) is already defined in the class 'B'">def <T> void foo(T t)</error> {}
+  <error descr="Method with signature foo(Object) is already defined in the class 'B'">def <E> void foo(E e)</error> {}
+}
+
+class C<T, E> {
+  <error descr="Method with signature foo(Object) is already defined in the class 'C'">def foo(T t, T t2 = null)</error> {}
+  <error descr="Method with signature foo(Object) is already defined in the class 'C'">def foo(E e)</error> {}
+}
+
+class D<T, E> {
+  <error descr="Method with signature foo(Object, Object) is already defined in the class 'D'">def foo(T t, E e)</error> {}
+  <error descr="Method with signature foo(Object, Object) is already defined in the class 'D'">def foo(E t, T e)</error> {}
+  def foo(E t) {}
+}''')
+  }
+
+  void testOverriddenReturnType0() {
+    myFixture.addClass('class Base{}')
+    myFixture.addClass('class Inh extends Base{}')
+    testHighlighting('''\
+class A {
+  List<Base> foo() {}
+}
+
+class B extends A {
+  List<Inh> foo() {} //correct
+}
+''')
+  }
+
+  void testOverriddenReturnType1() {
+    myFixture.addClass('class Base extends SuperBase {}')
+    myFixture.addClass('class Inh extends Base{}')
+    testHighlighting('''\
+class A {
+  List<Base> foo() {}
+}
+
+class B extends A {
+  <error>Collection<Base></error> foo() {}
+}
+''')
+  }
+
+  void testOverriddenReturnType2() {
+    myFixture.addClass('class Base extends SuperBase {}')
+    myFixture.addClass('class Inh extends Base{}')
+    testHighlighting('''\
+class A {
+  List<Base> foo() {}
+}
+
+class B extends A {
+  <error>int</error> foo() {}
+}
+''')
+  }
+
+  void testOverriddenReturnType3() {
+    myFixture.addClass('class Base extends SuperBase {}')
+    myFixture.addClass('class Inh extends Base{}')
+    testHighlighting('''\
+class A {
+  Base[] foo() {}
+}
+
+class B extends A {
+  <error>Inh[]</error> foo() {}
+}
+''')
+  }
+
+  void testOverriddenReturnType4() {
+    myFixture.addClass('class Base extends SuperBase {}')
+    myFixture.addClass('class Inh extends Base{}')
+    testHighlighting('''\
+class A {
+  Base[] foo() {}
+}
+
+class B extends A {
+  Base[] foo() {}
+}
+''')
+  }
+
+  void testEnumConstantAsAnnotationAttribute() {
+    testHighlighting('''\
+enum A {CONST}
+
+@interface I {
+    A foo()
+}
+
+@I(foo = A.CONST) //no error
+def bar
+''')
+  }
+
+  void testUnassignedFieldAsAnnotationAttribute() {
+    testHighlighting('''\
+interface A {
+  String CONST
+}
+
+@interface I {
+    String foo()
+}
+
+@I(foo = <error descr="Expected 'A.CONST' to be an inline constant">A.CONST</error>)
+def bar
+''')
+  }
+
+ void testFinalFieldRewrite() {
+   testHighlighting('''\
+class A {
+  final foo = 1
+
+  def A() {
+    foo = 2 //no error
+  }
+
+  def foo() {
+    <error descr="Cannot assign a value to final field 'foo'">foo</error> = 2
+  }
+}
+
+new A().foo = 2 //no error
+''')
+ }
+
+  void testStaticFinalFieldRewrite() {
+    testHighlighting('''\
+class A {
+  static final foo = 1
+
+  def A() {
+    <error descr="Cannot assign a value to final field 'foo'">foo</error> = 2
+  }
+
+  static {
+    foo = 2 //no error
+  }
+
+  def foo() {
+    <error descr="Cannot assign a value to final field 'foo'">foo</error> = 2
+  }
+
+  static def bar() {
+    <error descr="Cannot assign a value to final field 'foo'">foo</error> = 2
+  }
+}
+
+A.foo = 3 //no error
+''')
+  }
+
+  void testSOEIfExtendsItself() {
+    testHighlighting('''\
+<error descr="Cyclic inheritance involving 'A'"><error descr="Method 'invokeMethod' is not implemented">class A extends A</error></error> {
+  def foo
+}
+
+<error descr="Cyclic inheritance involving 'B'"><error descr="Method 'invokeMethod' is not implemented">class B extends C</error></error> {
+  def foo
+}
+
+<error descr="Cyclic inheritance involving 'C'"><error descr="Method 'invokeMethod' is not implemented">class C extends B</error></error> {
+}
 ''')
   }
 }

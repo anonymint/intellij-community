@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,11 @@ import java.awt.*;
 public class DarculaTextBorder implements Border, UIResource {
   @Override
   public Insets getBorderInsets(Component c) {
-    return new InsetsUIResource(4, 7, 4, 7);
+    if (DarculaTextFieldUI.isSearchField(c)) {
+      return new InsetsUIResource(5, 7 + 16 + 3, 5, 7 + 16);
+    } else {
+      return new InsetsUIResource(5, 7, 5, 7);
+    }
   }
 
   @Override
@@ -41,6 +45,7 @@ public class DarculaTextBorder implements Border, UIResource {
 
   @Override
   public void paintBorder(Component c, Graphics g2, int x, int y, int width, int height) {
+    if (DarculaTextFieldUI.isSearchField(c)) return;
     Graphics2D g = ((Graphics2D)g2);
     final GraphicsConfig config = new GraphicsConfig(g);
     g.translate(x, y);

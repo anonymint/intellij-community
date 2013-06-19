@@ -478,14 +478,23 @@ public class PsiClassImplUtil {
 
         final List<Pair<PsiMember, PsiSubstitutor>> list = allFieldsMap.get(name);
         if (list != null) {
+          boolean resolved = false;
           for (final Pair<PsiMember, PsiSubstitutor> candidate : list) {
             PsiMember candidateField = candidate.getFirst();
-            PsiSubstitutor finalSubstitutor = obtainFinalSubstitutor(candidateField.getContainingClass(), candidate.getSecond(), aClass,
+            PsiClass containingClass = candidateField.getContainingClass();
+            if (containingClass == null) {
+              LOG.error("No class for field " + candidateField.getName() + " of " + candidateField.getClass());
+              continue;
+            }
+            PsiSubstitutor finalSubstitutor = obtainFinalSubstitutor(containingClass, candidate.getSecond(), aClass,
                                                                      substitutor, factory, languageLevel);
 
-            processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, candidateField.getContainingClass());
-            if (!processor.execute(candidateField, state.put(PsiSubstitutor.KEY, finalSubstitutor))) return false;
+            processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, containingClass);
+            if (!processor.execute(candidateField, state.put(PsiSubstitutor.KEY, finalSubstitutor))) {
+              resolved = true;
+            }
           }
+          if (resolved) return false;
         }
       }
     }
@@ -509,6 +518,7 @@ public class PsiClassImplUtil {
 
           List<Pair<PsiMember, PsiSubstitutor>> list = allClassesMap.get(name);
           if (list != null) {
+            boolean resolved = false;
             for (final Pair<PsiMember, PsiSubstitutor> candidate : list) {
               PsiMember inner = candidate.getFirst();
               PsiClass containingClass = inner.getContainingClass();
@@ -516,9 +526,12 @@ public class PsiClassImplUtil {
                 PsiSubstitutor finalSubstitutor = obtainFinalSubstitutor(containingClass, candidate.getSecond(), aClass,
                                                                          substitutor, factory, languageLevel);
                 processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, containingClass);
-                if (!processor.execute(inner, state.put(PsiSubstitutor.KEY, finalSubstitutor))) return false;
+                if (!processor.execute(inner, state.put(PsiSubstitutor.KEY, finalSubstitutor))) {
+                  resolved = true;
+                }
               }
             }
+            if (resolved) return false;
           }
         }
       }
@@ -538,6 +551,7 @@ public class PsiClassImplUtil {
       Map<String, List<Pair<PsiMember, PsiSubstitutor>>> allMethodsMap = value.get(MemberType.METHOD);
       List<Pair<PsiMember, PsiSubstitutor>> list = allMethodsMap.get(name);
       if (list != null) {
+        boolean resolved = false;
         for (final Pair<PsiMember, PsiSubstitutor> candidate : list) {
           ProgressIndicatorProvider.checkCanceled();
           PsiMethod candidateMethod = (PsiMethod)candidate.getFirst();
@@ -553,7 +567,10 @@ public class PsiClassImplUtil {
                                                                    substitutor, factory, languageLevel);
           finalSubstitutor = checkRaw(isRaw, factory, candidateMethod, finalSubstitutor);
           processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, containingClass);
-          if (!processor.execute(candidateMethod, state.put(PsiSubstitutor.KEY, finalSubstitutor))) return false;
+          if (!processor.execute(candidateMethod, state.put(PsiSubstitutor.KEY, finalSubstitutor))) {
+            resolved = true;
+          }
+          if (resolved) return false;
         }
 
         if (visited != null) {

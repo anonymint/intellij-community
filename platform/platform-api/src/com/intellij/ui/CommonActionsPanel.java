@@ -41,7 +41,7 @@ public class CommonActionsPanel extends JPanel {
 
     public static Buttons[] ALL = {ADD, REMOVE, EDIT,  UP, DOWN};
 
-    Icon getIcon() {
+    public Icon getIcon() {
       switch (this) {
         case ADD:    return IconUtil.getAddIcon();
         case EDIT:    return IconUtil.getEditIcon();
@@ -122,11 +122,17 @@ public class CommonActionsPanel extends JPanel {
     if (buttonComparator != null) {
       Arrays.sort(myActions, buttonComparator);
     }
+    ArrayList<AnAction> toolbarActions = new ArrayList<AnAction>(Arrays.asList(myActions));
+    for (int i = 0; i < toolbarActions.size(); i++) {
+        if (toolbarActions.get(i) instanceof AnActionButton.CheckedAnActionButton) {
+          toolbarActions.set(i, ((AnActionButton.CheckedAnActionButton)toolbarActions.get(i)).getDelegate());
+        }
+    }
     myDecorateButtons = UIUtil.isUnderAquaLookAndFeel() && position == ActionToolbarPosition.BOTTOM;
 
     final ActionManagerEx mgr = (ActionManagerEx)ActionManager.getInstance();
     final ActionToolbar toolbar = mgr.createActionToolbar(ActionPlaces.UNKNOWN,
-                                                          new DefaultActionGroup(myActions),
+                                                          new DefaultActionGroup(toolbarActions.toArray(new AnAction[toolbarActions.size()])),
                                                           position == ActionToolbarPosition.BOTTOM || position == ActionToolbarPosition.TOP,
                                                           myDecorateButtons);
     toolbar.getComponent().setOpaque(false);

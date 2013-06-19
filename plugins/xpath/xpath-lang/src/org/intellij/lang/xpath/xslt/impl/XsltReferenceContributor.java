@@ -58,9 +58,9 @@ public class XsltReferenceContributor {
   public static class XML extends PsiReferenceContributor {
     public void registerReferenceProviders(PsiReferenceRegistrar registrar) {
       registrar.registerReferenceProvider(
-        psiElement(XmlAttributeValue.class).withParent(xmlAttribute().withLocalName(string().oneOf(
-          "name", "href", "mode", "elements", "exclude-result-prefixes", "extension-element-prefixes", "stylesheet-prefix"
-        )).withParent(xmlTag().withNamespace(XsltSupport.XSLT_NS))),
+        psiElement(XmlAttributeValue.class).withParent(
+          xmlAttribute().withLocalName("name", "href", "mode", "elements", "exclude-result-prefixes", "extension-element-prefixes", "stylesheet-prefix").withParent(
+            xmlTag().withNamespace(XsltSupport.XSLT_NS))),
         new XsltReferenceProvider());
 
       registrar.registerReferenceProvider(
@@ -98,7 +98,7 @@ public class XsltReferenceContributor {
       if (valueElement != null) {
         QuickFixAction.registerQuickFixAction(info, new CreateNSDeclarationIntentionFix(valueElement, getCanonicalText()) {
           @Override
-          public boolean showHint(Editor editor) {
+          public boolean showHint(@NotNull Editor editor) {
             return false;
           }
         });
@@ -134,6 +134,7 @@ public class XsltReferenceContributor {
       return name.equals(text) || text.endsWith(":" + name);
     }
 
+    @NotNull
     @Override
     public String getUnresolvedMessagePattern() {
       return "Unknown Type";

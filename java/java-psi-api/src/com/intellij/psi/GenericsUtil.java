@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,14 @@
 package com.intellij.psi;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
-import com.intellij.util.containers.*;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,7 +39,8 @@ public class GenericsUtil {
 
   private GenericsUtil() {}
 
-  public static PsiType getGreatestLowerBound(PsiType type1, PsiType type2) {
+  public static PsiType getGreatestLowerBound(@Nullable PsiType type1, @Nullable PsiType type2) {
+    if (type1 == null || type2 == null) return null;
     return PsiIntersectionType.createIntersection(type1, type2);
   }
 
@@ -47,6 +49,7 @@ public class GenericsUtil {
     if (TypeConversionUtil.isPrimitiveAndNotNull(type1) || TypeConversionUtil.isPrimitiveAndNotNull(type2)) return null;
     if (TypeConversionUtil.isNullType(type1)) return type2;
     if (TypeConversionUtil.isNullType(type2)) return type1;
+    if (Comparing.equal(type1, type2)) return type1;
     return getLeastUpperBound(type1, type2, new LinkedHashSet<Pair<PsiType, PsiType>>(), manager);
   }
 
@@ -150,7 +153,7 @@ public class GenericsUtil {
         if (type2 instanceof PsiWildcardType) {
           PsiWildcardType wild2 = (PsiWildcardType)type2;
           final PsiType bound2 = wild2.getBound();
-          if (bound2 == null) return wild1;
+          if (bound2 == null) return type2;
           if (wild1.isExtends() == wild2.isExtends()) {
             return wild1.isExtends() ?
                    PsiWildcardType.createExtends(manager, getLeastUpperBound(bound1, bound2, compared, manager)) :
@@ -183,18 +186,21 @@ public class GenericsUtil {
   public static PsiClass[] getLeastUpperClasses(PsiClass aClass, PsiClass bClass) {
     if (InheritanceUtil.isInheritorOrSelf(aClass, bClass, true)) return new PsiClass[]{bClass};
     Set<PsiClass> supers = new LinkedHashSet<PsiClass>();
-    getLeastUpperClassesInner(aClass, bClass, supers);
+    Set<PsiClass> visited = new HashSet<PsiClass>();
+    getLeastUpperClassesInner(aClass, bClass, supers, visited);
     return supers.toArray(new PsiClass[supers.size()]);
   }
 
-  private static void getLeastUpperClassesInner(PsiClass aClass, PsiClass bClass, Set<PsiClass> supers) {
+  private static void getLeastUpperClassesInner(PsiClass aClass, PsiClass bClass, Set<PsiClass> supers, Set<PsiClass> visited) {
     if (bClass.isInheritor(aClass, true)) {
       addSuper(supers, aClass);
     }
     else {
       final PsiClass[] aSupers = aClass.getSupers();
       for (PsiClass aSuper : aSupers) {
-        getLeastUpperClassesInner(aSuper, bClass, supers);
+        if (visited.add(aSuper)) {
+          getLeastUpperClassesInner(aSuper, bClass, supers, visited);
+        }
       }
     }
   }
@@ -234,7 +240,16 @@ public class GenericsUtil {
   }
 
   @Nullable
-  public static PsiType getVariableTypeByExpressionType(final PsiType type) {
+  public static PsiType getVariableTypeByExpressionType(@Nullable PsiType type) {
+    return getVariableTypeByExpressionType(type, true);
+  }
+
+  @Nullable
+  public static PsiType getVariableTypeByExpressionType(@Nullable PsiType type, final boolean openCaptured) {
+    if (type == null) return null;
+    if (type instanceof PsiCapturedWildcardType) {
+      type = ((PsiCapturedWildcardType)type).getWildcard();
+    }
     PsiType transformed = type.accept(new PsiTypeVisitor<PsiType>() {
       @Override
       public PsiType visitArrayType(PsiArrayType arrayType) {
@@ -270,7 +285,7 @@ public class GenericsUtil {
 
       @Override
       public PsiType visitCapturedWildcardType(PsiCapturedWildcardType capturedWildcardType) {
-        return capturedWildcardType.getWildcard().accept(this);
+        return openCaptured ? capturedWildcardType.getWildcard().accept(this) : capturedWildcardType;
       }
 
       @Override
@@ -376,6 +391,8 @@ public class GenericsUtil {
       final PsiType bound = ((PsiWildcardType)type).getBound();
       return bound != null ? bound 
                            : ((PsiWildcardType)type).getExtendsBound();//object
+    } else if (type instanceof PsiCapturedWildcardType && !eliminateInTypeArguments) {
+      return eliminateWildcards(((PsiCapturedWildcardType)type).getWildcard(), eliminateInTypeArguments);
     }
     return type;
   }

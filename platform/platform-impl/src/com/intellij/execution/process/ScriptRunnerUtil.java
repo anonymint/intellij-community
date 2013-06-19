@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.execution.process;
 
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.ExecutionException;
+import com.intellij.execution.KillableProcess;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
@@ -28,6 +29,8 @@ import com.intellij.openapi.vfs.encoding.EncodingManager;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.io.File;
 
 /**
  * @author Elena Shaverdova
@@ -94,13 +97,26 @@ public final class ScriptRunnerUtil {
     return outputBuilder.toString();
   }
 
+  @Nullable
+  private static File getShell() {
+    final String shell = System.getenv("SHELL");
+    if (shell != null && (shell.contains("bash") || shell.contains("zsh"))) {
+      File file = new File(shell);
+      if (file.isAbsolute() && file.isFile() && file.canExecute()) {
+        return file;
+      }
+    }
+    return null;
+  }
+
+  @NotNull
   public static OSProcessHandler execute(@NotNull String exePath,
                                          @Nullable String workingDirectory,
                                          @Nullable VirtualFile scriptFile,
                                          String[] parameters) throws ExecutionException {
     GeneralCommandLine commandLine = new GeneralCommandLine();
     commandLine.setExePath(exePath);
-    commandLine.setPassParentEnvs(true);
+    commandLine.setPassParentEnvironment(true);
     if (scriptFile != null) {
       commandLine.addParameter(scriptFile.getPresentableUrl());
     }
@@ -111,7 +127,7 @@ public final class ScriptRunnerUtil {
     }
 
     LOG.debug("Command line: " + commandLine.getCommandLineString());
-    LOG.debug("Command line env: " + commandLine.getEnvParams());
+    LOG.debug("Command line env: " + commandLine.getEnvironment());
 
     final OSProcessHandler processHandler = new ColoredProcessHandler(commandLine.createProcess(), commandLine.getCommandLineString(),
                                                                       EncodingManager.getInstance().getDefaultCharset());
@@ -186,4 +202,34 @@ public final class ScriptRunnerUtil {
       myMergedOutput.append(text);
     }
   }
+
+  /**
+   * Gracefully terminates a process handler.
+   * Initially, 'soft kill' is performed (on UNIX it's equivalent to SIGINT signal sending).
+   * If the process isn't terminated within a given timeout, 'force quite' is performed (on UNIX it's equivalent to SIGKILL
+   * signal sending).
+   *
+   * @param processHandler {@link ProcessHandler} instance
+   * @param millisTimeout timeout in milliseconds between 'soft kill' and 'force quite'
+   * @param commandLine command line
+   */
+  public static void terminateProcessHandler(@NotNull ProcessHandler processHandler,
+                                             long millisTimeout,
+                                             @Nullable String commandLine) {
+    if (processHandler.isProcessTerminated()) {
+      LOG.warn("Process '" + commandLine + "' is already terminated!");
+      return;
+    }
+    processHandler.destroyProcess();
+    if (processHandler instanceof KillableProcess) {
+      KillableProcess killableProcess = (KillableProcess) processHandler;
+      if (killableProcess.canKillProcess()) {
+        if (!processHandler.waitFor(millisTimeout)) {
+          // doing 'force quite'
+          killableProcess.killProcess();
+        }
+      }
+    }
+  }
+
 }

@@ -15,9 +15,9 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
-import com.intellij.codeInsight.daemon.impl.analysis.HighlightUtil;
+import com.intellij.codeInsight.daemon.impl.analysis.JavaHighlightUtil;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -39,7 +39,7 @@ public class DeleteMultiCatchFix implements IntentionAction {
   @NotNull
   @Override
   public String getText() {
-    return QuickFixBundle.message("delete.catch.text", HighlightUtil.formatType(myTypeElement.getType()));
+    return QuickFixBundle.message("delete.catch.text", JavaHighlightUtil.formatType(myTypeElement.getType()));
   }
 
   @NotNull
@@ -57,7 +57,7 @@ public class DeleteMultiCatchFix implements IntentionAction {
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) throws IncorrectOperationException {
-    if (!CodeInsightUtilBase.prepareFileForWrite(myTypeElement.getContainingFile())) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(myTypeElement.getContainingFile())) return;
 
     final PsiElement parentType = myTypeElement.getParent();
     if (!(parentType instanceof PsiTypeElement)) return;

@@ -16,6 +16,7 @@
 
 package com.intellij.codeInsight.completion;
 
+import com.intellij.codeInsight.completion.impl.CompletionServiceImpl;
 import com.intellij.codeInsight.completion.impl.CompletionSorterImpl;
 import com.intellij.codeInsight.lookup.*;
 import com.intellij.codeInsight.lookup.impl.EmptyLookupItem;
@@ -37,7 +38,6 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.statistics.StatisticsInfo;
-import com.intellij.psi.statistics.StatisticsManager;
 import com.intellij.util.Alarm;
 import com.intellij.util.ProcessingContext;
 import com.intellij.util.containers.ContainerUtil;
@@ -53,24 +53,18 @@ public class CompletionLookupArranger extends LookupArranger {
   @Nullable private static StatisticsUpdate ourPendingUpdate;
   private static final Alarm ourStatsAlarm = new Alarm(ApplicationManager.getApplication());
   private static final Key<String> PRESENTATION_INVARIANT = Key.create("PRESENTATION_INVARIANT");
+  private static final Comparator<LookupElement> BY_PRESENTATION_COMPARATOR = new Comparator<LookupElement>() {
+    @Override
+    public int compare(LookupElement o1, LookupElement o2) {
+      String invariant = PRESENTATION_INVARIANT.get(o1);
+      assert invariant != null;
+      return invariant.compareToIgnoreCase(PRESENTATION_INVARIANT.get(o2));
+    }
+  };
   private static final int MAX_PREFERRED_COUNT = 5;
   public static final Key<Boolean> PURE_RELEVANCE = Key.create("PURE_RELEVANCE");
   public static final Key<Integer> PREFIX_CHANGES = Key.create("PREFIX_CHANGES");
   private static final UISettings ourUISettings = UISettings.getInstance();
-  private static final Classifier<LookupElement> TAIL_CLASSIFIER = new Classifier<LookupElement>() {
-    @Override
-    public void addElement(LookupElement element) {
-    }
-
-    @Override
-    public Iterable<LookupElement> classify(Iterable<LookupElement> source, ProcessingContext context) {
-      return sortByPresentation(source);
-    }
-
-    @Override
-    public void describeItems(LinkedHashMap<LookupElement, StringBuilder> map, ProcessingContext context) {
-    }
-  };
   private final List<LookupElement> myFrozenItems = new ArrayList<LookupElement>();
   static {
     Disposer.register(ApplicationManager.getApplication(), new Disposable() {
@@ -151,7 +145,7 @@ public class CompletionLookupArranger extends LookupArranger {
     CompletionSorterImpl sorter = obtainSorter(element);
     Classifier<LookupElement> classifier = myClassifiers.get(sorter);
     if (classifier == null) {
-      myClassifiers.put(sorter, classifier = sorter.buildClassifier(TAIL_CLASSIFIER));
+      myClassifiers.put(sorter, classifier = sorter.buildClassifier(new AlphaClassifier(lookup)));
     }
     classifier.addElement(element);
 
@@ -164,17 +158,16 @@ public class CompletionLookupArranger extends LookupArranger {
     return tailText == null || tailText.isEmpty() ? " " : tailText;
   }
 
-  private static List<LookupElement> sortByPresentation(Iterable<LookupElement> source) {
-    ArrayList<LookupElement> result = ContainerUtil.newArrayList(source);
-    ContainerUtil.sort(result, new Comparator<LookupElement>() {
-      @Override
-      public int compare(LookupElement o1, LookupElement o2) {
-        String invariant = PRESENTATION_INVARIANT.get(o1);
-        assert invariant != null;
-        return invariant.compareToIgnoreCase(PRESENTATION_INVARIANT.get(o2));
-      }
-    });
-    return result;
+  private static List<LookupElement> sortByPresentation(Iterable<LookupElement> source, Lookup lookup) {
+    ArrayList<LookupElement> startMatches = ContainerUtil.newArrayList();
+    ArrayList<LookupElement> middleMatches = ContainerUtil.newArrayList();
+    for (LookupElement element : source) {
+      (CompletionServiceImpl.isStartMatch(element, lookup) ? startMatches : middleMatches).add(element);
+    }
+    ContainerUtil.sort(startMatches, BY_PRESENTATION_COMPARATOR);
+    ContainerUtil.sort(middleMatches, BY_PRESENTATION_COMPARATOR);
+    startMatches.addAll(middleMatches);
+    return startMatches;
   }
 
   private static boolean isAlphaSorted() {
@@ -188,10 +181,10 @@ public class CompletionLookupArranger extends LookupArranger {
 
     LookupElement relevantSelection = findMostRelevantItem(itemsBySorter);
     List<LookupElement> listModel = isAlphaSorted() ?
-                                    sortByPresentation(items) :
+                                    sortByPresentation(items, lookup) :
                                     fillModelByRelevance((LookupImpl)lookup, items, itemsBySorter, relevantSelection);
 
-    int toSelect = getItemToSelect(lookup, listModel, onExplicitAction, relevantSelection);
+    int toSelect = getItemToSelect((LookupImpl)lookup, listModel, onExplicitAction, relevantSelection);
     LOG.assertTrue(toSelect >= 0);
 
     addDummyItems(items.size() - listModel.size(), listModel);
@@ -230,7 +223,15 @@ public class CompletionLookupArranger extends LookupArranger {
     ensureItemAdded(items, model, byRelevance, relevantSelection);
     ensureEverythingVisibleAdded(lookup, model, byRelevance);
 
-    return new ArrayList<LookupElement>(model);
+    ArrayList<LookupElement> result = new ArrayList<LookupElement>(model);
+    if (result.size() > 1) {
+      LookupElement first = result.get(0);
+      if (isLiveTemplate(first) && isPrefixItem(lookup, first, true)) {
+        ContainerUtil.swapElements(result, 0, 1);
+      }
+    }
+
+    return result;
   }
 
   private static void ensureEverythingVisibleAdded(LookupImpl lookup, final LinkedHashSet<LookupElement> model, Iterator<LookupElement> byRelevance) {
@@ -319,8 +320,8 @@ public class CompletionLookupArranger extends LookupArranger {
     return new CompletionLookupArranger(myParameters, myProcess);
   }
 
-  private static int getItemToSelect(Lookup lookup, List<LookupElement> items, boolean onExplicitAction, @Nullable LookupElement mostRelevant) {
-    if (items.isEmpty() || !lookup.isFocused()) {
+  private static int getItemToSelect(LookupImpl lookup, List<LookupElement> items, boolean onExplicitAction, @Nullable LookupElement mostRelevant) {
+    if (items.isEmpty() || lookup.getFocusDegree() == LookupImpl.FocusDegree.UNFOCUSED) {
       return 0;
     }
 
@@ -384,7 +385,7 @@ public class CompletionLookupArranger extends LookupArranger {
 
     final StatisticsInfo base = StatisticsWeigher.getBaseStatisticsInfo(item, null);
     if (base == StatisticsInfo.EMPTY) {
-      return new StatisticsUpdate(Collections.<StatisticsInfo>emptyList());
+      return new StatisticsUpdate(StatisticsInfo.EMPTY);
     }
 
     StatisticsUpdate update = new StatisticsUpdate(StatisticsWeigher.composeStatsWithPrefix(base, lookup.itemPattern(item), true));
@@ -475,17 +476,15 @@ public class CompletionLookupArranger extends LookupArranger {
   }
 
   static class StatisticsUpdate implements Disposable {
-    private final List<StatisticsInfo> myInfos;
+    private final StatisticsInfo myInfo;
     private int mySpared;
 
-    public StatisticsUpdate(List<StatisticsInfo> infos) {
-      myInfos = infos;
+    public StatisticsUpdate(StatisticsInfo info) {
+      myInfo = info;
     }
 
     void performUpdate() {
-      for (StatisticsInfo statisticsInfo : myInfos) {
-        StatisticsManager.getInstance().incUseCount(statisticsInfo);
-      }
+      myInfo.incUseCount();
       ((FeatureUsageTrackerImpl)FeatureUsageTracker.getInstance()).getCompletionStatistics().registerInvocation(mySpared);
     }
 
@@ -508,6 +507,27 @@ public class CompletionLookupArranger extends LookupArranger {
       if (spared > 0) {
         mySpared += spared;
       }
+    }
+  }
+
+  private static class AlphaClassifier extends Classifier<LookupElement> {
+    private final Lookup myLookup;
+
+    private AlphaClassifier(Lookup lookup) {
+      myLookup = lookup;
+    }
+
+    @Override
+    public void addElement(LookupElement element) {
+    }
+
+    @Override
+    public Iterable<LookupElement> classify(Iterable<LookupElement> source, ProcessingContext context) {
+      return sortByPresentation(source, myLookup);
+    }
+
+    @Override
+    public void describeItems(LinkedHashMap<LookupElement, StringBuilder> map, ProcessingContext context) {
     }
   }
 }

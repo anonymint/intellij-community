@@ -380,6 +380,10 @@ public abstract class PropertyTable extends JBTable {
     return PROPERTY_COMPARATOR;
   }
 
+  protected List<Property> getProperties(PropertiesContainer component) {
+    return component.getProperties();
+  }
+
   private void restoreSelection(Property selection) {
     List<Property> propertyPath = new ArrayList<Property>(2);
     while (selection != null) {
@@ -424,7 +428,7 @@ public abstract class PropertyTable extends JBTable {
 
     if (size > 0) {
       List<Property> rootProperties = new ArrayList<Property>();
-      for (Property each : (Iterable<? extends Property>)myContainers.get(0).getProperties()) {
+      for (Property each : (Iterable<? extends Property>)getProperties(myContainers.get(0))) {
         addIfNeeded(getCurrentComponent(), each, rootProperties);
       }
       sortPropertiesAndCreateGroups(rootProperties);
@@ -482,7 +486,7 @@ public abstract class PropertyTable extends JBTable {
   }
 
   private void fillProperties(PropertiesContainer<?> component, List<Property> properties) {
-    for (Property each : component.getProperties()) {
+    for (Property each : getProperties(component)) {
       if (addIfNeeded(component, each, properties)) {
         addExpandedChildren(component, each, properties);
       }
@@ -649,11 +653,8 @@ public abstract class PropertyTable extends JBTable {
     int selectedRow = getSelectedRow();
     Property property = myProperties.get(rowIndex);
 
-    LOG.assertTrue(myExpandedProperties.remove(property.getPath()));
-    int size = getFilterChildren(property).size();
-    for (int i = 0; i < size; i++) {
-      myProperties.remove(rowIndex + 1);
-    }
+    int size = collapse(property, rowIndex + 1);
+    LOG.assertTrue(size > 0);
     myModel.fireTableDataChanged();
 
     if (selectedRow != -1) {
@@ -663,6 +664,18 @@ public abstract class PropertyTable extends JBTable {
 
       getSelectionModel().setSelectionInterval(selectedRow, selectedRow);
     }
+  }
+
+  private int collapse(Property property, int startIndex) {
+    int totalSize = 0;
+    if (myExpandedProperties.remove(property.getPath())) {
+      int size = getFilterChildren(property).size();
+      totalSize += size;
+      for (int i = 0; i < size; i++) {
+        totalSize += collapse(myProperties.remove(startIndex), startIndex);
+      }
+    }
+    return totalSize;
   }
 
   private void expand(int rowIndex) {
@@ -848,12 +861,12 @@ public abstract class PropertyTable extends JBTable {
       message = "No message";
     }
 
-    Messages.showMessageDialog(formatErrorGettingValueMesage(message),
+    Messages.showMessageDialog(formatErrorGettingValueMessage(message),
                                "Invalid Input",
                                Messages.getErrorIcon());
   }
 
-  private static String formatErrorGettingValueMesage(String message) {
+  private static String formatErrorGettingValueMessage(String message) {
     return MessageFormat.format("Error setting value: {0}", message);
   }
 
@@ -1311,7 +1324,7 @@ public abstract class PropertyTable extends JBTable {
         }
         catch (Exception e) {
           LOG.debug(e);
-          renderer.append(formatErrorGettingValueMesage(e.getMessage()), SimpleTextAttributes.ERROR_ATTRIBUTES);
+          renderer.append(formatErrorGettingValueMessage(e.getMessage()), SimpleTextAttributes.ERROR_ATTRIBUTES);
           return renderer;
         }
       }

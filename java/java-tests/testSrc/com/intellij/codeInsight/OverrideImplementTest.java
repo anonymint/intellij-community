@@ -15,6 +15,7 @@
  */
 package com.intellij.codeInsight;
 
+import com.intellij.codeInsight.generation.JavaOverrideMethodsHandler;
 import com.intellij.codeInsight.generation.OverrideImplementUtil;
 import com.intellij.codeInsight.generation.PsiMethodMember;
 import com.intellij.codeInsight.intention.impl.ImplementAbstractMethodHandler;
@@ -62,8 +63,12 @@ public class OverrideImplementTest extends LightCodeInsightTestCase {
   public void testOnTheLineWithExistingExpression() { doTest(false); }
   public void testSimplifyObjectWildcard() { doTest(false); }
   public void testErasureWildcard() { doTest(false); }
+  public void testMultipleInterfaceInheritance() { doTest(false); }
+  public void testResolveTypeParamConflict() { doTest(false); }
+  public void testRawInheritance() { doTest(false); }
 
   public void testImplementExtensionMethods() { doTest8(false, true); }
+  public void testOverrideExtensionMethods() { doTest8(false, false); }
   public void testDoNotImplementExtensionMethods() { doTest8(false, true); }
 
   public void testLongFinalParameterList() {
@@ -124,6 +129,16 @@ public class OverrideImplementTest extends LightCodeInsightTestCase {
     final PsiField[] fields = aClass.getFields();
     new ImplementAbstractMethodHandler(getProject(), getEditor(), psiMethod).implementInClass(fields);
     checkResultByFile(BASE_DIR + "after" + name + ".java");
+  }
+
+  public void testInAnnotationType() {
+    String name = getTestName(false);
+    configureByFile(BASE_DIR + "before" + name + ".java");
+    int offset = getEditor().getCaretModel().getOffset();
+    PsiElement context = getFile().findElementAt(offset);
+    final PsiClass aClass = PsiTreeUtil.getParentOfType(context, PsiClass.class);
+    assertTrue(aClass != null && aClass.isAnnotationType());
+    assertFalse(new JavaOverrideMethodsHandler().isValidFor(getEditor(), getFile()));
   }
 
   private void doTest(boolean copyJavadoc) { doTest(copyJavadoc, null); }

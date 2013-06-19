@@ -39,7 +39,7 @@ public class ImageOrColorPreviewProjectComponent extends AbstractProjectComponen
 
   @Override
   public void projectOpened() {
-    FileEditorManager.getInstance(myProject).addFileEditorManagerListener(new MyFileEditorManagerListener(), myProject);
+    myProject.getMessageBus().connect(myProject).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new MyFileEditorManagerListener());
   }
 
   @Override
@@ -51,12 +51,12 @@ public class ImageOrColorPreviewProjectComponent extends AbstractProjectComponen
 
   private static class MyFileEditorManagerListener extends FileEditorManagerAdapter {
     @Override
-    public void fileOpened(final FileEditorManager source, final VirtualFile file) {
+    public void fileOpened(@NotNull final FileEditorManager source, @NotNull final VirtualFile file) {
       if (isSuitable(source.getProject(), file)) {
         final FileEditor[] fileEditors = source.getEditors(file);
         for (final FileEditor each : fileEditors) {
           if (each instanceof TextEditor) {
-            Disposer.register(each, new ImageOrColorPreviewManager((TextEditor)each));
+            Disposer.register(each, new ImageOrColorPreviewManager((TextEditor)each, source.getProject()));
           }
         }
       }
@@ -65,7 +65,7 @@ public class ImageOrColorPreviewProjectComponent extends AbstractProjectComponen
     private static boolean isSuitable(final Project project, final VirtualFile file) {
       final FileViewProvider provider = PsiManager.getInstance(project).findViewProvider(file);
       if (provider == null) return false;
-      
+
       for (final PsiFile psiFile : provider.getAllFiles()) {
         for(PreviewHintProvider hintProvider: Extensions.getExtensions(PreviewHintProvider.EP_NAME)) {
           if (hintProvider.isSupportedFile(psiFile)) {

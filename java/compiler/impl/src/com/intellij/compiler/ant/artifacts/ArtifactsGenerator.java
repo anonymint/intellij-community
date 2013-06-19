@@ -19,18 +19,18 @@ import com.intellij.compiler.ant.*;
 import com.intellij.compiler.ant.taskdefs.*;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
-import com.intellij.packaging.elements.ComplexPackagingElement;
+import com.intellij.packaging.artifacts.ArtifactType;
 import com.intellij.packaging.elements.PackagingElement;
 import com.intellij.packaging.elements.PackagingElementResolvingContext;
 import com.intellij.packaging.impl.artifacts.ArtifactUtil;
-import com.intellij.packaging.impl.artifacts.PackagingElementPath;
-import com.intellij.packaging.impl.artifacts.PackagingElementProcessor;
 import com.intellij.packaging.impl.elements.ArtifactPackagingElement;
 import com.intellij.packaging.impl.elements.ModuleOutputPackagingElement;
+import com.intellij.util.Processor;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -93,6 +93,8 @@ public class ArtifactsGenerator {
       initTarget.add(generator);
     }
 
+    initArtifacts(myResolvingContext.getProject(), initTarget);
+
     Target buildAllArtifacts = new Target(BUILD_ALL_ARTIFACTS_TARGET, depends.toString(), "Build all artifacts", null);
     for (Artifact artifact : myAllArtifacts) {
       final String artifactOutputPath = artifact.getOutputPath();
@@ -118,14 +120,9 @@ public class ArtifactsGenerator {
   private Target createArtifactTarget(Artifact artifact) {
     final StringBuilder depends = new StringBuilder(INIT_ARTIFACTS_TARGET);
 
-    ArtifactUtil.processPackagingElements(artifact, null, new PackagingElementProcessor<PackagingElement<?>>() {
+    ArtifactUtil.processRecursivelySkippingIncludedArtifacts(artifact, new Processor<PackagingElement<?>>() {
       @Override
-      public boolean shouldProcessSubstitution(ComplexPackagingElement<?> element) {
-        return !(element instanceof ArtifactPackagingElement);
-      }
-
-      @Override
-      public boolean process(@NotNull PackagingElement<?> packagingElement, @NotNull PackagingElementPath path) {
+      public boolean process(@NotNull PackagingElement<?> packagingElement) {
         if (packagingElement instanceof ArtifactPackagingElement) {
           final Artifact included = ((ArtifactPackagingElement)packagingElement).findArtifact(myResolvingContext);
           if (included != null) {
@@ -142,10 +139,12 @@ public class ArtifactsGenerator {
         }
         return true;
       }
-    }, myResolvingContext, true);
+    }, myResolvingContext);
 
+    final Pair<String, String> xmlNs = getArtifactXmlNs(artifact.getArtifactType());
     final Target artifactTarget =
-        new Target(myContext.getTargetName(artifact), depends.toString(), "Build '" + artifact.getName() + "' artifact", null);
+        new Target(myContext.getTargetName(artifact), depends.toString(), "Build '" + artifact.getName() + "' artifact", null, 
+                   xmlNs != null ? xmlNs.first : null, xmlNs != null ? xmlNs.second : null);
 
     if (myContext.shouldBuildIntoTempDirectory(artifact)) {
       final String outputDirectory = BuildProperties.propertyRelativePath(ArtifactAntGenerationContextImpl.ARTIFACTS_TEMP_DIR_PROPERTY,
@@ -160,7 +159,9 @@ public class ArtifactsGenerator {
     final DirectoryAntCopyInstructionCreator creator = new DirectoryAntCopyInstructionCreator(outputPath);
 
     List<Generator> copyInstructions = new ArrayList<Generator>();
-    copyInstructions.addAll(artifact.getRootElement().computeAntInstructions(myResolvingContext, creator, myContext, artifact.getArtifactType()));
+    if (needAntArtifactInstructions(artifact.getArtifactType())) {
+      copyInstructions.addAll(artifact.getRootElement().computeAntInstructions(myResolvingContext, creator, myContext, artifact.getArtifactType()));
+    }
 
     for (Generator generator : myContext.getAndClearBeforeCurrentArtifact()) {
       artifactTarget.add(generator);
@@ -176,6 +177,27 @@ public class ArtifactsGenerator {
     for (ChunkBuildExtension extension : ChunkBuildExtension.EP_NAME.getExtensions()) {
       extension.generateTasksForArtifact(artifact, preprocessing, myContext, artifactTarget);
     }
+  }
+
+  private void initArtifacts(Project project, CompositeGenerator generator) {
+    for (ChunkBuildExtension extension : ChunkBuildExtension.EP_NAME.getExtensions()) {
+      extension.initArtifacts(project, myContext.getGenerationOptions(), generator);
+    }
+  }
+
+  private static Pair<String, String> getArtifactXmlNs(ArtifactType artifactType) {
+    for (ChunkBuildExtension extension : ChunkBuildExtension.EP_NAME.getExtensions()) {
+      final Pair<String, String> xmlNs = extension.getArtifactXmlNs(artifactType);
+      if (xmlNs != null) return xmlNs;
+    }
+    return null;
+  }
+
+  private static boolean needAntArtifactInstructions(ArtifactType artifactType) {
+    for (ChunkBuildExtension extension : ChunkBuildExtension.EP_NAME.getExtensions()) {
+      if (!extension.needAntArtifactInstructions(artifactType)) return false;
+    }
+    return true;
   }
 
   public List<String> getCleanTargetNames() {

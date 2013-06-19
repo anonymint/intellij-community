@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,14 +45,14 @@ import java.nio.charset.Charset;
  * @see VirtualFileManager
  */
 public abstract class VirtualFile extends UserDataHolderBase implements ModificationTracker {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vfs.VirtualFile");
   public static final Key<Object> REQUESTOR_MARKER = Key.create("REQUESTOR_MARKER");
-  private static final Key<byte[]> BOM_KEY = Key.create("BOM");
-  private static final Key<Charset> CHARSET_KEY = Key.create("CHARSET");
   public static final VirtualFile[] EMPTY_ARRAY = new VirtualFile[0];
 
-  protected VirtualFile() {
-  }
+  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vfs.VirtualFile");
+  private static final Key<byte[]> BOM_KEY = Key.create("BOM");
+  private static final Key<Charset> CHARSET_KEY = Key.create("CHARSET");
+
+  protected VirtualFile() { }
 
   /**
    * Gets the name of this file.
@@ -79,6 +79,7 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
    *
    * @return the path
    */
+  @SuppressWarnings("JavadocReference")
   public abstract String getPath();
 
   /**
@@ -135,6 +136,20 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
    * @see VirtualFilePropertyEvent#getPropertyName
    */
   @NonNls public static final String PROP_WRITABLE = "writable";
+
+  /**
+   * Used as a property name in the {@link VirtualFilePropertyEvent} fired when a visibility of a
+   * {@link VirtualFile} changes.
+   *
+   * @see VirtualFileListener#propertyChanged
+   * @see VirtualFilePropertyEvent#getPropertyName
+   */
+  @NonNls public static final String PROP_HIDDEN = "hidden";
+
+  /**
+   * Used as a property name in the {@link #is(String)}.
+   */
+  @NonNls public static final String PROP_SPECIAL = "special";
 
   /**
    * Gets the extension of this file. If file name contains '.' extension is the substring from the last '.'
@@ -213,13 +228,20 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
     return false;
   }
 
-  /**
-   * Checks whether this file is a special (e.g. FIFO or device) file.
-   *
-   * @return <code>true</code> if the file exists and is a special one, <code>false</code> otherwise
-   * @since 11.0
-   */
+  /** @deprecated use {@link #is(String)} (to remove in IDEA 14) */
+  @SuppressWarnings("UnusedDeclaration")
   public boolean isSpecialFile() {
+    return is(PROP_SPECIAL);
+  }
+
+  /**
+   * Checks whether this file has a specific property.
+   * Examples of such properties are {@link #PROP_HIDDEN} or {@link #PROP_SPECIAL}.
+   *
+   * @return <code>true</code> if the file has a specific property, <code>false</code> otherwise
+   * @since 13.0
+   */
+  public boolean is(String property) {
     return false;
   }
 
@@ -310,6 +332,7 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
    *         When IDEA has no idea what the file type is (i.e. file type is not registered via {@link FileTypeRegistry}),
    *         it returns {@link com.intellij.openapi.fileTypes.FileTypes#UNKNOWN}
    */
+  @SuppressWarnings("JavadocReference")
   @NotNull
   public FileType getFileType() {
     return FileTypeRegistry.getInstance().getFileTypeByFile(this);
@@ -352,9 +375,7 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
     if (index < relPath.length()) {
       return child.findFileByRelativePath(relPath.substring(index + 1));
     }
-    else {
-      return child;
-    }
+    return child;
   }
 
   /**
@@ -477,7 +498,7 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
    * @return Retrieve the charset file has been loaded with (if loaded) and would be saved with (if would).
    */
   public Charset getCharset() {
-    Charset charset = getUserData(CHARSET_KEY);
+    Charset charset = getStoredCharset();
     if (charset == null) {
       charset = EncodingRegistry.getInstance().getDefaultCharset();
       setCharset(charset);
@@ -485,17 +506,26 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
     return charset;
   }
 
+  @Nullable
+  protected Charset getStoredCharset() {
+    return getUserData(CHARSET_KEY);
+  }
+
+  protected void storeCharset(Charset charset) {
+    putUserData(CHARSET_KEY, charset);
+  }
+
   public void setCharset(final Charset charset) {
     setCharset(charset, null);
   }
 
   public void setCharset(final Charset charset, @Nullable Runnable whenChanged) {
-    final Charset old = getUserData(CHARSET_KEY);
-    putUserData(CHARSET_KEY, charset);
+    final Charset old = getStoredCharset();
+    storeCharset(charset);
     if (Comparing.equal(charset, old)) return;
-    byte[] bom = charset == null ? null : CharsetToolkit.getBom(charset);
+    byte[] bom = charset == null ? null : CharsetToolkit.getMandatoryBom(charset);
     byte[] existingBOM = getBOM();
-    if (bom == null && charset != null) {
+    if (bom == null && charset != null && existingBOM != null) {
       bom = CharsetToolkit.canHaveBom(charset, existingBOM) ? existingBOM : null;
     }
     setBOM(bom);
@@ -507,7 +537,7 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
   }
 
   public boolean isCharsetSet() {
-    return getUserData(CHARSET_KEY) != null;
+    return getStoredCharset() != null;
   }
 
   public final void setBinaryContent(@NotNull byte[] content) throws IOException {
@@ -622,11 +652,14 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
    * If this file is a directory the set of its children is refreshed. If recursive value is <code>true</code> all
    * children are refreshed recursively.
    * <p/>
-   * This method should be only called within write-action.
-   * See {@link com.intellij.openapi.application.Application#runWriteAction}.
+   * When invoking synchronous refresh from a thread other than the event dispatch thread, the current thread must
+   * NOT be in a read action, otherwise a deadlock may occur.
    *
-   * @param asynchronous if <code>true</code> then the operation will be performed in a separate thread,
-   *                     otherwise will be performed immediately
+   * @param asynchronous if <code>true</code>, the method will return immediately and the refresh will be processed
+   *                     in the background. If <code>false</code>, the method will return only after the refresh
+   *                     is done and the VFS change events caused by the refresh have been fired and processed
+   *                     in the event dispatch thread. Instead of synchronous refreshes, it's recommended to use
+   *                     asynchronous refreshes with a <code>postRunnable</code> whenever possible.
    * @param recursive    whether to refresh all the files in this directory recursively
    */
   public void refresh(boolean asynchronous, boolean recursive) {
@@ -649,7 +682,6 @@ public abstract class VirtualFile extends UserDataHolderBase implements Modifica
   }
 
   /**
-   * @param name
    * @return whether file name equals to this name
    *         result depends on the filesystem specifics
    */

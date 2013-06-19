@@ -83,7 +83,9 @@ public class NewMappings {
 
     vcsManager.addInitializationRequest(VcsInitObject.MAPPINGS, new DumbAwareRunnable() {
       public void run() {
-        activateActiveVcses();
+        if (!myProject.isDisposed()) {
+          activateActiveVcses();
+        }
       }
     });
   }
@@ -148,7 +150,7 @@ public class NewMappings {
     mappingsChanged();
   }
 
-  private void keepActiveVcs(final Runnable runnable) {
+  private void keepActiveVcs(@NotNull Runnable runnable) {
     final MyVcsActivator activator;
     synchronized (myLock) {
       if (! myActivated) {
@@ -182,9 +184,15 @@ public class NewMappings {
   }
 
   public void mappingsChanged() {
-    myMessageBus.syncPublisher(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED).directoryMappingChanged();
-    myFileStatusManager.fileStatusesChanged();
-    myFileWatchRequestsManager.ping();
+    ApplicationManager.getApplication().runReadAction(new Runnable() {
+      @Override
+      public void run() {
+        if (myProject.isDisposed()) return;
+        myMessageBus.syncPublisher(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED).directoryMappingChanged();
+        myFileStatusManager.fileStatusesChanged();
+        myFileWatchRequestsManager.ping();
+      }
+    });
   }
 
   @Modification

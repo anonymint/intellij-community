@@ -19,8 +19,10 @@ import com.intellij.codeInsight.actions.ReformatAndOptimizeImportsProcessor;
 import com.intellij.codeInsight.actions.ReformatCodeProcessor;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
+import com.intellij.lang.Language;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.vcs.checkin.ReformatBeforeCheckinHandler;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.TokenType;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
@@ -28,8 +30,7 @@ import com.intellij.psi.impl.source.tree.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.CharTable;
-import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.HashSet;
+import com.intellij.util.containers.ContainerUtilRt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,8 +39,8 @@ import java.util.Collections;
 
 public class FormatterUtil {
 
-  public static final Collection<String> FORMATTER_ACTION_NAMES = Collections.unmodifiableCollection(ContainerUtil.addAll(
-    new HashSet<String>(), ReformatAndOptimizeImportsProcessor.COMMAND_NAME, ReformatCodeProcessor.COMMAND_NAME
+  public static final Collection<String> FORMATTER_ACTION_NAMES = Collections.unmodifiableCollection(ContainerUtilRt.newHashSet(
+    ReformatAndOptimizeImportsProcessor.COMMAND_NAME, ReformatCodeProcessor.COMMAND_NAME, ReformatBeforeCheckinHandler.COMMAND_NAME
   ));
 
   private FormatterUtil() {
@@ -62,26 +63,36 @@ public class FormatterUtil {
 
   @Nullable
   public static ASTNode getPrevious(@Nullable ASTNode node, @NotNull IElementType... typesToIgnore) {
+    return getNextOrPrevious(node, false, typesToIgnore);
+  }
+
+  @Nullable
+  public static ASTNode getNext(@Nullable ASTNode node, @NotNull IElementType... typesToIgnore) {
+    return getNextOrPrevious(node, true, typesToIgnore);
+  }
+
+  @Nullable
+  private static ASTNode getNextOrPrevious(@Nullable ASTNode node, boolean isNext, @NotNull IElementType... typesToIgnore) {
     if (node == null) return null;
 
-    ASTNode prev = node.getTreePrev();
+    ASTNode each = isNext ? node.getTreeNext() : node.getTreePrev();
     ASTNode parent = node.getTreeParent();
-    while (prev == null && parent != null) {
-      prev = parent.getTreePrev();
+    while (each == null && parent != null) {
+      each = isNext ? parent.getTreeNext() : parent.getTreePrev();
       parent = parent.getTreeParent();
     }
 
-    if (prev == null) {
+    if (each == null) {
       return null;
     }
 
     for (IElementType type : typesToIgnore) {
-      if (prev.getElementType() == type) {
-        return getPrevious(prev, typesToIgnore);
+      if (each.getElementType() == type) {
+        return getNextOrPrevious(each, isNext, typesToIgnore);
       }
     }
 
-    return prev;
+    return each;
   }
 
   @Nullable
@@ -181,6 +192,14 @@ public class FormatterUtil {
     return expectedTypes.contains(prevNode.getElementType());
   }
 
+  public static boolean hasPrecedingSiblingOfType(@Nullable ASTNode node, IElementType expectedSiblingType, IElementType... skipTypes) {
+    for (ASTNode prevNode = node == null ? null : node.getTreePrev(); prevNode != null; prevNode = prevNode.getTreePrev()) {
+      if (isWhitespaceOrEmpty(prevNode) || isOneOf(prevNode, skipTypes)) continue;
+      if (prevNode.getElementType() == expectedSiblingType) return true;
+    }
+    return false;
+  }
+
   public static boolean isFollowedBy(@Nullable ASTNode node, IElementType expectedType) {
     return isFollowedBy(node, expectedType, IElementType.EMPTY_ARRAY);
   }
@@ -236,12 +255,12 @@ public class FormatterUtil {
     if (node == null) return false;
 
     if (isWhitespaceOrEmpty(node)) return true;
-    for (WhiteSpaceFormattingStrategy strategy : WhiteSpaceFormattingStrategyFactory.getAllStrategies()) {
-      if (strategy.containsWhitespacesOnly(node)) {
-        return true;
-      }
+    PsiElement psi = node.getPsi();
+    if (psi == null) {
+      return false;
     }
-    return false;
+    Language language = psi.getLanguage();
+    return WhiteSpaceFormattingStrategyFactory.getStrategy(language).containsWhitespacesOnly(node);
   }
 
   /**

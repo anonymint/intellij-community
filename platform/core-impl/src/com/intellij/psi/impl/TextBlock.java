@@ -17,14 +17,13 @@
 package com.intellij.psi.impl;
 
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.UserDataHolderEx;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
 
-public class TextBlock extends DocumentAdapter {
+public class TextBlock {
   private static final Key<TextBlock> KEY_TEXT_BLOCK = Key.create("KEY_TEXT_BLOCK");
   @SuppressWarnings({"UnusedDeclaration"})
   private Document myDocument; // Will hold a document on a hard reference until there's uncommitted PSI for this document.
@@ -67,7 +66,6 @@ public class TextBlock extends DocumentAdapter {
     return myPsiEndOffset;
   }
 
-  @Override
   public void documentChanged(DocumentEvent e) {
     myDocument = e.getDocument();
 
@@ -94,17 +92,13 @@ public class TextBlock extends DocumentAdapter {
   }
 
   public void performAtomically(@NotNull Runnable runnable) {
-    boolean wasLocked = isLocked();
-    if (!wasLocked) {
-      lock();
-    }
+    assert !isLocked();
+    lock();
     try {
       runnable.run();
     }
     finally {
-      if (!wasLocked) {
-        unlock();
-      }
+      unlock();
     }
   }
 
@@ -116,5 +110,15 @@ public class TextBlock extends DocumentAdapter {
     }
 
     return textBlock;
+  }
+
+  @Override
+  public String toString() {
+    return "TextBlock{" +
+           "myStartOffset=" + myStartOffset +
+           ", myTextEndOffset=" + myTextEndOffset +
+           ", myPsiEndOffset=" + myPsiEndOffset +
+           ", myIsLocked=" + myIsLocked +
+           '}';
   }
 }

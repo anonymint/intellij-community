@@ -15,12 +15,12 @@
  */
 package org.jetbrains.jps.model.serialization;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import org.jdom.Element;
 import org.jdom.JDOMException;
+import org.jetbrains.jps.TimingLog;
 import org.jetbrains.jps.model.JpsElement;
 
 import java.io.File;
@@ -30,7 +30,6 @@ import java.io.IOException;
  * @author nik
  */
 public abstract class JpsLoaderBase {
-  private static final Logger LOG = Logger.getInstance("#org.jetbrains.jps.model.serialization.JpsLoaderBase");
   private final JpsMacroExpander myMacroExpander;
 
   protected JpsLoaderBase(JpsMacroExpander macroExpander) {
@@ -47,6 +46,7 @@ public abstract class JpsLoaderBase {
                                                        final E element) {
     String fileName = serializer.getConfigFileName();
     File configFile = new File(dir, fileName != null ? fileName : defaultFileName);
+    Runnable timingLog = TimingLog.startActivity("loading: " + configFile.getName() + ":" + serializer.getComponentName());
     Element componentTag;
     if (configFile.exists()) {
       componentTag = JDomSerializationUtil.findComponent(loadRootElement(configFile), serializer.getComponentName());
@@ -61,6 +61,7 @@ public abstract class JpsLoaderBase {
     else {
       serializer.loadExtensionWithDefaultSettings(element);
     }
+    timingLog.run();
   }
 
   protected static Element loadRootElement(final File file, final JpsMacroExpander macroExpander) {
@@ -78,6 +79,6 @@ public abstract class JpsLoaderBase {
   }
 
   protected static boolean isXmlFile(File file) {
-    return file.isFile() && FileUtil.getExtension(file.getName()).equalsIgnoreCase("xml");
+    return file.isFile() && FileUtilRt.extensionEquals(file.getName(), "xml");
   }
 }

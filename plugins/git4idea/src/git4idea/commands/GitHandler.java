@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,11 @@ package git4idea.commands;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.ProcessEventListener;
@@ -37,8 +40,9 @@ import git4idea.config.GitVersionSpecialty;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.git4idea.http.GitAskPassXmlRpcHandler;
 import org.jetbrains.git4idea.ssh.GitSSHHandler;
-import org.jetbrains.git4idea.ssh.GitSSHService;
+import org.jetbrains.git4idea.ssh.GitXmlRpcSshService;
 
 import java.io.File;
 import java.io.OutputStream;
@@ -50,7 +54,6 @@ import java.util.concurrent.LinkedBlockingQueue;
  * A handler for git commands
  */
 public abstract class GitHandler {
-
   protected final Project myProject;
   protected final GitCommand myCommand;
 
@@ -82,9 +85,6 @@ public abstract class GitHandler {
   @NonNls
   private Charset myCharset = Charset.forName("UTF-8"); // Character set to use for IO
 
-  @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
-  private boolean myNoSSHFlag = false;
-
   private final EventDispatcher<ProcessEventListener> myListeners = EventDispatcher.create(ProcessEventListener.class);
   @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
   protected boolean mySilent; // if true, the command execution is not logged in version control view
@@ -99,6 +99,8 @@ public abstract class GitHandler {
 
   private long myStartTime; // git execution start timestamp
   private static final long LONG_TIME = 10 * 1000;
+  @Nullable private ModalityState myState;
+  @Nullable private String myUrl;
 
 
   /**
@@ -218,23 +220,13 @@ public abstract class GitHandler {
     return file;
   }
 
-  /**
-   * Set SSH flag. This flag should be set to true for commands that never interact with remote repositories.
-   *
-   * @param value if value is true, the custom ssh is not used for the command.
-   */
-  @SuppressWarnings({"WeakerAccess", "SameParameterValue"})
-  public void setNoSSH(boolean value) {
-    checkNotStarted();
-    myNoSSHFlag = value;
+  @SuppressWarnings("NullableProblems")
+  public void setUrl(@NotNull String url) {
+    myUrl = url;
   }
 
-  /**
-   * @return true if SSH is not invoked by this command.
-   */
-  @SuppressWarnings({"WeakerAccess"})
-  public boolean isNoSSH() {
-    return myNoSSHFlag;
+  protected boolean isRemote() {
+    return myUrl != null;
   }
 
   /**
@@ -276,16 +268,24 @@ public abstract class GitHandler {
   }
 
   @NotNull
-  private static String escapeParameterIfNeeded(@NotNull String parameter) {
-    if (SystemInfo.isWindows && parameter.contains("^")) {
+  private String escapeParameterIfNeeded(@NotNull String parameter) {
+    if (escapeNeeded(parameter)) {
       return parameter.replaceAll("\\^", "^^^^");
     }
     return parameter;
   }
 
+  private boolean escapeNeeded(@NotNull String parameter) {
+    return SystemInfo.isWindows && isCmd() && parameter.contains("^");
+  }
+
+  private boolean isCmd() {
+    return myAppSettings.getPathToGit().toLowerCase().endsWith("cmd");
+  }
+
   @NotNull
   private String unescapeCommandLine(@NotNull String commandLine) {
-    if (SystemInfo.isWindows && commandLine.contains("^")) {
+    if (escapeNeeded(commandLine)) {
       return commandLine.replaceAll("\\^\\^\\^\\^", "^");
     }
     return commandLine;
@@ -347,7 +347,7 @@ public abstract class GitHandler {
    * @return is "--progress" parameter supported by this version of Git.
    */
   public boolean addProgressParameter() {
-    if (GitVersionSpecialty.ABLE_TO_USE_PROGRESS.existsIn(myVcs.getVersion())) {
+    if (GitVersionSpecialty.ABLE_TO_USE_PROGRESS_IN_REMOTE_COMMANDS.existsIn(myVcs.getVersion())) {
       addParameters("--progress");
       return true;
     }
@@ -404,6 +404,7 @@ public abstract class GitHandler {
   /**
    * Start process
    */
+  @SuppressWarnings("UseOfSystemOutOrSystemErr")
   public synchronized void start() {
     checkNotStarted();
 
@@ -420,18 +421,38 @@ public abstract class GitHandler {
         LOG.debug(printableCommandLine());
       }
 
+      if (ApplicationManager.getApplication().isUnitTestMode()) {
+        System.out.println("cd " + myWorkingDirectory);
+        System.out.println(printableCommandLine());
+      }
+
       // setup environment
-      if (!myNoSSHFlag && myProjectSettings.isIdeaSsh()) {
-        GitSSHService ssh = GitSSHIdeaService.getInstance();
+      GitRemoteProtocol remoteProtocol = GitRemoteProtocol.fromUrl(myUrl);
+      if (remoteProtocol == GitRemoteProtocol.SSH && myProjectSettings.isIdeaSsh()) {
+        GitXmlRpcSshService ssh = ServiceManager.getService(GitXmlRpcSshService.class);
         myEnv.put(GitSSHHandler.GIT_SSH_ENV, ssh.getScriptPath().getPath());
-        myHandlerNo = ssh.registerHandler(new GitSSHGUIHandler(myProject));
+        myHandlerNo = ssh.registerHandler(new GitSSHGUIHandler(myProject, myState));
         myEnvironmentCleanedUp = false;
         myEnv.put(GitSSHHandler.SSH_HANDLER_ENV, Integer.toString(myHandlerNo));
         int port = ssh.getXmlRcpPort();
         myEnv.put(GitSSHHandler.SSH_PORT_ENV, Integer.toString(port));
         LOG.debug(String.format("handler=%s, port=%s", myHandlerNo, port));
       }
-      myCommandLine.setEnvParams(myEnv);
+      else if (remoteProtocol == GitRemoteProtocol.HTTP) {
+        GitHttpAuthService service = ServiceManager.getService(GitHttpAuthService.class);
+        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_ENV, service.getScriptPath().getPath());
+        assert myUrl != null : "myUrl can't be null here";
+        GitHttpAuthenticator httpAuthenticator = service.createAuthenticator(myProject, myState, myCommand, myUrl);
+        myHandlerNo = service.registerHandler(httpAuthenticator);
+        myEnvironmentCleanedUp = false;
+        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_HANDLER_ENV, Integer.toString(myHandlerNo));
+        int port = service.getXmlRcpPort();
+        myEnv.put(GitAskPassXmlRpcHandler.GIT_ASK_PASS_PORT_ENV, Integer.toString(port));
+        LOG.debug(String.format("handler=%s, port=%s", myHandlerNo, port));
+        addAuthListener(httpAuthenticator);
+      }
+      myCommandLine.getEnvironment().clear();
+      myCommandLine.getEnvironment().putAll(myEnv);
       // start process
       myProcess = startProcess();
       startHandlingStreams();
@@ -439,6 +460,33 @@ public abstract class GitHandler {
     catch (Throwable t) {
       cleanupEnv();
       myListeners.getMulticaster().startFailed(t);
+    }
+  }
+
+  private void addAuthListener(@NotNull final GitHttpAuthenticator authenticator) {
+    // TODO this code should be located in GitLineHandler, and the other remote code should be move there as well
+    if (this instanceof GitLineHandler) {
+      ((GitLineHandler)this).addLineListener(new GitLineHandlerAdapter() {
+
+        private boolean myAuthFailed;
+
+        @Override
+        public void onLineAvailable(String line, Key outputType) {
+          if (line.toLowerCase().contains("authentication failed")) {
+            myAuthFailed = true;
+          }
+        }
+
+        @Override
+        public void processTerminated(int exitCode) {
+          if (myAuthFailed) {
+            authenticator.forgetPassword();
+          }
+          else {
+            authenticator.saveAuthData();
+          }
+        }
+      });
     }
   }
 
@@ -493,10 +541,19 @@ public abstract class GitHandler {
    * Cleanup environment
    */
   protected synchronized void cleanupEnv() {
-    if (!myNoSSHFlag && !myEnvironmentCleanedUp) {
-      GitSSHService ssh = GitSSHIdeaService.getInstance();
+    if (myEnvironmentCleanedUp) {
+      return;
+    }
+    GitRemoteProtocol remoteProtocol = GitRemoteProtocol.fromUrl(myUrl);
+    if (remoteProtocol == GitRemoteProtocol.SSH) {
+      GitXmlRpcSshService ssh = ServiceManager.getService(GitXmlRpcSshService.class);
       myEnvironmentCleanedUp = true;
       ssh.unregisterHandler(myHandlerNo);
+    }
+    else if (remoteProtocol == GitRemoteProtocol.HTTP) {
+      GitHttpAuthService service = ServiceManager.getService(GitHttpAuthService.class);
+      myEnvironmentCleanedUp = true;
+      service.unregisterHandler(myHandlerNo);
     }
   }
 
@@ -633,6 +690,9 @@ public abstract class GitHandler {
     myResumeAction.run();
   }
 
+  public void setModalityState(@Nullable ModalityState state) {
+    myState = state;
+  }
 
   /**
    * @return true if the command line is too big
@@ -772,9 +832,4 @@ public abstract class GitHandler {
   public String toString() {
     return myCommandLine.toString();
   }
-
-  public void dontEscapeQuotes() {
-    myCommandLine.putUserData(GeneralCommandLine.DO_NOT_ESCAPE_QUOTES, true);
-  }
-
 }

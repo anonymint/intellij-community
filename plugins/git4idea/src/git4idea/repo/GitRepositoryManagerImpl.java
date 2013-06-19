@@ -15,7 +15,9 @@
  */
 package git4idea.repo;
 
+import com.intellij.dvcs.repo.RepoStateException;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.AbstractProjectComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -29,7 +31,10 @@ import git4idea.roots.GitRootScanner;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
@@ -39,27 +44,29 @@ public class GitRepositoryManagerImpl extends AbstractProjectComponent implement
 
   private static final Logger LOG = Logger.getInstance(GitRepositoryManager.class);
 
-  @NotNull private final AbstractVcs myVcs;
   @NotNull private final ProjectLevelVcsManager myVcsManager;
+  @NotNull private AbstractVcs myVcs;
 
   @NotNull private final Map<VirtualFile, GitRepository> myRepositories = new HashMap<VirtualFile, GitRepository>();
 
   @NotNull private final ReentrantReadWriteLock REPO_LOCK = new ReentrantReadWriteLock();
   @NotNull private final GitPlatformFacade myPlatformFacade;
 
-  public GitRepositoryManagerImpl(@NotNull Project project, @NotNull GitPlatformFacade platformFacade) {
+  public GitRepositoryManagerImpl(@NotNull Project project, @NotNull GitPlatformFacade platformFacade,
+                                  @NotNull ProjectLevelVcsManager vcsManager) {
     super(project);
     myPlatformFacade = platformFacade;
-    myVcsManager = ProjectLevelVcsManager.getInstance(myProject);
-    myVcs = platformFacade.getVcs(myProject);
+    myVcsManager = vcsManager;
   }
 
   @Override
   public void initComponent() {
+    myVcs = myPlatformFacade.getVcs(myProject);
     Disposer.register(myProject, this);
     myProject.getMessageBus().connect().subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED, this);
-    GitRootScanner rootScanner = new GitRootScanner(myProject);
-    Disposer.register(this, rootScanner);
+    if (!ApplicationManager.getApplication().isUnitTestMode()) {
+      GitRootScanner.start(myProject);
+    }
   }
 
   @Override
@@ -114,9 +121,7 @@ public class GitRepositoryManagerImpl extends AbstractProjectComponent implement
     final AbstractVcs vcs = vcsRoot.getVcs();
     if (!myVcs.equals(vcs)) {
       if (vcs != null) {
-        // if null, the file is just not under version control, nothing interesting;
-        // otherwise log, because Git method is requested not for a Git-controlled file
-        LOG.info(String.format("getRepositoryForFile returned non-Git (%s) root for file %s", vcs.getDisplayName(), filePath));
+        LOG.debug(String.format("getRepositoryForFile returned non-Git (%s) root for file %s", vcs.getDisplayName(), filePath));
       }
       return null;
     }
@@ -190,7 +195,7 @@ public class GitRepositoryManagerImpl extends AbstractProjectComponent implement
               GitRepository repository = createGitRepository(root);
               repositories.put(root, repository);
             }
-            catch (GitRepoStateException e) {
+            catch (RepoStateException e) {
               LOG.error("Couldn't initialize GitRepository in " + root.getPresentableUrl(), e);
             }
           }

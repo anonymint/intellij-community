@@ -17,6 +17,7 @@ package com.intellij.util.indexing;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.BaseComponent;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ContentIterator;
@@ -24,6 +25,7 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.util.Consumer;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -74,6 +76,9 @@ public abstract class FileBasedIndex implements BaseComponent {
                                                                     @NotNull K dataKey,
                                                                     @NotNull GlobalSearchScope filter);
 
+  /**
+   * @return false if ValueProcessor.process() returned false; true otherwise or if ValueProcessor was not called at all
+   */
   public abstract <K, V> boolean processValues(@NotNull ID<K, V> indexId,
                                                @NotNull K dataKey,
                                                @Nullable VirtualFile inFile,
@@ -86,9 +91,17 @@ public abstract class FileBasedIndex implements BaseComponent {
                                                                @Nullable Condition<V> valueChecker,
                                                                @NotNull Processor<VirtualFile> processor);
 
+  /**
+   * @param project it is guaranteed to return data which is up-to-date withing the project
+   *                Keys obtained from the files which do not belong to the project specified may not be up-to-date or even exist
+   */
   @NotNull
   public abstract <K> Collection<K> getAllKeys(@NotNull ID<K, ?> indexId, @NotNull Project project);
 
+  /**
+   * DO NOT CALL DIRECTLY IN CLIENT CODE
+   * The method is internal to indexing engine end is called internally. The method is public due to implementation details
+   */
   public abstract <K> void ensureUpToDate(@NotNull ID<K, ?> indexId, @Nullable Project project, @Nullable GlobalSearchScope filter);
 
   public abstract void requestRebuild(ID<?, ?> indexId, Throwable throwable);
@@ -104,6 +117,10 @@ public abstract class FileBasedIndex implements BaseComponent {
                                                  @NotNull Processor<VirtualFile> processor,
                                                  @NotNull GlobalSearchScope filter);
 
+  /**
+   * @param project it is guaranteed to return data which is up-to-date withing the project
+   *                Keys obtained from the files which do not belong to the project specified may not be up-to-date or even exist
+   */
   public abstract <K> boolean processAllKeys(@NotNull ID<K, ?> indexId, Processor<K> processor, @Nullable Project project);
 
   public interface ValueProcessor<V> {
@@ -118,7 +135,11 @@ public abstract class FileBasedIndex implements BaseComponent {
   /**
   * Author: dmitrylomov
   */
-  public static interface InputFilter {
+  public interface InputFilter {
     boolean acceptInput(VirtualFile file);
+  }
+
+  public interface FileTypeSpecificInputFilter extends InputFilter {
+    void registerFileTypesUsedForIndexing(@NotNull Consumer<FileType> fileTypeSink);
   }
 }

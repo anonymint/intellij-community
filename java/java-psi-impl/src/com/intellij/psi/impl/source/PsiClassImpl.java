@@ -22,6 +22,7 @@ import com.intellij.navigation.ItemPresentationProviders;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.*;
 import com.intellij.psi.impl.java.stubs.JavaStubElementTypes;
@@ -67,10 +68,28 @@ public class PsiClassImpl extends JavaStubPsiElement<PsiClassStub<?>> implements
 
   protected PsiClassImpl(final PsiClassStub stub, final IStubElementType type) {
     super(stub, type);
+    addTrace(null);
   }
 
   public PsiClassImpl(final ASTNode node) {
     super(node);
+    addTrace(null);
+  }
+
+  private void addTrace(@Nullable PsiClassStub stub) {
+    if (ourTraceStubAstBinding) {
+      String creationTrace = "Creation thread: " + Thread.currentThread() + "\n" + DebugUtil.currentStackTrace();
+      if (stub != null) {
+        creationTrace += "\nfrom stub " + stub + "@" + System.identityHashCode(stub) + "\n";
+        if (stub instanceof UserDataHolder) {
+          String stubTrace = ((UserDataHolder)stub).getUserData(CREATION_TRACE);
+          if (stubTrace != null) {
+            creationTrace += stubTrace;
+          }
+        }
+      }
+      putUserData(CREATION_TRACE, creationTrace);
+    }
   }
 
   @Override

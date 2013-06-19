@@ -32,7 +32,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiReference;
-import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.util.Function;
 import org.jetbrains.annotations.NotNull;
 
@@ -60,7 +59,7 @@ public class TemplateBuilderImpl implements TemplateBuilder {
   private static final Logger LOG = Logger.getInstance("#" + TemplateBuilderImpl.class.getName());
 
   public TemplateBuilderImpl(@NotNull PsiElement element) {
-    myFile = InjectedLanguageUtil.getTopLevelFile(element);
+    myFile = InjectedLanguageManager.getInstance(element.getProject()).getTopLevelFile(element);
     myDocument = myFile.getViewProvider().getDocument();
     myContainerElement = wrapElement(element);
   }
@@ -195,13 +194,18 @@ public class TemplateBuilderImpl implements TemplateBuilder {
     int start = 0;
     for (final RangeMarker element : myElements) {
       int offset = element.getStartOffset() - containerStart;
-      LOG.assertTrue(start <= offset,"container: " + myContainerElement + " markers: " +
-                                     StringUtil.join(myElements, new Function<RangeMarker, String>() {
-                                                       @Override
-                                                       public String fun(RangeMarker rangeMarker) {
-                                                         return "[" + rangeMarker.getStartOffset() + ", " + rangeMarker.getEndOffset() + "]";
-                                                       }
-                                                     }, ", "));
+      if (start > offset) {
+        LOG.error("file: " + myFile +
+                  " container: " + myContainerElement +
+                  " markers: " + StringUtil.join(myElements, new Function<RangeMarker, String>() {
+                                    @Override
+                                    public String fun(RangeMarker rangeMarker) {
+                                      final String docString =
+                                        myDocument.getText(new TextRange(rangeMarker.getStartOffset(), rangeMarker.getEndOffset()));
+                                      return "[[" + docString + "]" + rangeMarker.getStartOffset() + ", " + rangeMarker.getEndOffset() + "]";
+                                    }
+                                  }, ", "));
+      }
       template.addTextSegment(text.substring(start, offset));
 
       if (element == mySelection) {

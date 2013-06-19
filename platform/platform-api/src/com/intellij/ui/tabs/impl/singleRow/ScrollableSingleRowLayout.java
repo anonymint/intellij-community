@@ -43,6 +43,23 @@ public class ScrollableSingleRowLayout extends SingleRowLayout {
   public void scroll(int units) {
     myScrollOffset += units;
     if (myLastSingRowLayout != null) {
+      int offset = -myScrollOffset;
+      for (TabInfo info : myLastSingRowLayout.myVisibleInfos) {
+        final int length = getRequiredLength(info);
+        if (info == myTabs.getSelectedInfo()) {
+          if (offset < 0) {
+            myScrollOffset+=offset;
+          }
+          else {
+            final int maxLength = myLastSingRowLayout.toFitLength - getStrategy().getMoreRectAxisSize();
+            if (offset + length > maxLength) {
+              myScrollOffset+=offset + length - maxLength;
+            }
+          }
+          break;
+        }
+        offset += length;
+      }
       clampScrollOffsetToBounds(myLastSingRowLayout);
     }
   }
@@ -117,11 +134,6 @@ public class ScrollableSingleRowLayout extends SingleRowLayout {
   }
 
   @Override
-  protected void updateMoreIconVisibility(SingleRowPassInfo data) {
-    myMoreIcon.setPainted(data.requiredLength > data.toFitLength);
-  }
-
-  @Override
   protected boolean applyTabLayout(SingleRowPassInfo data, TabLabel label, int length, int deltaToFit) {
     if (data.requiredLength > data.toFitLength) {
       length = getStrategy().getLengthIncrement(label.getPreferredSize());
@@ -142,7 +154,7 @@ public class ScrollableSingleRowLayout extends SingleRowLayout {
   public boolean isTabHidden(TabInfo tabInfo) {
     final TabLabel label = myTabs.myInfo2Label.get(tabInfo);
     final Rectangle bounds = label.getBounds();
-    return getStrategy().getMinPosition(bounds) < 0 || bounds.isEmpty();
+    return getStrategy().getMinPosition(bounds) < -10 || bounds.isEmpty();
   }
 
   @Nullable

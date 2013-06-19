@@ -29,6 +29,7 @@ import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.ChangeContextUtil;
 import com.intellij.codeInsight.PsiEquivalenceUtil;
 import com.intellij.codeInsight.intention.AddAnnotationFix;
+import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
@@ -48,16 +49,12 @@ import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.listeners.JavaRefactoringListenerManager;
 import com.intellij.refactoring.listeners.impl.JavaRefactoringListenerManagerImpl;
-import com.intellij.refactoring.util.DocCommentPolicy;
-import com.intellij.refactoring.util.RefactoringHierarchyUtil;
-import com.intellij.refactoring.util.RefactoringUIUtil;
-import com.intellij.refactoring.util.RefactoringUtil;
+import com.intellij.refactoring.util.*;
 import com.intellij.refactoring.util.classMembers.ClassMemberReferencesVisitor;
 import com.intellij.refactoring.util.classMembers.MemberInfo;
 import com.intellij.refactoring.util.duplicates.MethodDuplicatesHandler;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
-import com.intellij.usageView.UsageViewUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Query;
 import com.intellij.util.VisibilityUtil;
@@ -157,7 +154,7 @@ public class PullUpHelper extends BaseRefactoringProcessor{
   }
 
   protected String getCommandName() {
-    return RefactoringBundle.message("pullUp.command", UsageViewUtil.getDescriptiveName(mySourceClass));
+    return RefactoringBundle.message("pullUp.command", DescriptiveNameUtil.getDescriptiveName(mySourceClass));
   }
 
   public void moveMembersToBase() throws IncorrectOperationException {
@@ -218,6 +215,19 @@ public class PullUpHelper extends BaseRefactoringProcessor{
     for (MemberInfo info : myMembersToMove) {
       if (info.getMember() instanceof PsiMethod) {
         PsiMethod method = (PsiMethod)info.getMember();
+        PsiMethod sibling = method;
+        PsiMethod anchor = null;
+        while (sibling != null) {
+          sibling = PsiTreeUtil.getNextSiblingOfType(sibling, PsiMethod.class);
+          if (sibling != null) {
+            anchor = MethodSignatureUtil
+              .findMethodInSuperClassBySignatureInDerived(method.getContainingClass(), myTargetSuperClass,
+                                                          sibling.getSignature(PsiSubstitutor.EMPTY), false);
+            if (anchor != null) {
+              break;
+            }
+          }
+        }
         PsiMethod methodCopy = (PsiMethod)method.copy();
         if (method.findSuperMethods(myTargetSuperClass).length == 0) {
           deleteOverrideAnnotationIfFound(methodCopy);
@@ -230,7 +240,7 @@ public class PullUpHelper extends BaseRefactoringProcessor{
 
           myJavaDocPolicy.processCopiedJavaDoc(methodCopy.getDocComment(), method.getDocComment(), isOriginalMethodAbstract);
 
-          final PsiMember movedElement = (PsiMember)myTargetSuperClass.add(methodCopy);
+          final PsiMember movedElement = anchor != null ? (PsiMember)myTargetSuperClass.addBefore(methodCopy, anchor) : (PsiMember)myTargetSuperClass.add(methodCopy);
           CodeStyleSettings styleSettings = CodeStyleSettingsManager.getSettings(method.getProject());
           if (styleSettings.INSERT_OVERRIDE_ANNOTATION) {
             if (PsiUtil.isLanguageLevel5OrHigher(mySourceClass) && !myTargetSuperClass.isInterface() || PsiUtil.isLanguageLevel6OrHigher(mySourceClass)) {
@@ -261,7 +271,8 @@ public class PullUpHelper extends BaseRefactoringProcessor{
             superClassMethod.replace(methodCopy);
           }
           else {
-            final PsiMember movedElement = (PsiMember)myTargetSuperClass.add(methodCopy);
+            final PsiMember movedElement =
+              anchor != null ? (PsiMember)myTargetSuperClass.addBefore(methodCopy, anchor) : (PsiMember)myTargetSuperClass.add(methodCopy);
             myMembersAfterMove.add(movedElement);
           }
           method.delete();
@@ -485,7 +496,7 @@ public class PullUpHelper extends BaseRefactoringProcessor{
       PsiStatement assignmentStatement = (PsiStatement)constructor.getBody().add(initializer.initializer);
 
       ChangeContextUtil.decodeContextInfo(assignmentStatement,
-                                          myTargetSuperClass, RefactoringUtil.createThisExpression(myManager, null));
+                                          myTargetSuperClass, RefactoringChangeUtil.createThisExpression(myManager, null));
       for (PsiElement psiElement : initializer.statementsToRemove) {
         psiElement.delete();
       }

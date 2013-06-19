@@ -30,11 +30,13 @@ import com.intellij.refactoring.ui.NameSuggestionsField;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.ParameterTablePanel;
 import com.intellij.refactoring.util.RefactoringMessageUtil;
+import com.intellij.refactoring.util.VariableData;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.NonFocusableCheckBox;
 import com.intellij.util.Function;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.ui.FormBuilder;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
@@ -48,7 +50,7 @@ class AnonymousToInnerDialog extends DialogWrapper{
   private final boolean myShowCanBeStatic;
 
   private NameSuggestionsField myNameField;
-  private final ParameterTablePanel.VariableData[] myVariableData;
+  private final VariableData[] myVariableData;
   private final Map<PsiVariable,VariableInfo> myVariableToInfoMap = new HashMap<PsiVariable, VariableInfo>();
   private JCheckBox myCbMakeStatic;
 
@@ -64,7 +66,7 @@ class AnonymousToInnerDialog extends DialogWrapper{
     for (VariableInfo info : variableInfos) {
       myVariableToInfoMap.put(info.variable, info);
     }
-    myVariableData = new ParameterTablePanel.VariableData[variableInfos.length];
+    myVariableData = new VariableData[variableInfos.length];
 
     final JavaCodeStyleManager codeStyleManager = JavaCodeStyleManager.getInstance(myProject);
     for(int idx = 0; idx < variableInfos.length; idx++){
@@ -73,7 +75,7 @@ class AnonymousToInnerDialog extends DialogWrapper{
       VariableKind kind = codeStyleManager.getVariableKind(info.variable);
       name = codeStyleManager.variableNameToPropertyName(name, kind);
       name = codeStyleManager.propertyNameToVariableName(name, VariableKind.PARAMETER);
-      ParameterTablePanel.VariableData data = new ParameterTablePanel.VariableData(info.variable);
+      VariableData data = new VariableData(info.variable);
       data.name = name;
       data.passAsParameter = true;
       myVariableData[idx] = data;
@@ -105,6 +107,7 @@ class AnonymousToInnerDialog extends DialogWrapper{
     myNameField.selectNameWithoutExtension();
   }
 
+  @NotNull
   protected Action[] createActions(){
     return new Action[]{getOKAction(),getCancelAction(),getHelpAction()};
   }
@@ -125,7 +128,7 @@ class AnonymousToInnerDialog extends DialogWrapper{
     JavaCodeStyleManager codeStyleManager = JavaCodeStyleManager.getInstance(myProject);
     VariableInfo[] infos = new VariableInfo[myVariableData.length];
     for (int idx = 0; idx < myVariableData.length; idx++) {
-      ParameterTablePanel.VariableData data = myVariableData[idx];
+      VariableData data = myVariableData[idx];
       VariableInfo info = myVariableToInfoMap.get(data.variable);
 
       info.passAsParameter = data.passAsParameter;

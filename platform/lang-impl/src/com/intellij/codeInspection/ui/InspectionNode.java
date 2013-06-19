@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.codeInspection.ex.InspectionTool;
 import com.intellij.icons.AllIcons;
 import com.intellij.ui.LayeredIcon;
 import com.intellij.util.IconUtil;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.util.Enumeration;
@@ -28,13 +29,10 @@ import java.util.Enumeration;
  * @author max
  */
 public class InspectionNode extends InspectionTreeNode {
-  public static final Icon TOOL;
+  public static final Icon TOOL = LayeredIcon.create(AllIcons.Toolwindows.ToolWindowInspection, IconUtil.getEmptyIcon(false));
+  private boolean myTooBigForOnlineRefresh = false;
 
-  static {
-    TOOL = LayeredIcon.create(AllIcons.Toolwindows.ToolWindowInspection, IconUtil.getEmptyIcon(false));
-  }
-
-  public InspectionNode(InspectionTool tool) {
+  public InspectionNode(@NotNull InspectionTool tool) {
     super(tool);
   }
 
@@ -42,14 +40,22 @@ public class InspectionNode extends InspectionTreeNode {
     return getTool().getDisplayName();
   }
 
+  @NotNull
   public InspectionTool getTool() {
     return (InspectionTool)getUserObject();
   }
 
+  @Override
   public Icon getIcon(boolean expanded) {
     return TOOL;
   }
 
+  public boolean isTooBigForOnlineRefresh() {
+    if(!myTooBigForOnlineRefresh) myTooBigForOnlineRefresh = getProblemCount()>1000;
+    return myTooBigForOnlineRefresh;
+  }
+
+  @Override
   public int getProblemCount() {
     int sum = 0;
     Enumeration children = children();

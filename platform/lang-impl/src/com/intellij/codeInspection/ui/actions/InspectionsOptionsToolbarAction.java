@@ -19,7 +19,6 @@ import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -39,14 +38,14 @@ import java.util.Set;
  * Date: 11-Jan-2006
  */
 public class InspectionsOptionsToolbarAction extends AnAction {
-  private static final Logger LOG = Logger.getInstance("com.intellij.codeInspection.ui.actions.SuppressInspectionToolbarAction");
   private final InspectionResultsView myView;
 
   public InspectionsOptionsToolbarAction(final InspectionResultsView view) {
     super(getToolOptions(null), getToolOptions(null), AllIcons.General.InspectionsOff);
-    myView = view;    
+    myView = view;
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     final DefaultActionGroup options = new DefaultActionGroup();
     final List<AnAction> actions = createActions();
@@ -65,6 +64,7 @@ public class InspectionsOptionsToolbarAction extends AnAction {
     return myView.getTree().getSelectedTool();
   }
 
+  @Override
   public void update(AnActionEvent e) {
     if (!myView.isSingleToolInSelection()) {
       e.getPresentation().setEnabled(false);
@@ -97,6 +97,7 @@ public class InspectionsOptionsToolbarAction extends AnAction {
     result.add(new DisableInspectionAction(key));
 
     result.add(new AnAction(InspectionsBundle.message("run.inspection.on.file.intention.text")) {
+      @Override
       public void actionPerformed(final AnActionEvent e) {
         final PsiElement psiElement = getPsiElement(tree);
         assert psiElement != null;
@@ -124,7 +125,7 @@ public class InspectionsOptionsToolbarAction extends AnAction {
     });
 
     result.add(new SuppressActionWrapper(myView.getProject(), tool, tree.getSelectionPaths()));
-    
+
 
     return result;
   }
@@ -137,6 +138,7 @@ public class InspectionsOptionsToolbarAction extends AnAction {
       myKey = key;
     }
 
+    @Override
     public void actionPerformed(final AnActionEvent e) {
       try {
         if (myView.isProfileDefined()) {

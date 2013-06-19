@@ -2,6 +2,7 @@
   <keymap name="Emacs" parent="$default" version="1" disable-mnemonics="false">
     <action id="EditorEscape">
       <keyboard-shortcut first-keystroke="ESCAPE" second-keystroke="ESCAPE"/>
+      <keyboard-shortcut first-keystroke="control G"/>
     </action>
     <action id="EditorCutLineBackward">
       <keyboard-shortcut first-keystroke="alt MINUS" second-keystroke="control K"/>
@@ -45,6 +46,9 @@
     </action>
     <action id="EditorSwapSelectionBoundaries">
       <keyboard-shortcut first-keystroke="control X" second-keystroke="X"/>
+    </action>
+    <action id="$SelectAll">
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="H" />
     </action>
     <action id="AutoIndentLines">
       <keyboard-shortcut first-keystroke="control alt I"/>
@@ -104,6 +108,12 @@
     <action id="GotoClass">
       <keyboard-shortcut first-keystroke="shift alt G"/>
     </action>
+    <action id="Switcher">
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="B"/>
+    </action>
+    <action id="GotoFile">
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="control F" />
+    </action>
     <action id="EditorRight">
       <keyboard-shortcut first-keystroke="RIGHT"/>
       <keyboard-shortcut first-keystroke="control F"/>
@@ -148,6 +158,7 @@
     <action id="NextTab">
       <keyboard-shortcut first-keystroke="alt RIGHT"/>
       <keyboard-shortcut first-keystroke="control X" second-keystroke="N"/>
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="O"/>
     </action>
     <action id="NextEditorTab">
       <keyboard-shortcut first-keystroke="alt shift RIGHT"/>
@@ -189,6 +200,7 @@
     <action id="EditorLineStart">
       <keyboard-shortcut first-keystroke="HOME"/>
       <keyboard-shortcut first-keystroke="control A"/>
+      <keyboard-shortcut first-keystroke="alt M"/>
     </action>
     <action id="EditorCodeBlockStartWithSelection">
       <keyboard-shortcut first-keystroke="shift control OPEN_BRACKET"/>
@@ -200,6 +212,9 @@
     </action>
     <action id="CloseAllEditors">
       <keyboard-shortcut first-keystroke="control X" second-keystroke="control C"/>
+    </action>
+    <action id="CloseAllEditorsButActive">
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="1" />
     </action>
     <action id="Find">
       <keyboard-shortcut first-keystroke="control alt S"/>
@@ -219,6 +234,9 @@
     <action id="EmacsStyleIndent">
       <keyboard-shortcut first-keystroke="TAB"/>
     </action>
+    <action id="ExpandLiveTemplateByTab">
+      <keyboard-shortcut first-keystroke="TAB"/>
+    </action>
     <action id="EditorUp">
       <keyboard-shortcut first-keystroke="UP"/>
       <keyboard-shortcut first-keystroke="control P"/>
@@ -226,12 +244,13 @@
     <action id="CloseContent">
       <keyboard-shortcut first-keystroke="control F4"/>
       <keyboard-shortcut first-keystroke="control X" second-keystroke="K"/>
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="0"/>
     </action>
     <action id="SplitVertically">
-      <keyboard-shortcut first-keystroke="control X" second-keystroke="2"/>
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="3"/>
     </action>
     <action id="SplitHorizontally">
-      <keyboard-shortcut first-keystroke="control X" second-keystroke="3"/>
+      <keyboard-shortcut first-keystroke="control X" second-keystroke="2"/>
     </action>
     <action id="UnsplitAll">
       <keyboard-shortcut first-keystroke="control 1"/>
@@ -256,9 +275,6 @@
       <keyboard-shortcut first-keystroke="PAGE_DOWN"/>
       <keyboard-shortcut first-keystroke="control V"/>
     </action>
-    <action id="OpenFile">
-      <keyboard-shortcut first-keystroke="control X" second-keystroke="control F"/>
-    </action>
     <action id="VcsShowNextChangeMarker">
       <keyboard-shortcut first-keystroke="shift control alt DOWN"/>
     </action>
@@ -278,7 +294,6 @@
     <action id="OverrideMethods"/>
     <action id="ToggleBookmark2" />
     <action id="SafeDelete" />
-    <action id="$SelectAll"/>
     <action id="IntroduceField"/>
     <action id="RecentFiles"/>
     <action id="EditorTab"/>

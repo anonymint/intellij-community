@@ -44,6 +44,7 @@ public class FavoritesTreeNodeDescriptor extends PresentableNodeDescriptor<Abstr
     myElement = element;
   }
 
+  @Override
   protected void update(PresentationData presentation) {
     myElement.update();
     presentation.copyFrom(myElement.getPresentation());
@@ -54,17 +55,17 @@ public class FavoritesTreeNodeDescriptor extends PresentableNodeDescriptor<Abstr
     return parentValue instanceof PsiDirectory || parentValue instanceof PackageElement;
   }*/
 
-  public String getLocation(){
+  public String getLocation() {
     return getLocation(myElement, myProject);
   }
 
   public static String getLocation(final AbstractTreeNode element, final Project project) {
     Object nodeElement = element.getValue();
-    if (nodeElement instanceof SmartPsiElementPointer){
+    if (nodeElement instanceof SmartPsiElementPointer) {
       nodeElement = ((SmartPsiElementPointer)nodeElement).getElement();
     }
-    if (nodeElement instanceof PsiElement){
-      if (nodeElement instanceof PsiDirectory){
+    if (nodeElement instanceof PsiElement) {
+      if (nodeElement instanceof PsiDirectory) {
         return ((PsiDirectory)nodeElement).getVirtualFile().getPresentableUrl();
       }
       if (nodeElement instanceof PsiFile) {
@@ -74,23 +75,24 @@ public class FavoritesTreeNodeDescriptor extends PresentableNodeDescriptor<Abstr
       }
     }
 
-    if (nodeElement instanceof LibraryGroupElement){
+    if (nodeElement instanceof LibraryGroupElement) {
       return ((LibraryGroupElement)nodeElement).getModule().getName();
     }
-    if (nodeElement instanceof NamedLibraryElement){
+    if (nodeElement instanceof NamedLibraryElement) {
       final NamedLibraryElement namedLibraryElement = ((NamedLibraryElement)nodeElement);
       final Module module = namedLibraryElement.getModule();
       return (module != null ? module.getName() : "") + ":" + namedLibraryElement.getOrderEntry().getPresentableName();
     }
 
     final FavoriteNodeProvider[] nodeProviders = Extensions.getExtensions(FavoriteNodeProvider.EP_NAME, project);
-    for(FavoriteNodeProvider provider: nodeProviders) {
+    for (FavoriteNodeProvider provider : nodeProviders) {
       String location = provider.getElementLocation(nodeElement);
       if (location != null) return location;
     }
     return null;
   }
 
+  @Override
   public AbstractTreeNode getElement() {
     return myElement;
   }
@@ -116,6 +118,7 @@ public class FavoritesTreeNodeDescriptor extends PresentableNodeDescriptor<Abstr
     return descriptor;
   }
 
+  @Override
   public PresentableNodeDescriptor getChildToHighlightAt(int index) {
     return myElement.getChildToHighlightAt(index);
   }

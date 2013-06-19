@@ -78,7 +78,6 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
   public boolean AUTO_POPUP_JAVADOC_INFO = false;
   public int JAVADOC_INFO_DELAY = 1000;
   public boolean AUTO_POPUP_COMPLETION_LOOKUP = true;
-  public int AUTO_LOOKUP_DELAY = 0;
 
   @MagicConstant(intValues = {ALL, NONE, FIRST_LETTER})
   public int COMPLETION_CASE_SENSITIVE = FIRST_LETTER;
@@ -92,6 +91,7 @@ public class CodeInsightSettings implements PersistentStateComponent<Element>, C
   public static final int SMART = 2;
   public static final int ALWAYS = 3;
 
+  public boolean SELECT_AUTOPOPUP_SUGGESTIONS_BY_CHARS = false;
   public boolean AUTOCOMPLETE_ON_CODE_COMPLETION = true;
   public boolean AUTOCOMPLETE_ON_SMART_TYPE_COMPLETION = true;
   @Deprecated public boolean AUTOCOMPLETE_ON_CLASS_NAME_COMPLETION = false;

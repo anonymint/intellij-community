@@ -18,6 +18,7 @@ package git4idea.changes;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.Change;
@@ -29,18 +30,14 @@ import com.intellij.openapi.vcs.history.VcsRevisionNumber;
 import com.intellij.openapi.vcs.versionBrowser.ChangeBrowserSettings;
 import com.intellij.openapi.vcs.versionBrowser.ChangesBrowserSettingsEditor;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
-import com.intellij.openapi.vcs.versionBrowser.CommittedChangeListImpl;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.AsynchConsumer;
 import com.intellij.util.Consumer;
-import git4idea.GitFileRevision;
-import git4idea.GitLocalBranch;
-import git4idea.GitRemoteBranch;
-import git4idea.GitUtil;
+import git4idea.*;
 import git4idea.commands.GitSimpleHandler;
 import git4idea.history.GitHistoryUtils;
-import git4idea.history.browser.GitCommit;
+import git4idea.history.browser.GitHeavyCommit;
 import git4idea.history.browser.SymbolicRefs;
 import git4idea.repo.GitRepository;
 import org.jetbrains.annotations.NotNull;
@@ -136,9 +133,9 @@ public class GitCommittedChangeListProvider implements CommittedChangesProvider<
     throws VcsException {
     GitRepositoryLocation l = (GitRepositoryLocation)location;
     final Long beforeRev = settings.getChangeBeforeFilter();
-    final Long afterRev = settings.getChangeBeforeFilter();
+    final Long afterRev = settings.getChangeAfterFilter();
     final Date beforeDate = settings.getDateBeforeFilter();
-    final Date afterDate = settings.getDateBeforeFilter();
+    final Date afterDate = settings.getDateAfterFilter();
     final String author = settings.getUserFilter();
     VirtualFile root = LocalFileSystem.getInstance().findFileByIoFile(l.getRoot());
     if (root == null) {
@@ -188,23 +185,22 @@ public class GitCommittedChangeListProvider implements CommittedChangesProvider<
   public Pair<CommittedChangeList, FilePath> getOneList(final VirtualFile file, final VcsRevisionNumber number) throws VcsException {
     final FilePathImpl filePath = new FilePathImpl(file);
 
-    final List<GitCommit> gitCommits =
+    final List<GitHeavyCommit> gitCommits =
       GitHistoryUtils.commitsDetails(myProject, filePath, new SymbolicRefs(), Collections.singletonList(number.asString()));
     if (gitCommits.size() != 1) {
       return null;
     }
-    final GitCommit gitCommit = gitCommits.get(0);
-    final CommittedChangeList commit = new CommittedChangeListImpl(gitCommit.getDescription() + " (" + gitCommit.getShortHash().getString() + ")",
-                                                                   gitCommit.getDescription(), gitCommit.getCommitter(),
-                                                                   GitChangeUtils.longForSHAHash(gitCommit.getHash().getValue()),
-                                                                   gitCommit.getDate(), gitCommit.getChanges());
+    final GitHeavyCommit gitCommit = gitCommits.get(0);
+    CommittedChangeList commit = new GitCommittedChangeList(gitCommit.getDescription() + " (" + gitCommit.getShortHash().getString() + ")",
+                                                            gitCommit.getDescription(), gitCommit.getAuthor(), (GitRevisionNumber)number,
+                                                            new Date(gitCommit.getAuthorTime()), gitCommit.getChanges(), true);
 
     final Collection<Change> changes = commit.getChanges();
     if (changes.size() == 1) {
       return new Pair<CommittedChangeList, FilePath>(commit, changes.iterator().next().getAfterRevision().getFile());
     }
     for (Change change : changes) {
-      if (change.getAfterRevision() != null && filePath.getIOFile().equals(change.getAfterRevision().getFile().getIOFile())) {
+      if (change.getAfterRevision() != null && FileUtil.filesEqual(filePath.getIOFile(), change.getAfterRevision().getFile().getIOFile())) {
         return new Pair<CommittedChangeList, FilePath>(commit, filePath);
       }
     }

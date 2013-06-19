@@ -27,9 +27,10 @@ import org.jetbrains.annotations.Nullable;
  * @author max
  */
 public class SameReturnValueInspection extends GlobalJavaInspectionTool {
+  @Override
   @Nullable
-  public CommonProblemDescriptor[] checkElement(RefEntity refEntity, AnalysisScope scope, InspectionManager manager, GlobalInspectionContext globalContext,
-                                                ProblemDescriptionsProcessor processor) {
+  public CommonProblemDescriptor[] checkElement(@NotNull RefEntity refEntity, @NotNull AnalysisScope scope, @NotNull InspectionManager manager, @NotNull GlobalInspectionContext globalContext,
+                                                @NotNull ProblemDescriptionsProcessor processor) {
     if (refEntity instanceof RefMethod) {
       final RefMethod refMethod = (RefMethod)refEntity;
 
@@ -55,14 +56,16 @@ public class SameReturnValueInspection extends GlobalJavaInspectionTool {
   }
 
 
-  protected boolean queryExternalUsagesRequests(final RefManager manager, final GlobalJavaInspectionContext globalContext,
-                                                final ProblemDescriptionsProcessor processor) {
+  @Override
+  protected boolean queryExternalUsagesRequests(@NotNull final RefManager manager, @NotNull final GlobalJavaInspectionContext globalContext,
+                                                @NotNull final ProblemDescriptionsProcessor processor) {
     manager.iterate(new RefJavaVisitor() {
-      @Override public void visitElement(RefEntity refEntity) {
+      @Override public void visitElement(@NotNull RefEntity refEntity) {
         if (refEntity instanceof RefElement && processor.getDescriptions(refEntity) != null) {
           refEntity.accept(new RefJavaVisitor() {
-            @Override public void visitMethod(final RefMethod refMethod) {
+            @Override public void visitMethod(@NotNull final RefMethod refMethod) {
               globalContext.enqueueDerivedMethodsProcessor(refMethod, new GlobalJavaInspectionContext.DerivedMethodsProcessor() {
+                @Override
                 public boolean process(PsiMethod derivedMethod) {
                   processor.ignoreElement(refMethod);
                   return false;
@@ -77,16 +80,19 @@ public class SameReturnValueInspection extends GlobalJavaInspectionTool {
     return false;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return InspectionsBundle.message("inspection.same.return.value.display.name");
   }
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return GroupNames.DECLARATION_REDUNDANCY;
   }
 
+  @Override
   @NotNull
   public String getShortName() {
     return "SameReturnValue";

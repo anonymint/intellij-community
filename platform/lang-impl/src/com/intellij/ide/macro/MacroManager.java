@@ -30,11 +30,13 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ConvertingIterator;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.HashMap;
+import gnu.trove.THashMap;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.Map;
 
 public final class MacroManager {
   private final HashMap<String, Macro> myMacrosMap = new HashMap<String, Macro>();
@@ -46,9 +48,13 @@ public final class MacroManager {
   private MacroManager() {
     registerMacro(new SourcepathMacro());
     registerMacro(new FileDirMacro());
+    registerMacro(new FileDirNameMacro());
+    registerMacro(new FileParentDirMacro());
+    registerMacro(new FileDirPathFromParentMacro());
     registerMacro(new FileExtMacro());
     registerMacro(new FileNameMacro());
     registerMacro(new FileNameWithoutExtension());
+    registerMacro(new FileNameWithoutAllExtensions());
     registerMacro(new FilePathMacro());
     registerMacro(new FileEncodingMacro());
     registerMacro(new FileDirRelativeToProjectRootMacro());
@@ -74,6 +80,7 @@ public final class MacroManager {
     registerMacro(new LineNumberMacro());
     registerMacro(new ColumnNumberMacro());
 
+    registerMacro(new ClipboardContentMacro());
     registerMacro(new SelectedTextMacro());
     registerMacro(new SelectionStartLineMacro());
     registerMacro(new SelectionStartColumnMacro());
@@ -144,7 +151,8 @@ public final class MacroManager {
       Macro macro = macros.next();
       if (macro instanceof SecondQueueExpandMacro && firstQueueExpand) continue;
       String name = "$" + macro.getName() + "$";
-      if (str.indexOf(name) >= 0) {
+      String macroNameWithParamStart = "$" + macro.getName() + "(";
+      if (str.contains(name)) {
         String expanded = macro.expand(dataContext);
         //if (dataContext instanceof DataManagerImpl.MyDataContext) {
         //  // hack: macro.expand() can cause UI events such as showing dialogs ('Prompt' macro) which may 'invalidate' the datacontext
@@ -156,12 +164,38 @@ public final class MacroManager {
         }
         str = StringUtil.replace(str, name, expanded);
       }
+      else if(str.contains(macroNameWithParamStart)) {
+        String macroNameWithParamEnd = ")$";
+        Map<String, String> toReplace = null;
+        int i = str.indexOf(macroNameWithParamStart);
+        while (i != -1) {
+          int j = str.indexOf(macroNameWithParamEnd, i + macroNameWithParamStart.length());
+          if(j > i) {
+            String param = str.substring(i + macroNameWithParamStart.length(), j);
+            if(toReplace == null) toReplace = new THashMap<String, String>();
+            String expanded = macro.expand(dataContext, param);
+            if (expanded == null) {
+              expanded = "";
+            }
+            toReplace.put(macroNameWithParamStart + param + macroNameWithParamEnd, expanded);
+            i = j + macroNameWithParamEnd.length();
+          } else {
+            break;
+          }
+        }
+        if(toReplace !=null) {
+          for (Map.Entry<String, String> entry : toReplace.entrySet()) {
+            str = StringUtil.replace(str, entry.getKey(), entry.getValue());
+          }
+        }
+      }
     }
     return str;
   }
 
   public String expandSilentMarcos(String str, boolean firstQueueExpand, DataContext dataContext) throws Macro.ExecutionCancelledException {
     final Convertor<Macro, Macro> convertor = new Convertor<Macro, Macro>() {
+      @Override
       public Macro convert(Macro macro) {
         if (macro instanceof PromptingMacro) {
           return new Macro.Silent(macro, "");

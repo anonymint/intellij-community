@@ -15,7 +15,9 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
+import com.intellij.codeInsight.FileModificationService;
+import com.intellij.codeInsight.PsiEquivalenceUtil;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
 import com.intellij.codeInsight.lookup.LookupElement;
@@ -182,7 +184,7 @@ public class CreateLocalVarFromInstanceofAction extends BaseIntentionAction {
     if (isNegated(instanceOfExpression)) return false;
     final PsiExpression expression = statement.getExpression();
     final PsiExpression operand = instanceOfExpression.getOperand();
-    if (operand instanceof PsiReferenceExpression && expression instanceof PsiReferenceExpression && 
+    if (operand instanceof PsiReferenceExpression && expression instanceof PsiReferenceExpression &&
         ((PsiReferenceExpression)operand).resolve() == ((PsiReferenceExpression)expression).resolve()){
       return true;
     }
@@ -196,15 +198,15 @@ public class CreateLocalVarFromInstanceofAction extends BaseIntentionAction {
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
     PsiInstanceOfExpression instanceOfExpression = getInstanceOfExpressionAtCaret(editor, file);
     assert instanceOfExpression.getContainingFile() == file : instanceOfExpression.getContainingFile() + "; file="+file;
     try {
-      final PsiStatement statementInside = isNegated(instanceOfExpression) ? null : getExpressionStatementInside(file, editor);
+      final PsiStatement statementInside = isNegated(instanceOfExpression) ? null : getExpressionStatementInside(file, editor, instanceOfExpression.getOperand());
       PsiDeclarationStatement decl = createLocalVariableDeclaration(instanceOfExpression, statementInside);
       if (decl == null) return;
-      decl = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(decl);
+      decl = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(decl);
 
       PsiLocalVariable localVariable = (PsiLocalVariable)decl.getDeclaredElements()[0];
       TemplateBuilderImpl builder = new TemplateBuilderImpl(localVariable);
@@ -213,6 +215,7 @@ public class CreateLocalVarFromInstanceofAction extends BaseIntentionAction {
       Template template = generateTemplate(project, localVariable.getInitializer(), localVariable.getType());
 
       Editor newEditor = CreateFromUsageBaseFix.positionCursor(project, file, localVariable.getNameIdentifier());
+      if (newEditor == null) return;
       TextRange range = localVariable.getNameIdentifier().getTextRange();
       newEditor.getDocument().deleteString(range.getStartOffset(), range.getEndOffset());
 
@@ -242,7 +245,7 @@ public class CreateLocalVarFromInstanceofAction extends BaseIntentionAction {
   }
 
   @Nullable
-  protected static PsiStatement getExpressionStatementInside(PsiFile file, Editor editor) {
+  protected static PsiStatement getExpressionStatementInside(PsiFile file, Editor editor, @NotNull PsiExpression operand) {
     PsiElement elementAt = file.findElementAt(editor.getCaretModel().getOffset());
 
     PsiBlockStatement blockStatement = PsiTreeUtil.getParentOfType(elementAt, PsiBlockStatement.class);
@@ -266,13 +269,15 @@ public class CreateLocalVarFromInstanceofAction extends BaseIntentionAction {
 
     if (blockStatement != null) {
       final PsiStatement[] statements = blockStatement.getCodeBlock().getStatements();
-      if (statements.length == 1 && statements[0] instanceof PsiExpressionStatement) {
+      if (statements.length == 1 &&
+          statements[0] instanceof PsiExpressionStatement &&
+          PsiEquivalenceUtil.areElementsEquivalent(((PsiExpressionStatement)statements[0]).getExpression(), operand)) {
         return statements[0];
       }
     }
     return null;
   }
-  
+
   @Nullable
   private static PsiDeclarationStatement createLocalVariableDeclaration(final PsiInstanceOfExpression instanceOfExpression,
                                                                         final PsiStatement statementInside) throws IncorrectOperationException {

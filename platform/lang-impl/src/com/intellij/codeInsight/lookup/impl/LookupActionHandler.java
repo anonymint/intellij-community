@@ -72,6 +72,24 @@ public abstract class LookupActionHandler extends EditorActionHandler {
     return lookup != null || myOriginalHandler.isEnabled(editor, dataContext);
   }
 
+  private static void executeUpOrDown(LookupImpl lookup, boolean up) {
+    if (!lookup.isFocused()) {
+      boolean semiFocused = lookup.getFocusDegree() == LookupImpl.FocusDegree.SEMI_FOCUSED;
+      lookup.setFocusDegree(LookupImpl.FocusDegree.FOCUSED);
+      if (!up && !semiFocused) {
+        return;
+      }
+    }
+    if (up) {
+      ListScrollingUtil.moveUp(lookup.getList(), 0);
+    } else {
+      ListScrollingUtil.moveDown(lookup.getList(), 0);
+    }
+    lookup.markSelectionTouched();
+    lookup.refreshUi(false, true);
+
+  }
+
   public static class DownHandler extends LookupActionHandler {
 
     public DownHandler(EditorActionHandler originalHandler){
@@ -80,19 +98,9 @@ public abstract class LookupActionHandler extends EditorActionHandler {
 
     @Override
     protected void executeInLookup(final LookupImpl lookup, DataContext context) {
-      executeDown(lookup);
+      executeUpOrDown(lookup, false);
     }
 
-    static void executeDown(LookupImpl lookup) {
-      if (!lookup.isFocused()) {
-        lookup.setFocused(true);
-        lookup.uninstallPreview();
-        lookup.getList().setSelectedIndex(0);
-        lookup.refreshUi(false, true);
-      } else {
-        ListScrollingUtil.moveDown(lookup.getList(), 0);
-      }
-    }
   }
 
   public static class UpAction extends DumbAwareAction {
@@ -138,26 +146,13 @@ public abstract class LookupActionHandler extends EditorActionHandler {
 
     @Override
     protected void executeInLookup(final LookupImpl lookup, DataContext context) {
-      if (!executeUp(lookup)) {
+      if (!UISettings.getInstance().CYCLE_SCROLLING && !lookup.isFocused() && lookup.getList().getSelectedIndex() == 0) {
         myOriginalHandler.execute(lookup.getEditor(), context);
+        return;
       }
+      executeUpOrDown(lookup, true);
     }
 
-    static boolean executeUp(final LookupImpl lookup) {
-      if (!lookup.isFocused()) {
-        if (!UISettings.getInstance().CYCLE_SCROLLING) {
-          return false;
-        }
-
-        lookup.setFocused(true);
-        lookup.uninstallPreview();
-        lookup.getList().setSelectedIndex(0);
-      }
-      lookup.markSelectionTouched();
-      ListScrollingUtil.moveUp(lookup.getList(), 0);
-      lookup.refreshUi(false, true);
-      return true;
-    }
   }
 
   public static class PageDownHandler extends LookupActionHandler {
@@ -167,8 +162,7 @@ public abstract class LookupActionHandler extends EditorActionHandler {
 
     @Override
     protected void executeInLookup(final LookupImpl lookup, DataContext context) {
-      lookup.setFocused(true);
-      lookup.uninstallPreview();
+      lookup.setFocusDegree(LookupImpl.FocusDegree.FOCUSED);
       ListScrollingUtil.movePageDown(lookup.getList());
     }
   }
@@ -180,8 +174,7 @@ public abstract class LookupActionHandler extends EditorActionHandler {
 
     @Override
     protected void executeInLookup(final LookupImpl lookup, DataContext context) {
-      lookup.setFocused(true);
-      lookup.uninstallPreview();
+      lookup.setFocusDegree(LookupImpl.FocusDegree.FOCUSED);
       ListScrollingUtil.movePageUp(lookup.getList());
     }
   }
@@ -198,8 +191,6 @@ public abstract class LookupActionHandler extends EditorActionHandler {
         return;
       }
 
-      CompletionPreview preview = lookup.uninstallPreview();
-
       if (!lookup.performGuardedChange(new Runnable() {
         @Override
         public void run() {
@@ -210,8 +201,6 @@ public abstract class LookupActionHandler extends EditorActionHandler {
       }
 
       BackspaceHandler.truncatePrefix(context, lookup, myOriginalHandler, lookup.getLookupStart() - 1);
-
-      CompletionPreview.reinstallPreview(preview);
     }
   }
   public static class RightHandler extends LookupActionHandler {
@@ -237,8 +226,6 @@ public abstract class LookupActionHandler extends EditorActionHandler {
         return;
       }
 
-      CompletionPreview preview = lookup.uninstallPreview();
-
       if (!lookup.performGuardedChange(new Runnable() {
         @Override
         public void run() {
@@ -254,7 +241,6 @@ public abstract class LookupActionHandler extends EditorActionHandler {
       if (completion != null) {
         completion.prefixUpdated();
       }
-      CompletionPreview.reinstallPreview(preview);
     }
   }
 

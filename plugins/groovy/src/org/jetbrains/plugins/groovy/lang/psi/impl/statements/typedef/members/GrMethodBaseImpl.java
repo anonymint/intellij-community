@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.extensions.NamedArgumentDescriptor;
 import org.jetbrains.plugins.groovy.gpp.GppTypeConverter;
-import org.jetbrains.plugins.groovy.lang.GrReferenceAdjuster;
 import org.jetbrains.plugins.groovy.lang.groovydoc.psi.api.GrDocComment;
 import org.jetbrains.plugins.groovy.lang.groovydoc.psi.impl.GrDocCommentUtil;
 import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
@@ -132,7 +131,19 @@ public abstract class GrMethodBaseImpl extends GrStubElementBase<GrMethodStub> i
     return getParameterList().getParameters();
   }
 
+  @Nullable
   public GrTypeElement getReturnTypeElementGroovy() {
+    final GrMethodStub stub = getStub();
+    if (stub != null) {
+      final String typeText = stub.getTypeText();
+      if (typeText != null) {
+        return GroovyPsiElementFactory.getInstance(getProject()).createTypeElement(typeText, this);
+      }
+      else {
+        return null;
+      }
+    }
+
     return (GrTypeElement)findChildByType(GroovyElementTypes.TYPE_ELEMENTS);
   }
 
@@ -267,7 +278,7 @@ public abstract class GrMethodBaseImpl extends GrStubElementBase<GrMethodStub> i
       @Override
       public void visitCodeReferenceElement(GrCodeReferenceElement refElement) {
         super.visitCodeReferenceElement(refElement);
-        GrReferenceAdjuster.shortenReference(refElement);
+        org.jetbrains.plugins.groovy.codeStyle.GrReferenceAdjuster.shortenReference(refElement);
       }
     });
     return newTypeElement;
@@ -528,25 +539,7 @@ public abstract class GrMethodBaseImpl extends GrStubElementBase<GrMethodStub> i
   }
 
   public PsiType getReturnTypeNoResolve() {
-    if (isConstructor()) return null;
-
-    final GrMethodStub stub = getStub();
-    if (stub != null) {
-      final String typeText = stub.getTypeText();
-      if (typeText == null) return null;
-
-      try {
-        return JavaPsiFacade.getInstance(getProject()).getElementFactory().createTypeFromText(typeText, this);
-      }
-      catch(IncorrectOperationException e){
-        LOG.error(e);
-        return null;
-      }
-    }
-
-    GrTypeElement typeElement = getReturnTypeElementGroovy();
-    if (typeElement == null) return null;
-    return typeElement.getTypeNoResolve(this);
+    return getReturnType();
   }
 
   @Override

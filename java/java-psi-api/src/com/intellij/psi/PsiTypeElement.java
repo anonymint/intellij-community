@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ public interface PsiTypeElement extends PsiElement,PsiAnnotationOwner {
   PsiTypeElement[] EMPTY_ARRAY = new PsiTypeElement[0];
 
   ArrayFactory<PsiTypeElement> ARRAY_FACTORY = new ArrayFactory<PsiTypeElement>() {
+    @NotNull
     @Override
     public PsiTypeElement[] create(final int count) {
       return count == 0 ? EMPTY_ARRAY : new PsiTypeElement[count];
@@ -53,7 +54,9 @@ public interface PsiTypeElement extends PsiElement,PsiAnnotationOwner {
   @Nullable
   PsiJavaCodeReferenceElement getInnermostComponentReferenceElement();
 
+  /** @deprecated use {@link PsiAnnotation#getOwner()} (to remove in IDEA 13) */
   PsiAnnotationOwner getOwner(PsiAnnotation annotation);
 
+  /** @deprecated use {@link #getType()} (to remove in IDEA 13) */
   PsiType getTypeNoResolve(@NotNull PsiElement context);
 }

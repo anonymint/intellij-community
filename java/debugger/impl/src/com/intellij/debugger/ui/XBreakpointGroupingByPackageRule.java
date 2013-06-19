@@ -17,19 +17,25 @@ package com.intellij.debugger.ui;
 
 import com.intellij.debugger.ui.breakpoints.BreakpointWithHighlighter;
 import com.intellij.debugger.ui.breakpoints.ExceptionBreakpoint;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.xdebugger.breakpoints.ui.XBreakpointGroup;
 import com.intellij.xdebugger.breakpoints.ui.XBreakpointGroupingRule;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
+import com.intellij.xdebugger.breakpoints.ui.XBreakpointsGroupingPriorities;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.Collection;
 
 public class XBreakpointGroupingByPackageRule<B> extends XBreakpointGroupingRule<B, XBreakpointPackageGroup> {
 
   protected XBreakpointGroupingByPackageRule() {
     super("XBreakpointGroupingByPackageRule", "Group by package");
+  }
+
+  @Override
+  public int getPriority() {
+    return XBreakpointsGroupingPriorities.BY_PACKAGE;
   }
 
   @Override
@@ -50,5 +56,11 @@ public class XBreakpointGroupingByPackageRule<B> extends XBreakpointGroupingRule
       }
     }
     return new XBreakpointPackageGroup(packageName);
+  }
+
+  @Nullable
+  @Override
+  public Icon getIcon() {
+    return AllIcons.Nodes.Package;
   }
 }

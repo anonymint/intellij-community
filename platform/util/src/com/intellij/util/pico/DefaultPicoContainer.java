@@ -17,6 +17,7 @@ package com.intellij.util.pico;
 
 import com.intellij.util.ReflectionCache;
 import com.intellij.util.containers.ConcurrentHashMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -35,8 +36,6 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
 
   private final Map<Object, ComponentAdapter> componentKeyToAdapterCache = new ConcurrentHashMap<Object, ComponentAdapter>();
   private final LinkedHashSetWrapper<ComponentAdapter> componentAdapters = new LinkedHashSetWrapper<ComponentAdapter>();
-  // Keeps track of instantiation order.
-  private final LinkedHashSetWrapper<ComponentAdapter> orderedComponentAdapters = new LinkedHashSetWrapper<ComponentAdapter>();
   private final Map<String, ComponentAdapter> classNameToAdapter = new ConcurrentHashMap<String, ComponentAdapter>();
   private final AtomicReference<FList<ComponentAdapter>> nonAssignableComponentAdapters = new AtomicReference<FList<ComponentAdapter>>(FList.<ComponentAdapter>emptyList());
 
@@ -49,6 +48,7 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     this(new DefaultComponentAdapterFactory(), null);
   }
 
+  @Override
   public Collection<ComponentAdapter> getComponentAdapters() {
     return componentAdapters.getImmutableSet();
   }
@@ -57,11 +57,17 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     return Collections.unmodifiableMap(classNameToAdapter);
   }
 
-
-  public Collection<ComponentAdapter> getNonAssignableAdapters() {
-    return nonAssignableComponentAdapters.get().getReversedList();
+  protected LinkedList<ComponentAdapter> getNonAssignableAdaptersOfType(final Class componentType) {
+    LinkedList<ComponentAdapter> result = new LinkedList<ComponentAdapter>();
+    for (final ComponentAdapter componentAdapter : nonAssignableComponentAdapters.get()) {
+      if (ReflectionCache.isAssignable(componentType, componentAdapter.getComponentImplementation())) {
+        result.addFirst(componentAdapter);
+      }
+    }
+    return result;
   }
 
+  @Override
   @Nullable
   public final ComponentAdapter getComponentAdapter(Object componentKey) {
     ComponentAdapter adapter = getFromCache(componentKey);
@@ -84,6 +90,7 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     return null;
   }
 
+  @Override
   @Nullable
   public ComponentAdapter getComponentAdapterOfType(Class componentType) {
     // See http://jira.codehaus.org/secure/ViewIssue.jspa?key=PICO-115
@@ -101,9 +108,7 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
       if (parent != null) {
         return parent.getComponentAdapterOfType(componentType);
       }
-      else {
-        return null;
-      }
+      return null;
     }
     else {
       Class[] foundClasses = new Class[found.size()];
@@ -115,6 +120,7 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     }
   }
 
+  @Override
   public List getComponentAdaptersOfType(Class componentType) {
     if (componentType == null) {
       return Collections.emptyList();
@@ -130,6 +136,7 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     return found;
   }
 
+  @Override
   public ComponentAdapter registerComponent(ComponentAdapter componentAdapter) {
     Object componentKey = componentAdapter.getComponentKey();
     if (componentKeyToAdapterCache.containsKey(componentKey)) {
@@ -156,65 +163,44 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     return componentAdapter;
   }
 
+  @Override
   public ComponentAdapter unregisterComponent(Object componentKey) {
     ComponentAdapter adapter = componentKeyToAdapterCache.remove(componentKey);
 
     componentAdapters.remove(adapter);
-    orderedComponentAdapters.remove(adapter);
 
     return adapter;
   }
 
-  private void addOrderedComponentAdapter(ComponentAdapter componentAdapter) {
-    if (!orderedComponentAdapters.contains(componentAdapter)) {
-      orderedComponentAdapters.add(componentAdapter);
-    }
-  }
-
+  @Override
   public List getComponentInstances() throws PicoException {
     return getComponentInstancesOfType(Object.class);
   }
 
+  @Override
   public List getComponentInstancesOfType(Class componentType) {
     if (componentType == null) {
       return Collections.emptyList();
     }
 
-    Map<ComponentAdapter, Object> adapterToInstanceMap = new HashMap<ComponentAdapter, Object>();
+    List<Object> result = new ArrayList<Object>();
     for (final ComponentAdapter componentAdapter : componentAdapters.getImmutableSet()) {
       if (ReflectionCache.isAssignable(componentType, componentAdapter.getComponentImplementation())) {
-        Object componentInstance = getInstance(componentAdapter);
-        adapterToInstanceMap.put(componentAdapter, componentInstance);
-
-        // This is to ensure all are added. (Indirect dependencies will be added
-        // from InstantiatingComponentAdapter).
-        addOrderedComponentAdapter(componentAdapter);
-      }
-    }
-
-    List<Object> result = new ArrayList<Object>();
-    for (ComponentAdapter componentAdapter : orderedComponentAdapters.getImmutableSet()) {
-      final Object componentInstance = adapterToInstanceMap.get(componentAdapter);
-      if (componentInstance != null) {
-        // may be null in the case of the "implicit" adapter
-        // representing "this".
-        result.add(componentInstance);
+        // may be null in the case of the "implicit" adapter representing "this".
+        ContainerUtil.addIfNotNull(result, getInstance(componentAdapter));
       }
     }
     return result;
   }
 
+  @Override
   @Nullable
   public Object getComponentInstance(Object componentKey) {
     ComponentAdapter componentAdapter = getComponentAdapter(componentKey);
-    if (componentAdapter != null) {
-      return getInstance(componentAdapter);
-    }
-    else {
-      return null;
-    }
+    return componentAdapter == null ? null : getInstance(componentAdapter);
   }
 
+  @Override
   @Nullable
   public Object getComponentInstanceOfType(Class componentType) {
     final ComponentAdapter componentAdapter = getComponentAdapterOfType(componentType);
@@ -222,13 +208,11 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
   }
 
   @Nullable
-  private Object getInstance(ComponentAdapter componentAdapter) {
-    final boolean isLocal = componentAdapters.contains(componentAdapter);
-
-    if (isLocal) {
+  private Object getInstance(@NotNull ComponentAdapter componentAdapter) {
+    if (componentAdapters.getImmutableSet().contains(componentAdapter)) {
       return getLocalInstance(componentAdapter);
     }
-    else if (parent != null) {
+    if (parent != null) {
       return parent.getComponentInstance(componentAdapter.getComponentKey());
     }
 
@@ -257,12 +241,12 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
 
       throw firstLevelException;
     }
-    addOrderedComponentAdapter(componentAdapter);
 
     return instance;
   }
 
 
+  @Override
   @Nullable
   public ComponentAdapter unregisterComponentByInstance(Object componentInstance) {
     Collection<ComponentAdapter> adapters = getComponentAdapters();
@@ -276,36 +260,44 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     return null;
   }
 
+  @Override
   public void verify() throws PicoVerificationException {
     new VerifyingVisitor().traverse(this);
   }
 
+  @Override
   public void start() {
     throw new UnsupportedOperationException();
   }
 
+  @Override
   public void stop() {
     throw new UnsupportedOperationException();
   }
 
+  @Override
   public void dispose() {
     throw new UnsupportedOperationException();
   }
 
+  @Override
   public MutablePicoContainer makeChildContainer() {
     DefaultPicoContainer pc = new DefaultPicoContainer(componentAdapterFactory, this);
     addChildContainer(pc);
     return pc;
   }
 
+  @Override
   public boolean addChildContainer(PicoContainer child) {
     return children.add(child);
   }
 
+  @Override
   public boolean removeChildContainer(PicoContainer child) {
     return children.remove(child);
   }
 
+  @Override
   public void accept(PicoVisitor visitor) {
     visitor.visitContainer(this);
     final List<ComponentAdapter> adapters = new ArrayList<ComponentAdapter>(getComponentAdapters());
@@ -318,57 +310,65 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     }
   }
 
+  @Override
   public ComponentAdapter registerComponentInstance(@NotNull Object component) {
     return registerComponentInstance(component.getClass(), component);
   }
 
+  @Override
   public ComponentAdapter registerComponentInstance(@NotNull Object componentKey, @NotNull Object componentInstance) {
     return registerComponent(new InstanceComponentAdapter(componentKey, componentInstance));
   }
 
+  @Override
   public ComponentAdapter registerComponentImplementation(@NotNull Class componentImplementation) {
     return registerComponentImplementation(componentImplementation, componentImplementation);
   }
 
+  @Override
   public ComponentAdapter registerComponentImplementation(@NotNull Object componentKey, @NotNull Class componentImplementation) {
     return registerComponentImplementation(componentKey, componentImplementation, null);
   }
 
+  @Override
   public ComponentAdapter registerComponentImplementation(@NotNull Object componentKey, @NotNull Class componentImplementation, Parameter[] parameters) {
     ComponentAdapter componentAdapter = componentAdapterFactory.createComponentAdapter(componentKey, componentImplementation, parameters);
     return registerComponent(componentAdapter);
   }
 
+  @Override
   public PicoContainer getParent() {
     return parent;
   }
-  
+
+  /**
+   * A linked hash set that's copied on write operations.
+   * @param <T>
+   */
   private static class LinkedHashSetWrapper<T> {
-    
+    private final Object lock = new Object();
     private volatile Set<T> immutableSet;
-    
-    private final LinkedHashSet<T> synchronizedSet = new LinkedHashSet<T>();
-    
-    private final ConcurrentHashMap<T, T> concurrentSet = new ConcurrentHashMap<T, T>();
-    
-    public boolean contains(@Nullable T element) {
-      return element != null && concurrentSet.containsKey(element);
-    }
-    
+    private LinkedHashSet<T> synchronizedSet = new LinkedHashSet<T>();
+
     public void add(@NotNull T element) {
-      synchronized (synchronizedSet) {
-        immutableSet = null;
-        synchronizedSet.add(element);
-        concurrentSet.put(element, element);
+      synchronized (lock) {
+        if (!synchronizedSet.contains(element)) {
+          copySyncSetIfExposedAsImmutable().add(element);
+        }
       }
     }
-    
-    public void remove(@Nullable T element) {
-      if (element == null) return;
-      synchronized (synchronizedSet) {
+
+    private LinkedHashSet<T> copySyncSetIfExposedAsImmutable() {
+      if (immutableSet != null) {
         immutableSet = null;
-        synchronizedSet.remove(element);
-        concurrentSet.remove(element);
+        synchronizedSet = new LinkedHashSet<T>(synchronizedSet);
+      }
+      return synchronizedSet;
+    }
+
+    public void remove(@Nullable T element) {
+      synchronized (lock) {
+        copySyncSetIfExposedAsImmutable().remove(element);
       }
     }
 
@@ -376,11 +376,11 @@ public class DefaultPicoContainer implements MutablePicoContainer, Serializable 
     public Set<T> getImmutableSet() {
       Set<T> res = immutableSet;
       if (res == null) {
-        synchronized (synchronizedSet) {
+        synchronized (lock) {
           res = immutableSet;
           if (res == null) {
-            res = Collections.unmodifiableSet((Set<T>)synchronizedSet.clone());
-            immutableSet = res;
+            // Expose the same set as immutable. It should be never modified again. Next add/remove operations will copy synchronizedSet
+            immutableSet = res = Collections.unmodifiableSet(synchronizedSet);
           }
         }
       }

@@ -75,9 +75,9 @@ public final class QuickFixAction {
     if (info == null || action == null) return;
     if (fixRange == null) fixRange = new TextRange(info.startOffset, info.endOffset);
     if (info.quickFixActionRanges == null) {
-      info.quickFixActionRanges = ContainerUtil.createEmptyCOWList();
+      info.quickFixActionRanges = ContainerUtil.createLockFreeCopyOnWriteList();
     }
-    HighlightInfo.IntentionActionDescriptor desc = new HighlightInfo.IntentionActionDescriptor(action, options, displayName, null, key);
+    HighlightInfo.IntentionActionDescriptor desc = new HighlightInfo.IntentionActionDescriptor(action, options, displayName, null, key, info.getProblemGroup());
     info.quickFixActionRanges.add(Pair.create(desc, fixRange));
     info.fixStartOffset = Math.min (info.fixStartOffset, fixRange.getStartOffset());
     info.fixEndOffset = Math.max (info.fixEndOffset, fixRange.getEndOffset());
@@ -86,7 +86,10 @@ public final class QuickFixAction {
     }
   }
 
-  public static void registerQuickFixAction(@Nullable HighlightInfo info, @Nullable TextRange fixRange, @Nullable IntentionAction action, @Nullable final HighlightDisplayKey key) {
+  public static void registerQuickFixAction(@Nullable HighlightInfo info,
+                                            @Nullable TextRange fixRange,
+                                            @Nullable IntentionAction action,
+                                            @Nullable final HighlightDisplayKey key) {
     doRegister(info, action, null, HighlightDisplayKey.getDisplayNameByKey(key), fixRange, key);
   }
 
@@ -129,7 +132,7 @@ public final class QuickFixAction {
                                                    int group,
                                                    int offset) {
     if (info.quickFixActionMarkers == null) return;
-    if (group != -1 && group != info.group) return;
+    if (group != -1 && group != info.getGroup()) return;
     Editor injectedEditor = null;
     PsiFile injectedFile = null;
     for (Pair<HighlightInfo.IntentionActionDescriptor, RangeMarker> pair : info.quickFixActionMarkers) {
@@ -144,7 +147,7 @@ public final class QuickFixAction {
       }
       Editor editorToUse;
       PsiFile fileToUse;
-      if (info.fromInjection) {
+      if (info.isFromInjection()) {
         if (injectedEditor == null) {
           injectedFile = InjectedLanguageUtil.findInjectedPsiNoCommit(file, offset);
           injectedEditor = InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor, injectedFile);

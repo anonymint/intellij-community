@@ -31,6 +31,7 @@ import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.PsiFileEx;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.ObjectStubTree;
+import com.intellij.psi.stubs.Stub;
 import com.intellij.psi.stubs.StubTreeLoader;
 import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
@@ -38,9 +39,12 @@ import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.xml.*;
 import com.intellij.util.Function;
 import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.indexing.FileContent;
+import com.intellij.util.text.CharSequenceReader;
 import com.intellij.util.xml.*;
 import com.intellij.util.xml.structure.DomStructureViewBuilder;
 import com.intellij.util.xml.stubs.FileStub;
+import com.intellij.util.xml.stubs.builder.DomStubBuilder;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -76,12 +80,23 @@ public class DomServiceImpl extends DomService {
       if (virtualFile instanceof VirtualFileWithId) {
         ObjectStubTree tree = StubTreeLoader.getInstance().readFromVFile(file.getProject(), virtualFile);
         if (tree != null) {
-          return ((FileStub)tree.getRoot()).getHeader();
+          Stub root = tree.getRoot();
+          if (root instanceof FileStub) {
+            return ((FileStub)root).getHeader();
+          }
         }
       }
     }
 
     if (!file.isValid()) return XmlFileHeader.EMPTY;
+
+    if (XmlUtil.isStubBuilding(file) && file.getFileType() == XmlFileType.INSTANCE) {
+      FileContent fileContent = file.getUserData(DomStubBuilder.CONTENT_FOR_DOM_STUBS);
+      if (fileContent != null) {
+        //noinspection IOResourceOpenedButNotSafelyClosed
+        return NanoXmlUtil.parseHeader(new CharSequenceReader(fileContent.getContentAsText()));
+      }
+    }
     return NanoXmlUtil.parseHeader(file);
   }
 

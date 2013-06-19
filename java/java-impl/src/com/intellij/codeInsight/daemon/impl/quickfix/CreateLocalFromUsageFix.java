@@ -15,7 +15,7 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.intention.impl.TypeExpression;
 import com.intellij.codeInsight.template.Template;
@@ -60,7 +60,7 @@ public class CreateLocalFromUsageFix extends CreateVarFromUsageFix {
 
   @Override
   protected void invokeImpl(final PsiClass targetClass) {
-    if (CreateFromUsageUtils.isValidReference(myReferenceExpression, true)) {
+    if (CreateFromUsageUtils.isValidReference(myReferenceExpression, false)) {
       return;
     }
 
@@ -110,7 +110,7 @@ public class CreateLocalFromUsageFix extends CreateVarFromUsageFix {
       CodeStyleSettingsManager.getSettings(project).GENERATE_FINAL_LOCALS && !CreateFromUsageUtils.isAccessedForWriting(expressions);
     PsiUtil.setModifierProperty(var, PsiModifier.FINAL, isFinal);
 
-    var = CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(var);
+    var = CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(var);
     if (var == null) return;
     TemplateBuilderImpl builder = new TemplateBuilderImpl(var);
     builder.replaceElement(var.getTypeElement(), expression);
@@ -118,6 +118,7 @@ public class CreateLocalFromUsageFix extends CreateVarFromUsageFix {
     Template template = builder.buildTemplate();
 
     final Editor newEditor = positionCursor(project, targetFile, var);
+    if (newEditor == null) return;
     TextRange range = var.getTextRange();
     newEditor.getDocument().deleteString(range.getStartOffset(), range.getEndOffset());
 
@@ -153,8 +154,8 @@ public class CreateLocalFromUsageFix extends CreateVarFromUsageFix {
       minOffset = Math.min(minOffset, expressionOccurences[i].getTextRange().getStartOffset());
     }
 
-    PsiCodeBlock block = (PsiCodeBlock) (parent instanceof PsiCodeBlock ? parent : PsiTreeUtil.getParentOfType(parent, PsiCodeBlock.class));
-    LOG.assertTrue(block != null && block.getStatements().length > 0);
+    final PsiCodeBlock block = PsiTreeUtil.getParentOfType(parent, PsiCodeBlock.class, false);
+    LOG.assertTrue(block != null && block.getStatements().length > 0, "block: " + block +"; parent: " + parent);
     PsiStatement[] statements = block.getStatements();
     for (int i = 1; i < statements.length; i++) {
       if (statements[i].getTextRange().getStartOffset() > minOffset) return statements[i-1];

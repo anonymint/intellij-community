@@ -20,8 +20,9 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.tasks.TaskManager;
-import com.intellij.tasks.TaskRepositoryType;
+import com.intellij.tasks.TaskRepository;
 import com.intellij.tasks.impl.BaseRepository;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.PanelWithAnchor;
@@ -65,6 +66,7 @@ public class BaseRepositoryEditor<T extends BaseRepository> extends TaskReposito
   private JPanel myEditorPanel;
   protected JBCheckBox myLoginAnonymouslyJBCheckBox;
   protected JBTabbedPane myTabbedPane;
+  private JTextPane myAdvertiser;
 
   private boolean myApplying;
   protected Project myProject;
@@ -99,9 +101,9 @@ public class BaseRepositoryEditor<T extends BaseRepository> extends TaskReposito
     myUseProxy.setSelected(repository.isUseProxy());
 
     myUseHttpAuthenticationCheckBox.setSelected(repository.isUseHttpAuthentication());
-    myUseHttpAuthenticationCheckBox.setVisible(repository.getRepositoryType().isSupported(TaskRepositoryType.BASIC_HTTP_AUTHORIZATION));
+    myUseHttpAuthenticationCheckBox.setVisible(repository.isSupported(TaskRepository.BASIC_HTTP_AUTHORIZATION));
 
-    myLoginAnonymouslyJBCheckBox.setVisible(repository.getRepositoryType().isSupported(TaskRepositoryType.LOGIN_ANONYMOUSLY));
+    myLoginAnonymouslyJBCheckBox.setVisible(repository.isSupported(TaskRepository.LOGIN_ANONYMOUSLY));
     myLoginAnonymouslyJBCheckBox.setSelected(repository.isLoginAnonymously());
     myLoginAnonymouslyJBCheckBox.addActionListener(new ActionListener() {
       @Override
@@ -115,6 +117,14 @@ public class BaseRepositoryEditor<T extends BaseRepository> extends TaskReposito
     myEditor = EditorFactory.getInstance().createEditor(myDocument);
     myEditorPanel.add(myEditor.getComponent(), BorderLayout.CENTER);
     myComment.setText("Available placeholders: " + repository.getComment());
+    String advertiser = repository.getRepositoryType().getAdvertiser();
+    if (advertiser != null) {
+      Messages.installHyperlinkSupport(myAdvertiser);
+      myAdvertiser.setText(advertiser);
+    }
+    else {
+      myAdvertiser.setVisible(false);
+    }
 
     installListener(myAddCommitMessage);
     installListener(myDocument);

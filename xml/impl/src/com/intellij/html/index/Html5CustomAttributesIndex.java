@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,14 +75,6 @@ public class Html5CustomAttributesIndex extends ScalarIndexExtension<String> {
     }
   };
 
-  private final FileBasedIndex.InputFilter myInputFilter = new FileBasedIndex.InputFilter() {
-    @Override
-    public boolean acceptInput(final VirtualFile file) {
-      return (file.getFileSystem() == LocalFileSystem.getInstance() || file.getFileSystem() instanceof TempFileSystem) &&
-             file.getFileType() == StdFileTypes.HTML || file.getFileType() == StdFileTypes.XHTML;
-    }
-  };
-
   @NotNull
   @Override
   public ID<String, Void> getName() {
@@ -102,7 +94,16 @@ public class Html5CustomAttributesIndex extends ScalarIndexExtension<String> {
 
   @Override
   public FileBasedIndex.InputFilter getInputFilter() {
-    return myInputFilter;
+    return new DefaultFileTypeSpecificInputFilter(StdFileTypes.HTML, StdFileTypes.XHTML) {
+      @Override
+      public boolean acceptInput(final VirtualFile file) {
+        if (file.getFileSystem() != LocalFileSystem.getInstance() && !(file.getFileSystem() instanceof TempFileSystem)) {
+          return false;
+        }
+
+        return true;
+      }
+    };
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,9 @@ import com.intellij.debugger.engine.requests.RequestManagerImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.ui.JavaDebuggerSupport;
-import com.intellij.idea.ActionsBundle;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
@@ -52,8 +50,6 @@ import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.xdebugger.impl.DebuggerSupport;
 import com.intellij.xdebugger.impl.actions.EditBreakpointAction;
-import com.intellij.xdebugger.impl.actions.ViewBreakpointsAction;
-import com.intellij.xdebugger.impl.actions.XDebuggerActions;
 import com.intellij.xdebugger.ui.DebuggerColors;
 import com.intellij.xml.util.XmlStringUtil;
 import com.sun.jdi.ReferenceType;
@@ -226,14 +222,14 @@ public abstract class BreakpointWithHighlighter extends Breakpoint {
       }
       buf.append("&nbsp;<br>&nbsp;");
       buf.append(DebuggerBundle.message("breakpoint.property.name.suspend.policy")).append(" : ");
-      if (DebuggerSettings.SUSPEND_ALL.equals(SUSPEND_POLICY)) {
+      if (DebuggerSettings.SUSPEND_NONE.equals(SUSPEND_POLICY) || !SUSPEND) {
+        buf.append(DebuggerBundle.message("breakpoint.properties.panel.option.suspend.none"));
+      }
+      else if (DebuggerSettings.SUSPEND_ALL.equals(SUSPEND_POLICY)) {
         buf.append(DebuggerBundle.message("breakpoint.properties.panel.option.suspend.all"));
       }
       else if (DebuggerSettings.SUSPEND_THREAD.equals(SUSPEND_POLICY)) {
         buf.append(DebuggerBundle.message("breakpoint.properties.panel.option.suspend.thread"));
-      }
-      else if (DebuggerSettings.SUSPEND_NONE.equals(SUSPEND_POLICY)) {
-        buf.append(DebuggerBundle.message("breakpoint.properties.panel.option.suspend.none"));
       }
       buf.append("&nbsp;<br>&nbsp;");
       buf.append(DebuggerBundle.message("breakpoint.property.name.log.message")).append(": ");
@@ -346,6 +342,7 @@ public abstract class BreakpointWithHighlighter extends Breakpoint {
         if (debugProcess == null || !debugProcess.isAttached()) {
           updateCaches(null);
           updateGutter();
+
           afterUpdate.run();
         }
         else {
@@ -617,6 +614,11 @@ public abstract class BreakpointWithHighlighter extends Breakpoint {
     }
 
     @Override
+    public Alignment getAlignment() {
+      return Alignment.RIGHT;
+    }
+
+    @Override
     public AnAction getClickAction() {
       return new AnAction() {
         @Override
@@ -640,63 +642,13 @@ public abstract class BreakpointWithHighlighter extends Breakpoint {
 
     @Override
     public ActionGroup getPopupMenuActions() {
-      final BreakpointManager breakpointManager = DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager();
-      /**
-       * Used from Popup Menu
-       */
-      class RemoveAction extends AnAction {
-        @Nullable private Breakpoint myBreakpoint;
+      return null;
+    }
 
-        public RemoveAction(Breakpoint breakpoint) {
-          super(DebuggerBundle.message("action.remove.text"));
-          myBreakpoint = breakpoint;
-        }
-
-        @Override
-        public void actionPerformed(AnActionEvent e) {
-          if (myBreakpoint != null) {
-            breakpointManager.removeBreakpoint(myBreakpoint);
-            myBreakpoint = null;
-          }
-        }
-      }
-
-      /**
-       * Used from Popup Menu
-       */
-      class SetEnabledAction extends AnAction {
-        private final boolean myNewValue;
-        private final Breakpoint myBreakpoint;
-
-        public SetEnabledAction(Breakpoint breakpoint, boolean newValue) {
-          super(newValue ? DebuggerBundle.message("action.enable.text") : DebuggerBundle.message("action.disable.text"));
-          myBreakpoint = breakpoint;
-          myNewValue = newValue;
-        }
-
-        @Override
-        public void actionPerformed(AnActionEvent e) {
-          myBreakpoint.ENABLED = myNewValue;
-          breakpointManager.fireBreakpointChanged(myBreakpoint);
-          myBreakpoint.updateUI();
-        }
-      }
-
-
-      AnAction viewBreakpointsAction =
-        new ViewBreakpointsAction(ActionsBundle.actionText(XDebuggerActions.VIEW_BREAKPOINTS), BreakpointWithHighlighter.this);
-
-      DefaultActionGroup group = new DefaultActionGroup();
-      RangeHighlighter highlighter = getHighlighter();
-      if (highlighter != null) {
-        group.add(new EditBreakpointAction.ContextAction(this, BreakpointWithHighlighter.this, DebuggerSupport.getDebuggerSupport(JavaDebuggerSupport.class)));
-        group.addSeparator();
-      }
-      group.add(new SetEnabledAction(BreakpointWithHighlighter.this, !ENABLED));
-      group.add(new RemoveAction(BreakpointWithHighlighter.this));
-      group.addSeparator();
-      group.add(viewBreakpointsAction);
-      return group;
+    @Nullable
+    @Override
+    public AnAction getRightButtonClickAction() {
+      return new EditBreakpointAction.ContextAction(this, BreakpointWithHighlighter.this, DebuggerSupport.getDebuggerSupport(JavaDebuggerSupport.class));
     }
 
     @Override

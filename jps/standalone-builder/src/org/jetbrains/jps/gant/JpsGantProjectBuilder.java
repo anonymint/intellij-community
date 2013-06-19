@@ -21,8 +21,8 @@ import com.intellij.openapi.util.io.FileUtil;
 import org.apache.tools.ant.BuildException;
 import org.apache.tools.ant.Project;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.jps.api.BuildType;
 import org.jetbrains.jps.build.Standalone;
 import org.jetbrains.jps.cmdline.JpsModelLoader;
 import org.jetbrains.jps.incremental.MessageHandler;
@@ -134,19 +134,19 @@ public class JpsGantProjectBuilder {
   }
 
   public void makeModule(JpsModule module) {
-    runBuild(getModuleDependencies(module, false), false);
+    runBuild(getModuleDependencies(module, false), false, false);
   }
 
   public void makeModuleTests(JpsModule module) {
-    runBuild(getModuleDependencies(module, true), true);
+    runBuild(getModuleDependencies(module, true), false, true);
   }
 
   public void buildAll() {
-    runBuild(Collections.<String>emptySet(), true);
+    runBuild(Collections.<String>emptySet(), true, true);
   }
 
   public void buildProduction() {
-    runBuild(Collections.<String>emptySet(), false);
+    runBuild(Collections.<String>emptySet(), true, false);
   }
 
   public void exportModuleOutputProperties() {
@@ -167,14 +167,14 @@ public class JpsGantProjectBuilder {
     return names;
   }
 
-  private void runBuild(final Set<String> modulesSet, boolean includeTests) {
+  private void runBuild(final Set<String> modulesSet, final boolean allModules, boolean includeTests) {
     if (!myDryRun) {
       final AntMessageHandler messageHandler = new AntMessageHandler();
       Logger.setFactory(new AntLoggerFactory(messageHandler));
       info("Starting build: modules = " + modulesSet + ", caches are saved to " + myDataStorageRoot.getAbsolutePath());
       try {
-        Standalone.runBuild(myModelLoader, myDataStorageRoot, BuildType.PROJECT_REBUILD, modulesSet, Collections.<String>emptyList(),
-                            includeTests, messageHandler);
+        Standalone.runBuild(myModelLoader, myDataStorageRoot, true, modulesSet, allModules, Collections.<String>emptyList(), includeTests,
+                            messageHandler);
       }
       catch (Throwable e) {
         error(e);
@@ -246,7 +246,7 @@ public class JpsGantProjectBuilder {
     public Logger getLoggerInstance(String category) {
       return new DefaultLogger(category) {
         @Override
-        public void error(@NonNls String message, @Nullable Throwable t, @NonNls String... details) {
+        public void error(@NonNls String message, @Nullable Throwable t, @NotNull @NonNls String... details) {
           if (t != null) {
             myMessageHandler.processMessage(new CompilerMessage(COMPILER_NAME, t));
           }

@@ -23,6 +23,7 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Ref;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnBundle;
 import org.jetbrains.idea.svn.SvnVcs;
@@ -60,6 +61,11 @@ public class SelectLocationDialog extends DialogWrapper {
     try {
       SVNURL.parseURIEncoded(url);
       final SVNURL svnurl = initRoot(project, url);
+      if (svnurl == null) {
+        Messages.showErrorDialog(project, "Can not detect repository root for URL: " + url,
+                                 SvnBundle.message("dialog.title.select.repository.location"));
+        return null;
+      }
       SelectLocationDialog dialog = new SelectLocationDialog(project, svnurl, null, null, true);
       dialog.show();
       if (!dialog.isOK()) return null;
@@ -106,6 +112,7 @@ public class SelectLocationDialog extends DialogWrapper {
     HelpManager.getInstance().invokeHelp(HELP_ID);
   }
 
+  @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(), getCancelAction(), getHelpAction()};
   }
@@ -114,6 +121,7 @@ public class SelectLocationDialog extends DialogWrapper {
     return "svn.repositoryBrowser";
   }
 
+  @Nullable
   private static SVNURL initRoot(final Project project, final String urlString) throws SVNException {
     final Ref<SVNURL> result = new Ref<SVNURL>();
     final Ref<SVNException> excRef = new Ref<SVNException>();

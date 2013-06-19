@@ -27,6 +27,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.pom.Navigatable;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 import org.testng.remote.strprotocol.MessageHelper;
@@ -49,6 +50,8 @@ public class TestProxy extends AbstractTestProxy {
     Pattern.compile("(.*)expected \\[(.*)\\] but got \\[(.*)\\].*", Pattern.DOTALL);
   @NonNls public static final Pattern EXPECTED_NOT_SAME_BUT_WAS_PATTERN =
     Pattern.compile("(.*)expected not same with:\\<(.*)\\> but was same:\\<(.*)\\>.*", Pattern.DOTALL);
+  @NonNls public static final Pattern EXPECTED_BUT_FOUND_PATTERN =
+    Pattern.compile("(.*)expected \\[(.*)\\] but found \\[(.*)\\].*", Pattern.DOTALL);
   private final List<TestProxy> results = new ArrayList<TestProxy>();
   private TestResultMessage resultMessage;
   private String name;
@@ -77,7 +80,7 @@ public class TestProxy extends AbstractTestProxy {
     if (psiElement != null) {
       final Project project = psiElement.getProject();
       PsiDocumentManager.getInstance(project).commitAllDocuments();
-      this.psiElement = SmartPointerManager.getInstance(project).createLazyPointer(psiElement);
+      this.psiElement = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(psiElement);
     } else {
       this.psiElement = null;
     }
@@ -154,7 +157,7 @@ public class TestProxy extends AbstractTestProxy {
     return !isNotPassed();
   }
 
-  public Location getLocation(final Project project) {
+  public Location getLocation(final Project project, GlobalSearchScope searchScope) {
     if (psiElement == null) return null;
     final PsiElement element = psiElement.getElement();
     if (element == null) return null;
@@ -343,16 +346,27 @@ public class TestProxy extends AbstractTestProxy {
     String s = trimStackTrace(result.getStackTrace());
     List<Printable> printables = new ArrayList<Printable>();
     //figure out if we have a diff we need to hyperlink
-    Matcher matcher = COMPARISION_PATTERN.matcher(s);
-    if (!matcher.matches()) {
-      matcher = EXPECTED_BUT_WAS_PATTERN.matcher(s);
+    if (appendDiffChuncks(result, s, printables, COMPARISION_PATTERN)) {
+      return printables;
     }
-    if (!matcher.matches()) {
-      matcher = EXPECTED_BUT_WAS_SET_PATTERN.matcher(s);
+    if (appendDiffChuncks(result, s, printables, EXPECTED_BUT_WAS_PATTERN)) {
+      return printables;
     }
-    if (!matcher.matches()) {
-      matcher = EXPECTED_NOT_SAME_BUT_WAS_PATTERN.matcher(s);
+    if (appendDiffChuncks(result, s, printables, EXPECTED_BUT_WAS_SET_PATTERN)) {
+      return printables;
     }
+    if (appendDiffChuncks(result, s, printables, EXPECTED_NOT_SAME_BUT_WAS_PATTERN)) {
+      return printables;
+    }
+    if (appendDiffChuncks(result, s, printables, EXPECTED_BUT_FOUND_PATTERN)) {
+      return printables;
+    }
+    printables.add(new Chunk(s, ConsoleViewContentType.ERROR_OUTPUT));
+    return printables;
+  }
+
+  private static boolean appendDiffChuncks(final TestResultMessage result, String s, List<Printable> printables, final Pattern pattern) {
+    final Matcher matcher = pattern.matcher(s);
     if (matcher.matches()) {
       printables.add(new Chunk(matcher.group(1), ConsoleViewContentType.ERROR_OUTPUT));
       //we have an assert with expected/actual, so we parse it out and create a diff hyperlink
@@ -365,11 +379,9 @@ public class TestProxy extends AbstractTestProxy {
       //same as junit diff view
       printables.add(link);
       printables.add(new Chunk(trimStackTrace(s.substring(matcher.end(3) + 1)), ConsoleViewContentType.ERROR_OUTPUT));
+      return true;
     }
-    else {
-      printables.add(new Chunk(s, ConsoleViewContentType.ERROR_OUTPUT));
-    }
-    return printables;
+    return false;
   }
 
   public static String toDisplayText(TestResultMessage message, Project project) {

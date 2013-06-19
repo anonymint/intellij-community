@@ -15,6 +15,8 @@
  */
 package com.intellij.openapi.editor.impl;
 
+import com.intellij.ui.Gray;
+import com.intellij.ui.JBColor;
 import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
@@ -29,9 +31,9 @@ public class EditorHeaderComponent extends JPanel {
 
   public EditorHeaderComponent() {
     super(new BorderLayout(0, 0));
-    GRADIENT_C1 = getBackground();
-    GRADIENT_C2 = new Color(Math.max(0, GRADIENT_C1.getRed() - 0x18), Math.max(0, GRADIENT_C1.getGreen() - 0x18),
-                            Math.max(0, GRADIENT_C1.getBlue() - 0x18));
+    GRADIENT_C1 = new JBColor(getBackground(), JBColor.background());
+    GRADIENT_C2 = new JBColor(new Color(Math.max(0, GRADIENT_C1.getRed() - 0x18), Math.max(0, GRADIENT_C1.getGreen() - 0x18),
+                                        Math.max(0, GRADIENT_C1.getBlue() - 0x18)), Gray._75);
   }
 
   @Override
@@ -40,7 +42,7 @@ public class EditorHeaderComponent extends JPanel {
     final Graphics2D g2d = (Graphics2D)g;
 
     if (!UIUtil.isUnderGTKLookAndFeel()) {
-      g2d.setPaint(new GradientPaint(0, 0, GRADIENT_C1, 0, getHeight(), GRADIENT_C2));
+      g2d.setPaint(UIUtil.getGradientPaint(0, 0, GRADIENT_C1, 0, getHeight(), GRADIENT_C2));
       g2d.fillRect(1, 1, getWidth(), getHeight() - 1);
       g2d.setPaint(null);
     }

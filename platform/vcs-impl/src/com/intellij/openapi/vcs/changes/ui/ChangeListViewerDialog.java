@@ -24,6 +24,7 @@ package com.intellij.openapi.vcs.changes.ui;
 
 import com.intellij.CommonBundle;
 import com.intellij.openapi.actionSystem.DataProvider;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Splitter;
@@ -33,15 +34,19 @@ import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.committed.CommittedChangesBrowserUseCase;
 import com.intellij.openapi.vcs.changes.committed.RepositoryChangesBrowser;
 import com.intellij.openapi.vcs.changes.issueLinks.IssueLinkHtmlRenderer;
+import com.intellij.openapi.vcs.history.CopyRevisionNumberAction;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeList;
 import com.intellij.openapi.vcs.versionBrowser.CommittedChangeListImpl;
+import com.intellij.openapi.vcs.versionBrowser.VcsRevisionNumberAware;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.BrowserHyperlinkListener;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.SeparatorFactory;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -127,6 +132,11 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     if (VcsDataKeys.CHANGES.is(dataId)) {
       return myChanges;
     }
+    else if (VcsDataKeys.VCS_REVISION_NUMBER.is(dataId)) {
+      if (myChangeList instanceof VcsRevisionNumberAware) {
+        return ((VcsRevisionNumberAware)myChangeList).getRevisionNumber();
+      }
+    }
     return null;
   }
 
@@ -141,6 +151,22 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     myChangesBrowser = new RepositoryChangesBrowser(myProject, Collections.singletonList(myChangeList),
                                                     new ArrayList<Change>(myChangeList.getChanges()),
                                                     myChangeList, myToSelect) {
+
+      @Override
+      protected void buildToolBar(DefaultActionGroup toolBarGroup) {
+        super.buildToolBar(toolBarGroup);
+        toolBarGroup.add(new CopyRevisionNumberAction());
+      }
+
+      @Override
+      public Object getData(@NonNls String dataId) {
+        Object data = super.getData(dataId);
+        if (data != null) {
+          return data;
+        }
+        return ChangeListViewerDialog.this.getData(dataId);
+      }
+
       @Override
       protected void showDiffForChanges(final Change[] changesArray, final int indexInSelection) {
         if (myInAir && (myConvertor != null)) {
@@ -171,7 +197,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     final String description = getDescription();
     if (description != null) {
       JPanel descPanel = new JPanel();
-      descPanel.add(new JLabel("<html>" + description + "</html>"));
+      descPanel.add(new JLabel(XmlStringUtil.wrapInHtml(description)));
       descPanel.setBorder(BorderFactory.createEtchedBorder());
       mainPanel.add(descPanel, BorderLayout.NORTH);
     }
@@ -184,6 +210,7 @@ public class ChangeListViewerDialog extends DialogWrapper implements DataProvide
     super.dispose();
   }
 
+  @NotNull
   @Override
   protected Action[] createActions() {
     Action cancelAction = getCancelAction();

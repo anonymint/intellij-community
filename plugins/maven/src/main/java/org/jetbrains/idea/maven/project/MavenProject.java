@@ -37,6 +37,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.importing.MavenExtraArtifactType;
 import org.jetbrains.idea.maven.importing.MavenImporter;
 import org.jetbrains.idea.maven.model.*;
+import org.jetbrains.idea.maven.plugins.api.MavenModelPropertiesPatcher;
 import org.jetbrains.idea.maven.server.MavenEmbedderWrapper;
 import org.jetbrains.idea.maven.server.NativeMavenProjectHolder;
 import org.jetbrains.idea.maven.utils.*;
@@ -153,6 +154,8 @@ public class MavenProject {
     newState.myProperties = model.getProperties();
 
     doSetResolvedAttributes(newState, readerResult, resetArtifacts);
+
+    MavenModelPropertiesPatcher.patch(newState.myProperties, newState.myPlugins);
 
     newState.myModulesPathsAndNames = collectModulePathsAndNames(model, getDirectory());
     Collection<String> newProfiles = collectProfilesIds(model.getProfiles());
@@ -382,18 +385,47 @@ public class MavenProject {
 
   @NotNull
   public ProcMode getProcMode() {
-    Element compilerConfiguration = getCompilerConfig();
+    Element compilerConfiguration = getPluginExecutionConfiguration("org.apache.maven.plugins", "maven-compiler-plugin", "default-compile");
+    if (compilerConfiguration == null) {
+      compilerConfiguration = getCompilerConfig();
+    }
+
     if (compilerConfiguration == null) {
       return ProcMode.BOTH;
     }
+
     Element procElement = compilerConfiguration.getChild("proc");
-    if (procElement == null) {
-      return ProcMode.BOTH;
-    }
-    else {
+    if (procElement != null) {
       String procMode = procElement.getValue();
       return ("only".equalsIgnoreCase(procMode)) ? ProcMode.ONLY : ("none".equalsIgnoreCase(procMode)) ? ProcMode.NONE : ProcMode.BOTH;
     }
+
+    String compilerArgument = compilerConfiguration.getChildTextTrim("compilerArgument");
+    if ("-proc:none".equals(compilerArgument)) {
+      return ProcMode.NONE;
+    }
+    if ("-proc:only".equals(compilerArgument)) {
+      return ProcMode.ONLY;
+    }
+
+    //Element compilerArguments = compilerConfiguration.getChild("compilerArguments");
+    //if (compilerArguments != null) {
+    //  for (Element element : (List<Element>)compilerArguments.getChildren()) {
+    //    String argName = element.getName();
+    //    if (argName.startsWith("-")) {
+    //      argName = argName.substring(1);
+    //    }
+    //
+    //    if ("proc:none".equals(argName)) {
+    //      return ProcMode.NONE;
+    //    }
+    //    if ("proc:only".equals(argName)) {
+    //      return ProcMode.ONLY;
+    //    }
+    //  }
+    //}
+
+    return ProcMode.BOTH;
   }
 
   //@Nullable
@@ -431,6 +463,10 @@ public class MavenProject {
     if (compilerArguments != null) {
       for (Element e : (Collection<Element>)compilerArguments.getChildren()){
         String name = e.getName();
+        if (name.startsWith("-")) {
+          name = name.substring(1);
+        }
+
         if (name.length() > 1 && name.charAt(0) == 'A') {
           if (res == null) {
             res = new LinkedHashMap<String, String>();
@@ -573,13 +609,12 @@ public class MavenProject {
   @NotNull
   public Pair<Boolean, MavenProjectChanges> resolveFolders(@NotNull MavenEmbedderWrapper embedder,
                                                            @NotNull MavenImportingSettings importingSettings,
-                                                           @NotNull MavenProjectReader reader,
                                                            @NotNull MavenConsole console) throws MavenProcessCanceledException {
-    MavenProjectReaderResult result = reader.generateSources(embedder,
-                                                             importingSettings,
-                                                             getFile(),
-                                                             getActivatedProfilesIds(),
-                                                             console);
+    MavenProjectReaderResult result = MavenProjectReader.generateSources(embedder,
+                                                                         importingSettings,
+                                                                         getFile(),
+                                                                         getActivatedProfilesIds(),
+                                                                         console);
     if (result == null || !result.readingProblems.isEmpty()) return Pair.create(false, MavenProjectChanges.NONE);
     MavenProjectChanges changes = setFolders(result);
     return Pair.create(true, changes);
@@ -754,10 +789,6 @@ public class MavenProject {
     return myState.myDependencyTree;
   }
 
-  public boolean isSupportedDependency(@NotNull MavenArtifact artifact, @NotNull SupportedRequestType type) {
-    return getSupportedDependencyTypes(type).contains(artifact.getType());
-  }
-
   @NotNull
   public Set<String> getSupportedPackagings() {
     Set<String> result = ContainerUtil.newHashSet(MavenConstants.TYPE_POM,
@@ -769,19 +800,14 @@ public class MavenProject {
     return result;
   }
 
-  @NotNull
-  public Set<String> getSupportedDependencyTypes(@NotNull SupportedRequestType type) {
-    Set<String> result = new THashSet<String>(Arrays.asList(MavenConstants.TYPE_JAR,
-                                                            MavenConstants.TYPE_TEST_JAR,
-                                                            "ejb", "ejb-client", "jboss-har", "jboss-sar", "war", "ear", "bundle"));
-    if (type == SupportedRequestType.FOR_COMPLETION) {
-      result.add(MavenConstants.TYPE_POM);
-    }
+  public Set<String> getDependencyTypesFromImporters(@NotNull SupportedRequestType type) {
+    THashSet<String> res = new THashSet<String>();
 
     for (MavenImporter each : getSuitableImporters()) {
-      each.getSupportedDependencyTypes(result, type);
+      each.getSupportedDependencyTypes(res, type);
     }
-    return result;
+
+    return res;
   }
 
   @NotNull
@@ -809,10 +835,10 @@ public class MavenProject {
     return findDependencies(depProject.getMavenId());
   }
 
-  public List<MavenArtifact> findDependencies(MavenId id) {
+  public List<MavenArtifact> findDependencies(@NotNull MavenId id) {
     List<MavenArtifact> result = new SmartList<MavenArtifact>();
     for (MavenArtifact each : getDependencies()) {
-      if (each.getMavenId().equals(id)) result.add(each);
+      if (id.equals(each.getGroupId(), each.getArtifactId(), each.getVersion())) result.add(each);
     }
     return result;
   }
@@ -821,7 +847,9 @@ public class MavenProject {
   public List<MavenArtifact> findDependencies(@Nullable String groupId, @Nullable String artifactId) {
     List<MavenArtifact> result = new SmartList<MavenArtifact>();
     for (MavenArtifact each : getDependencies()) {
-      if (each.getMavenId().equals(groupId, artifactId)) result.add(each);
+      if (Comparing.equal(artifactId, each.getArtifactId()) && Comparing.equal(groupId, each.getGroupId())) {
+        result.add(each);
+      }
     }
     return result;
   }
@@ -857,24 +885,26 @@ public class MavenProject {
 
   @Nullable
   public Element getPluginConfiguration(@Nullable String groupId, @Nullable String artifactId) {
-    return doGetPluginOrGoalConfiguration(groupId, artifactId, null);
+    return getPluginGoalConfiguration(groupId, artifactId, null);
   }
 
   @Nullable
   public Element getPluginGoalConfiguration(@Nullable String groupId, @Nullable String artifactId, @Nullable String goal) {
-    return doGetPluginOrGoalConfiguration(groupId, artifactId, goal);
-  }
-
-  @Nullable
-  private Element doGetPluginOrGoalConfiguration(@Nullable String groupId, @Nullable String artifactId, @Nullable String goalOrNull) {
     MavenPlugin plugin = findPlugin(groupId, artifactId);
     if (plugin == null) return null;
 
-    if (goalOrNull == null) {
+    if (goal == null) {
       return plugin.getConfigurationElement();
     }
 
-    return plugin.getGoalConfiguration(goalOrNull);
+    return plugin.getGoalConfiguration(goal);
+  }
+
+  public Element getPluginExecutionConfiguration(@Nullable String groupId, @Nullable String artifactId, @NotNull String executionId) {
+    MavenPlugin plugin = findPlugin(groupId, artifactId);
+    if (plugin == null) return null;
+
+    return plugin.getExecutionConfiguration(executionId);
   }
 
   @Nullable

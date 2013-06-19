@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import com.intellij.psi.meta.PsiMetaData;
 import com.intellij.psi.meta.PsiMetaOwner;
 import com.intellij.psi.search.ProjectScope;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.TokenSet;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.EmptyIterable;
@@ -95,7 +96,7 @@ public final class PsiUtil extends PsiUtilCore {
 
   @NotNull
   public static JavaResolveResult getAccessObjectClass(@NotNull PsiExpression expression) {
-    if (expression instanceof PsiSuperExpression || expression instanceof PsiThisExpression) return JavaResolveResult.EMPTY;
+    if (expression instanceof PsiSuperExpression) return JavaResolveResult.EMPTY;
     PsiType type = expression.getType();
     if (type instanceof PsiClassType) {
       return ((PsiClassType)type).resolveGenerics();
@@ -465,13 +466,24 @@ public final class PsiUtil extends PsiUtilCore {
     final PsiParameter[] parms = method.getParameterList().getParameters();
     if (args.length < parms.length - 1) return ApplicabilityLevel.NOT_APPLICABLE;
 
-    if (!areFirstArgumentsApplicable(args, parms, languageLevel, substitutorForMethod)) return ApplicabilityLevel.NOT_APPLICABLE;
+    final PsiClass containingClass = method.getContainingClass();
+    final boolean isRaw = containingClass != null && isRawSubstitutor(method, substitutorForMethod) && isRawSubstitutor(containingClass, substitutorForMethod);
+    if (!areFirstArgumentsApplicable(args, parms, languageLevel, substitutorForMethod, isRaw)) return ApplicabilityLevel.NOT_APPLICABLE;
     if (args.length == parms.length) {
       if (parms.length == 0) return ApplicabilityLevel.FIXED_ARITY;
       PsiType parmType = getParameterType(parms[parms.length - 1], languageLevel, substitutorForMethod);
       PsiType argType = args[args.length - 1];
       if (argType == null) return ApplicabilityLevel.NOT_APPLICABLE;
       if (TypeConversionUtil.isAssignable(parmType, argType)) return ApplicabilityLevel.FIXED_ARITY;
+
+      if (isRaw) {
+        final PsiType erasedParamType = TypeConversionUtil.erasure(parmType);
+        final PsiType erasedArgType = TypeConversionUtil.erasure(argType);
+        if (erasedArgType != null &&  erasedParamType != null &&
+            TypeConversionUtil.isAssignable(erasedParamType, erasedArgType)) {
+          return ApplicabilityLevel.FIXED_ARITY;
+        }
+      }
     }
 
     if (method.isVarArgs() && languageLevel.compareTo(LanguageLevel.JDK_1_5) >= 0) {
@@ -499,13 +511,19 @@ public final class PsiUtil extends PsiUtilCore {
   private static boolean areFirstArgumentsApplicable(@NotNull PsiType[] args,
                                                      @NotNull final PsiParameter[] parms,
                                                      @NotNull LanguageLevel languageLevel,
-                                                     @NotNull final PsiSubstitutor substitutorForMethod) {
+                                                     @NotNull final PsiSubstitutor substitutorForMethod, boolean isRaw) {
     for (int i = 0; i < parms.length - 1; i++) {
       final PsiType type = args[i];
       if (type == null) return false;
       final PsiParameter parameter = parms[i];
       final PsiType substitutedParmType = getParameterType(parameter, languageLevel, substitutorForMethod);
-      if (!TypeConversionUtil.isAssignable(substitutedParmType, type)) {
+      if (isRaw) {
+        final PsiType substErasure = TypeConversionUtil.erasure(substitutedParmType);
+        final PsiType typeErasure = TypeConversionUtil.erasure(type);
+        if (substErasure != null && typeErasure != null && !TypeConversionUtil.isAssignable(substErasure, typeErasure)) {
+          return false;
+        }
+      } else if (!TypeConversionUtil.isAssignable(substitutedParmType, type)) {
         return false;
       }
     }
@@ -534,7 +552,7 @@ public final class PsiUtil extends PsiUtilCore {
     if (typeParameters1.length != typeParameters2.length) return false;
     for (int i = 0; i < typeParameters1.length; i++) {
       final PsiType substituted2 = s2.substitute(typeParameters2[i]);
-      if (!Comparing.equal(s1.substituteWithBoundsPromotion(typeParameters1[i]), substituted2) && 
+      if (!Comparing.equal(s1.substituteWithBoundsPromotion(typeParameters1[i]), substituted2) &&
           !Comparing.equal(s1.substitute(typeParameters1[i]), substituted2)) return false;
     }
     if (aClass.hasModifierProperty(PsiModifier.STATIC)) return true;
@@ -705,9 +723,14 @@ public final class PsiUtil extends PsiUtilCore {
 
   @PsiModifier.ModifierConstant
   public static String getMaximumModifierForMember(final PsiClass aClass) {
+    return getMaximumModifierForMember(aClass, true);
+  }
+
+  @PsiModifier.ModifierConstant
+  public static String getMaximumModifierForMember(final PsiClass aClass, boolean allowPublicAbstract) {
     String modifier = PsiModifier.PUBLIC;
 
-    if (aClass.hasModifierProperty(PsiModifier.ABSTRACT) && !aClass.isEnum()) {
+    if (!allowPublicAbstract && aClass.hasModifierProperty(PsiModifier.ABSTRACT) && !aClass.isEnum()) {
       modifier =  PsiModifier.PROTECTED;
     }
     else if (aClass.hasModifierProperty(PsiModifier.PACKAGE_LOCAL)) {
@@ -816,21 +839,29 @@ public final class PsiUtil extends PsiUtilCore {
 
   @NotNull
   public static LanguageLevel getLanguageLevel(@NotNull PsiElement element) {
-    if (element instanceof PsiDirectory) return JavaDirectoryService.getInstance().getLanguageLevel((PsiDirectory)element);
-    final PsiFile file = element.getContainingFile();
-    if (file == null) {
-      final LanguageLevelProjectExtension instance = LanguageLevelProjectExtension.getInstance(element.getProject());
-      return instance != null ? instance.getLanguageLevel() : LanguageLevel.HIGHEST;
+    if (element instanceof PsiDirectory) {
+      return JavaDirectoryService.getInstance().getLanguageLevel((PsiDirectory)element);
     }
 
-    if (!(file instanceof PsiJavaFile)) {
-      final PsiElement context = file.getContext();
-      if (context != null) return getLanguageLevel(context);
-      final LanguageLevelProjectExtension instance = LanguageLevelProjectExtension.getInstance(file.getProject());
-      return instance != null ? instance.getLanguageLevel() : LanguageLevel.HIGHEST;
+    PsiFile file = element.getContainingFile();
+    if (file instanceof PsiJavaFile) {
+      return ((PsiJavaFile)file).getLanguageLevel();
     }
 
-    return ((PsiJavaFile)file).getLanguageLevel();
+    if (file != null) {
+      PsiElement context = file.getContext();
+      if (context != null) {
+        return getLanguageLevel(context);
+      }
+    }
+
+    return getLanguageLevel(element.getProject());
+  }
+
+  @NotNull
+  public static LanguageLevel getLanguageLevel(@NotNull Project project) {
+    LanguageLevelProjectExtension instance = LanguageLevelProjectExtension.getInstance(project);
+    return instance != null ? instance.getLanguageLevel() : LanguageLevel.HIGHEST;
   }
 
   public static boolean isInstantiatable(@NotNull PsiClass clazz) {
@@ -842,7 +873,7 @@ public final class PsiUtil extends PsiUtilCore {
   public static boolean hasDefaultConstructor(@NotNull PsiClass clazz) {
     return hasDefaultConstructor(clazz, false);
   }
-  
+
   public static boolean hasDefaultConstructor(@NotNull PsiClass clazz, boolean allowProtected) {
     return hasDefaultConstructor(clazz, allowProtected, true);
   }
@@ -933,8 +964,12 @@ public final class PsiUtil extends PsiUtilCore {
     return parent instanceof PsiIfStatement && element == ((PsiIfStatement)parent).getElseBranch();
   }
 
-  public static boolean isJavaToken(@Nullable final PsiElement element, final IElementType type) {
+  public static boolean isJavaToken(@Nullable PsiElement element, IElementType type) {
     return element instanceof PsiJavaToken && ((PsiJavaToken)element).getTokenType() == type;
+  }
+
+  public static boolean isJavaToken(@Nullable PsiElement element, @NotNull TokenSet types) {
+    return element instanceof PsiJavaToken && types.contains(((PsiJavaToken)element).getTokenType());
   }
 
   public static boolean isCatchParameter(@Nullable final PsiElement element) {
@@ -961,5 +996,29 @@ public final class PsiUtil extends PsiUtilCore {
 
     final PsiMethod[] closes = autoCloseable.findMethodsByName("close", false);
     return closes.length == 1 ? resourceClass.findMethodBySignature(closes[0], true) : null;
+  }
+
+  @Nullable
+  public static PsiExpression skipParenthesizedExprDown(PsiExpression initializer) {
+    while (initializer instanceof PsiParenthesizedExpression) {
+      initializer = ((PsiParenthesizedExpression)initializer).getExpression();
+    }
+    return initializer;
+  }
+
+  public static PsiElement skipParenthesizedExprUp(PsiElement parent) {
+    while (parent instanceof PsiParenthesizedExpression) {
+      parent = parent.getParent();
+    }
+    return parent;
+  }
+
+  public static void ensureValidType(@NotNull PsiType type) {
+    if (!type.isValid()) {
+      if (type instanceof PsiClassType) {
+        ((PsiClassType)type).resolve(); // should throw exception
+      }
+      throw new AssertionError("Invalid type: " + type + " of class " + type.getClass());
+    }
   }
 }

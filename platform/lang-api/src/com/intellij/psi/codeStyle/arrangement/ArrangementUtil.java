@@ -15,18 +15,25 @@
  */
 package com.intellij.psi.codeStyle.arrangement;
 
+import com.intellij.application.options.codeStyle.arrangement.color.ArrangementColorsProvider;
 import com.intellij.lang.Language;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.codeStyle.arrangement.match.ArrangementEntryType;
-import com.intellij.psi.codeStyle.arrangement.match.ArrangementModifier;
-import com.intellij.psi.codeStyle.arrangement.model.*;
+import com.intellij.psi.codeStyle.arrangement.match.*;
+import com.intellij.psi.codeStyle.arrangement.model.ArrangementAtomMatchCondition;
+import com.intellij.psi.codeStyle.arrangement.model.ArrangementCompositeMatchCondition;
+import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchCondition;
+import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchConditionVisitor;
+import com.intellij.psi.codeStyle.arrangement.std.*;
 import com.intellij.util.containers.ContainerUtilRt;
+import com.intellij.util.text.CharArrayUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Set;
+import java.util.*;
 
 /**
  * @author Denis Zhdanov
@@ -85,13 +92,8 @@ public class ArrangementUtil {
   //region ArrangementEntry
 
   /**
-   * Tries to build a text range on the given arguments basis. It should conform to the criteria below:
-   * <pre>
-   * <ul>
-   *   <li>it's start offset is located at the start of the same line where given range starts;</li>
-   *   <li>it's end offset is located at the end of the same line where given range ends;</li>
-   * </ul>
-   * </pre>
+   * Tries to build a text range on the given arguments basis. Expands to the line start/end if possible.
+   * <p/>
    * This method is expected to be used in a situation when we want to arrange complete rows.
    * Example:
    * <pre>
@@ -118,39 +120,60 @@ public class ArrangementUtil {
    *        }
    *   }
    * </pre>
+   * However, this method is expected to just return given range if there are multiple distinct elements at the same line:
+   * <pre>
+   *   class Test {
+   *     void test1(){} void test2() {} int i;
+   *   }
+   * </pre>
    * 
    * @param initialRange  anchor range
    * @param document      target document against which the ranges are built
    * @return              expanded range if possible; <code>null</code> otherwise
    */
   @NotNull
-  public static TextRange expandToLine(@NotNull TextRange initialRange, @NotNull Document document) {
+  public static TextRange expandToLineIfPossible(@NotNull TextRange initialRange, @NotNull Document document) {
+    CharSequence text = document.getCharsSequence();
+    String ws = " \t";
+    
     int startLine = document.getLineNumber(initialRange.getStartOffset());
-    int startOffsetToUse = document.getLineStartOffset(startLine);
+    int lineStartOffset = document.getLineStartOffset(startLine);
+    int i = CharArrayUtil.shiftBackward(text, lineStartOffset + 1, initialRange.getStartOffset() - 1, ws);
+    if (i != lineStartOffset) {
+      return initialRange;
+    }
 
     int endLine = document.getLineNumber(initialRange.getEndOffset());
-    int endOffsetToUse = document.getLineEndOffset(endLine);
-
-    return TextRange.create(startOffsetToUse, endOffsetToUse);
+    int lineEndOffset = document.getLineEndOffset(endLine);
+    i = CharArrayUtil.shiftForward(text, initialRange.getEndOffset(), lineEndOffset, ws);
+    
+    return i == lineEndOffset ? TextRange.create(lineStartOffset, lineEndOffset) : initialRange;
   }
   //endregion
   
-  @NotNull
-  public static ArrangementSettingType parseType(@NotNull Object condition) throws IllegalArgumentException {
-    if (condition instanceof ArrangementEntryType) {
-      return ArrangementSettingType.TYPE;
-    }
-    else if (condition instanceof ArrangementModifier) {
-      return ArrangementSettingType.MODIFIER;
-    }
-    else if (condition instanceof String) {
-      return ArrangementSettingType.NAME;
-    }
-    else {
-      throw new IllegalArgumentException(String.format(
-        "Can't parse type for the given condition of class '%s': %s", condition.getClass(), condition
-      ));
-    }
+  @Nullable
+  public static ArrangementSettingsToken parseType(@NotNull ArrangementMatchCondition condition) throws IllegalArgumentException {
+    final Ref<ArrangementSettingsToken> result = new Ref<ArrangementSettingsToken>();
+    condition.invite(new ArrangementMatchConditionVisitor() {
+      @Override
+      public void visit(@NotNull ArrangementAtomMatchCondition condition) {
+        if (StdArrangementTokens.EntryType.is(condition.getType())) {
+          result.set(condition.getType());
+        }
+      }
+
+      @Override
+      public void visit(@NotNull ArrangementCompositeMatchCondition condition) {
+        for (ArrangementMatchCondition c : condition.getOperands()) {
+          c.invite(this);
+          if (result.get() != null) {
+            return;
+          }
+        } 
+      }
+    });
+
+    return result.get();
   }
 
   public static <T> Set<T> flatten(@NotNull Iterable<? extends Iterable<T>> data) {
@@ -164,12 +187,14 @@ public class ArrangementUtil {
   }
 
   @NotNull
-  public static ArrangementRuleInfo extractConditions(@NotNull ArrangementMatchCondition condition) {
-    final ArrangementRuleInfo result = new ArrangementRuleInfo();
+  public static Map<ArrangementSettingsToken, Object> extractTokens(@NotNull ArrangementMatchCondition condition) {
+    final Map<ArrangementSettingsToken, Object> result = ContainerUtilRt.newHashMap();
     condition.invite(new ArrangementMatchConditionVisitor() {
       @Override
       public void visit(@NotNull ArrangementAtomMatchCondition condition) {
-        result.addAtomCondition(condition); 
+        ArrangementSettingsToken type = condition.getType();
+        Object value = condition.getValue();
+        result.put(condition.getType(), type.equals(value) ? null : value); 
       }
 
       @Override
@@ -180,5 +205,98 @@ public class ArrangementUtil {
       }
     });
     return result;
+  }
+
+  @Nullable
+  public static ArrangementEntryMatcher buildMatcher(@NotNull ArrangementMatchCondition condition) {
+    final Ref<ArrangementEntryMatcher> result = new Ref<ArrangementEntryMatcher>();
+    final Stack<CompositeArrangementEntryMatcher> composites = new Stack<CompositeArrangementEntryMatcher>();
+    ArrangementMatchConditionVisitor visitor = new ArrangementMatchConditionVisitor() {
+      @Override
+      public void visit(@NotNull ArrangementAtomMatchCondition condition) {
+        ArrangementEntryMatcher matcher = buildMatcher(condition);
+        if (matcher == null) {
+          return;
+        }
+        if (composites.isEmpty()) {
+          result.set(matcher);
+        }
+        else {
+          composites.peek().addMatcher(matcher);
+        } 
+      }
+
+      @Override
+      public void visit(@NotNull ArrangementCompositeMatchCondition condition) {
+        composites.push(new CompositeArrangementEntryMatcher());
+        try {
+          for (ArrangementMatchCondition operand : condition.getOperands()) {
+            operand.invite(this);
+          }
+        }
+        finally {
+          CompositeArrangementEntryMatcher matcher = composites.pop();
+          if (composites.isEmpty()) {
+            result.set(matcher);
+          }
+        }
+      }
+    };
+    condition.invite(visitor);
+    return result.get();
+  }
+
+  @Nullable
+  public static ArrangementEntryMatcher buildMatcher(@NotNull ArrangementAtomMatchCondition condition) {
+    if (StdArrangementTokens.EntryType.is(condition.getType())) {
+      return new ByTypeArrangementEntryMatcher(condition.getType());
+    }
+    else if (StdArrangementTokens.Modifier.is(condition.getType())) {
+      return new ByModifierArrangementEntryMatcher(condition.getType());
+    }
+    else if (StdArrangementTokens.Regexp.NAME.equals(condition.getType())) {
+      return new ByNameArrangementEntryMatcher(condition.getValue().toString());
+    }
+    else if (StdArrangementTokens.Regexp.XML_NAMESPACE.equals(condition.getType())) {
+      return new ByNamespaceArrangementEntryMatcher(condition.getValue().toString());
+    }
+    else {
+      return null;
+    }
+  }
+
+  @NotNull
+  public static ArrangementUiComponent buildUiComponent(@NotNull StdArrangementTokenUiRole role,
+                                                        @NotNull List<ArrangementSettingsToken> tokens,
+                                                        @NotNull ArrangementColorsProvider colorsProvider,
+                                                        @NotNull ArrangementStandardSettingsManager settingsManager)
+    throws IllegalArgumentException
+  {
+    for (ArrangementUiComponent.Factory factory : Extensions.getExtensions(ArrangementUiComponent.Factory.EP_NAME)) {
+      ArrangementUiComponent result = factory.build(role, tokens, colorsProvider, settingsManager);
+      if (result != null) {
+        return result;
+      }
+    }
+    throw new IllegalArgumentException("Unsupported UI token role " + role);
+  }
+
+  @NotNull
+  public static List<CompositeArrangementSettingsToken> flatten(@NotNull CompositeArrangementSettingsToken base) {
+    List<CompositeArrangementSettingsToken> result = ContainerUtilRt.newArrayList();
+    Queue<CompositeArrangementSettingsToken> toProcess = ContainerUtilRt.newLinkedList(base);
+    while (!toProcess.isEmpty()) {
+      CompositeArrangementSettingsToken token = toProcess.remove();
+      result.add(token);
+      toProcess.addAll(token.getChildren());
+    }
+    return result;
+  }
+
+  @NotNull
+  public static List<? extends ArrangementMatchRule> getRulesSortedByPriority(@NotNull ArrangementSettings arrangementSettings) {
+    return arrangementSettings instanceof RulePriorityAwareSettings ?
+           ((RulePriorityAwareSettings)arrangementSettings).getRulesSortedByPriority() :
+           arrangementSettings.getRules();
   }
 }

@@ -17,7 +17,7 @@
 package com.intellij.codeInsight.completion.actions;
 
 import com.intellij.codeInsight.CodeInsightActionHandler;
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.completion.impl.CamelHumpMatcher;
 import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.codeInsight.lookup.LookupManager;
@@ -47,7 +47,7 @@ public class HippieWordCompletionHandler implements CodeInsightActionHandler {
 
   @Override
   public void invoke(@NotNull Project project, @NotNull final Editor editor, @NotNull PsiFile file) {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
     LookupManager.getInstance(project).hideActiveLookup();
 
@@ -237,25 +237,26 @@ public class HippieWordCompletionHandler implements CodeInsightActionHandler {
   }
 
   private static CompletionData computeData(final Editor editor, final CharSequence charsSequence) {
-    int offset = editor.getCaretModel().getOffset();
-
-    while (offset > 1 && Character.isJavaIdentifierPart(charsSequence.charAt(offset - 1))) offset--;
+    final int offset = editor.getCaretModel().getOffset();
 
     final CompletionData data = new CompletionData();
 
-    int endOffset = offset;
-    data.startOffset = offset;
-    while (charsSequence.length() > endOffset && Character.isJavaIdentifierPart(charsSequence.charAt(endOffset)) &&
-           endOffset < editor.getDocument().getTextLength()) {
-      if (endOffset == editor.getCaretModel().getOffset()) {
-        data.myPrefix = charsSequence.subSequence(offset, endOffset).toString();
+    IdTableBuilding.scanWords(new IdTableBuilding.ScanWordProcessor() {
+      @Override
+      public void run(final CharSequence chars, @Nullable char[] charsArray, final int start, final int end) {
+        if (start <= offset && end >= offset) {
+          data.myPrefix = charsSequence.subSequence(start, offset).toString();
+          data.myWordUnderCursor = charsSequence.subSequence(start, end).toString();
+          data.startOffset = start;
+        }
       }
-      endOffset++;
+    }, charsSequence, 0, charsSequence.length());
+
+    if (data.myPrefix == null) {
+      data.myPrefix = "";
+      data.myWordUnderCursor = "";
+      data.startOffset = offset;
     }
-
-    data.myWordUnderCursor = charsSequence.subSequence(offset, endOffset).toString();
-    if (data.myPrefix == null) data.myPrefix = data.myWordUnderCursor;
-
     return data;
   }
 

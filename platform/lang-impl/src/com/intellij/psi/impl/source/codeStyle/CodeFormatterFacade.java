@@ -21,6 +21,7 @@ import com.intellij.ide.DataManager;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.LanguageFormatting;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
@@ -44,6 +45,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLanguageInjectionHost;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.formatter.DocumentBasedFormattingModel;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
@@ -53,19 +55,19 @@ import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtilRt;
+import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
-import java.util.Collections;
-import java.util.LinkedHashSet;
+import java.util.*;
 import java.util.List;
 
 public class CodeFormatterFacade {
-  
+
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.codeStyle.CodeFormatterFacade");
-  
+
   private static final String WRAP_LINE_COMMAND_NAME = "AutoWrapLongLine";
 
   /**
@@ -73,7 +75,7 @@ public class CodeFormatterFacade {
    *
    * @see CodeStyleSettings#WRAP_LONG_LINES
    */
-  public static final Key<Boolean> WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY 
+  public static final Key<Boolean> WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY
     = new Key<Boolean>("WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY");
 
   private final CodeStyleSettings mySettings;
@@ -94,7 +96,8 @@ public class CodeFormatterFacade {
     final Document document = file.getViewProvider().getDocument();
     final RangeMarker rangeMarker = document != null && endOffset < document.getTextLength()? document.createRangeMarker(startOffset, endOffset):null;
 
-    PsiElement elementToFormat = document instanceof DocumentWindow ? InjectedLanguageUtil.getTopLevelFile(file) : psiElement;
+    PsiElement elementToFormat = document instanceof DocumentWindow ? InjectedLanguageManager
+          .getInstance(file.getProject()).getTopLevelFile(file) : psiElement;
     final PsiFile fileToFormat = elementToFormat.getContainingFile();
 
     final FormattingModelBuilder builder = LanguageFormatting.INSTANCE.forContext(fileToFormat);
@@ -125,16 +128,18 @@ public class CodeFormatterFacade {
           final PsiElement at = file.findElementAt(rangeMarker.getStartOffset());
           final PsiElement result = PsiTreeUtil.getParentOfType(at, psiElement.getClass(), false);
           assert result != null;
+          rangeMarker.dispose();
           return result.getNode();
         } else {
           assert false;
         }
       }
-
 //      return SourceTreeToPsiMap.psiElementToTree(pointer.getElement());
-
     }
 
+    if (rangeMarker != null) {
+      rangeMarker.dispose();
+    }
     return element;
   }
 
@@ -143,7 +148,7 @@ public class CodeFormatterFacade {
     Document document = PsiDocumentManager.getInstance(project).getDocument(file);
     final List<FormatTextRanges.FormatTextRange> textRanges = ranges.getRanges();
     if (document instanceof DocumentWindow) {
-      file = InjectedLanguageUtil.getTopLevelFile(file);
+      file = InjectedLanguageManager.getInstance(file.getProject()).getTopLevelFile(file);
       final DocumentWindow documentWindow = (DocumentWindow)document;
       for (FormatTextRanges.FormatTextRange range : textRanges) {
         range.setTextRange(documentWindow.injectedToHost(range.getTextRange()));
@@ -211,7 +216,16 @@ public class CodeFormatterFacade {
           if (CodeStyleManager.getInstance(project).isSequentialProcessingAllowed()) {
             formatter.setProgressTask(new FormattingProgressTask(project, file, document));
           }
-          formatter.format(model, mySettings, mySettings.getIndentOptions(file.getFileType()), ranges);
+
+          CommonCodeStyleSettings.IndentOptions indentOptions = null;
+          if (builder instanceof FormattingModelBuilderEx) {
+            indentOptions = ((FormattingModelBuilderEx)builder).getIndentOptionsToUse(file, ranges, mySettings);
+          }
+          if (indentOptions == null) {
+            indentOptions  = mySettings.getIndentOptions(file.getFileType());
+          }
+
+          formatter.format(model, mySettings, indentOptions, ranges);
           for (FormatTextRanges.FormatTextRange range : textRanges) {
             TextRange textRange = range.getTextRange();
             wrapLongLinesIfNecessary(file, document, textRange.getStartOffset(), textRange.getEndOffset());
@@ -233,33 +247,37 @@ public class CodeFormatterFacade {
       }
       return result;
     }
-    
+
     PsiFile file = psi.getContainingFile();
-    
+
     // We use a set here because we encountered a situation when more than one PSI leaf points to the same injected fragment
     // (at least for sql injected into sql).
     final LinkedHashSet<TextRange> injectedFileRangesSet = ContainerUtilRt.newLinkedHashSet();
-    if (InjectedLanguageUtil.areInjectionsProcessed(file)) {
-      for (DocumentWindow window : InjectedLanguageUtil.getCachedInjectedDocuments(file)) {
-        injectedFileRangesSet.add(TextRange.create(window.injectedToHost(0), window.injectedToHost(window.getTextLength())));
-      }
-    }
-    else if (!file.getProject().isDefault()) {
-      PsiLanguageInjectionHost.InjectedPsiVisitor visitor = new PsiLanguageInjectionHost.InjectedPsiVisitor() {
-        @Override
-        public void visit(@NotNull PsiFile injectedPsi, @NotNull List<PsiLanguageInjectionHost.Shred> places) {
-          for (PsiLanguageInjectionHost.Shred place : places) {
-            Segment rangeMarker = place.getHostRangeMarker();
-            injectedFileRangesSet.add(TextRange.create(rangeMarker.getStartOffset(), rangeMarker.getEndOffset()));
-          }
-        }
-      };
 
-      for (PsiElement e = PsiTreeUtil.getDeepestFirst(file); e != null; e = PsiTreeUtil.nextLeaf(e, true)) {
-        InjectedLanguageUtil.enumerate(e, visitor);
+    if (!psi.getProject().isDefault()) {
+      List<DocumentWindow> injectedDocuments = InjectedLanguageUtil.getCachedInjectedDocuments(file);
+      if (!injectedDocuments.isEmpty()) {
+        for (DocumentWindow injectedDocument : injectedDocuments) {
+          injectedFileRangesSet.add(TextRange.from(injectedDocument.injectedToHost(0), injectedDocument.getTextLength()));
+        }
+      }
+      else {
+        Collection<PsiLanguageInjectionHost> injectionHosts = collectInjectionHosts(file, range);
+        PsiLanguageInjectionHost.InjectedPsiVisitor visitor = new PsiLanguageInjectionHost.InjectedPsiVisitor() {
+          @Override
+          public void visit(@NotNull PsiFile injectedPsi, @NotNull List<PsiLanguageInjectionHost.Shred> places) {
+            for (PsiLanguageInjectionHost.Shred place : places) {
+              Segment rangeMarker = place.getHostRangeMarker();
+              injectedFileRangesSet.add(TextRange.create(rangeMarker.getStartOffset(), rangeMarker.getEndOffset()));
+            }
+          }
+        };
+        for (PsiLanguageInjectionHost host : injectionHosts) {
+          InjectedLanguageUtil.enumerate(host, visitor);
+        }
       }
     }
-    
+
     if (!injectedFileRangesSet.isEmpty()) {
       List<TextRange> ranges = ContainerUtilRt.newArrayList(injectedFileRangesSet);
       Collections.reverse(ranges);
@@ -293,11 +311,47 @@ public class CodeFormatterFacade {
         }
       }
     }
+
     for(PreFormatProcessor processor: Extensions.getExtensions(PreFormatProcessor.EP_NAME)) {
       result = processor.process(node, result);
     }
+
     return result;
   }
+
+  @NotNull
+  private static Collection<PsiLanguageInjectionHost> collectInjectionHosts(@NotNull PsiFile file, @NotNull TextRange range) {
+    Stack<PsiElement> toProcess = new Stack<PsiElement>();
+    for (PsiElement e = file.findElementAt(range.getStartOffset()); e != null; e = e.getNextSibling()) {
+      if (e.getTextRange().getStartOffset() >= range.getEndOffset()) {
+        break;
+      }
+      toProcess.push(e);
+    }
+    if (toProcess.isEmpty()) {
+      return Collections.emptySet();
+    }
+    Set<PsiLanguageInjectionHost> result = null;
+    while (!toProcess.isEmpty()) {
+      PsiElement e = toProcess.pop();
+      if (e instanceof PsiLanguageInjectionHost) {
+        if (result == null) {
+          result = ContainerUtilRt.newHashSet();
+        }
+        result.add((PsiLanguageInjectionHost)e);
+      }
+      else {
+        for (PsiElement child = e.getFirstChild(); child != null; child = child.getNextSibling()) {
+          if (e.getTextRange().getStartOffset() >= range.getEndOffset()) {
+            break;
+          }
+          toProcess.push(child);
+        }
+      }
+    }
+    return result == null ? Collections.<PsiLanguageInjectionHost>emptySet() : result;
+  }
+
 
   /**
    * Inspects all lines of the given document and wraps all of them that exceed {@link CodeStyleSettings#RIGHT_MARGIN right margin}.
@@ -347,7 +401,7 @@ public class CodeFormatterFacade {
         return;
       }
       editorFactory = EditorFactory.getInstance();
-      editor = editorFactory.createEditor(document);
+      editor = editorFactory.createEditor(document, file.getProject());
     }
     try {
       final Editor editorToUse = editor;
@@ -360,7 +414,7 @@ public class CodeFormatterFacade {
           doWrapLongLinesIfNecessary(editorToUse, file.getProject(), editorToUse.getDocument(), startOffset, endOffset);
           if (caretMarker.isValid() && caretModel.getOffset() != caretMarker.getStartOffset()) {
             caretModel.moveToOffset(caretMarker.getStartOffset());
-          } 
+          }
         }
       });
     }
@@ -373,8 +427,8 @@ public class CodeFormatterFacade {
     }
   }
 
-  private void doWrapLongLinesIfNecessary(@NotNull final Editor editor, @NotNull final Project project, @NotNull Document document, 
-                                          int startOffset, int endOffset) {
+  public void doWrapLongLinesIfNecessary(@NotNull final Editor editor, @NotNull final Project project, @NotNull Document document,
+                                         int startOffset, int endOffset) {
     // Normalization.
     int startOffsetToUse = Math.min(document.getTextLength(), Math.max(0, startOffset));
     int endOffsetToUse = Math.min(document.getTextLength(), Math.max(0, endOffset));
@@ -389,92 +443,17 @@ public class CodeFormatterFacade {
       tabSize = 1;
     }
     int spaceSize = EditorUtil.getSpaceWidth(Font.PLAIN, editor);
+    int[] shifts = new int[2];
+    // shifts[0] - lines shift.
+    // shift[1] - offset shift.
 
     for (int line = startLine; line < maxLine; line++) {
       int startLineOffset = document.getLineStartOffset(line);
       int endLineOffset = document.getLineEndOffset(line);
+      final int preferredWrapPosition
+        = calculatePreferredWrapPosition(editor, text, tabSize, spaceSize, startLineOffset, endLineOffset, endOffsetToUse);
 
-      boolean hasTabs = false;
-      boolean canOptimize = true;
-      boolean hasNonSpaceSymbols = false;
-      loop:
-      for (int i = startLineOffset; i < Math.min(endLineOffset, endOffsetToUse); i++) {
-        char c = text.charAt(i);
-        switch (c) {
-          case '\t': {
-            hasTabs = true;
-            if (hasNonSpaceSymbols) {
-              canOptimize = false;
-              break loop;
-            }
-          }
-          case ' ': break;
-          default: hasNonSpaceSymbols = true;
-        }
-      }
-
-      boolean wrapLine = false; 
-      int preferredWrapPosition = Integer.MAX_VALUE;
-      if (!hasTabs) {
-        if (Math.min(endLineOffset, endOffsetToUse) - startLineOffset > mySettings.RIGHT_MARGIN) {
-          preferredWrapPosition = startLineOffset + mySettings.RIGHT_MARGIN - FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS;
-          wrapLine = true;
-        }
-      }
-      else if (canOptimize) {
-        int width = 0;
-        int symbolWidth;
-        for (int i = startLineOffset; i < Math.min(endLineOffset, endOffsetToUse); i++) {
-          char c = text.charAt(i);
-          switch (c) {
-            case '\t': symbolWidth = tabSize - (width % tabSize); break;
-            default: symbolWidth = 1;
-          }
-          if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN
-              && (Math.min(endLineOffset, endOffsetToUse) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS)
-          {
-            // Remember preferred position.
-            preferredWrapPosition = i - 1;
-          }
-          if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
-            wrapLine = true;
-            break;
-          }
-          width += symbolWidth;
-        }
-      }
-      else {
-        int width = 0;
-        int x = 0;
-        int newX;
-        int symbolWidth;
-        for (int i = startLineOffset; i < Math.min(endLineOffset, endOffsetToUse); i++) {
-          char c = text.charAt(i);
-          switch (c) {
-            case '\t':
-              newX = EditorUtil.nextTabStop(x, editor);
-              int diffInPixels = newX - x;
-              symbolWidth = diffInPixels / spaceSize;
-              if (diffInPixels % spaceSize > 0) {
-                symbolWidth++;
-              }
-              break;
-            default: newX = x + EditorUtil.charWidth(c, Font.PLAIN, editor); symbolWidth = 1;
-          }
-          if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN
-              && (Math.min(endLineOffset, endOffsetToUse) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS)
-          {
-            preferredWrapPosition = i - 1;
-          }
-          if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
-            wrapLine = true;
-            break;
-          }
-          x = newX;
-          width += symbolWidth;
-        }
-      }
-      if (!wrapLine || preferredWrapPosition >= endLineOffset) {
+      if (preferredWrapPosition < 0 || preferredWrapPosition >= endLineOffset) {
         continue;
       }
       if (preferredWrapPosition >= endOffsetToUse) {
@@ -486,76 +465,232 @@ public class CodeFormatterFacade {
         document, editor.getProject(), Math.max(startLineOffset, startOffsetToUse), Math.min(endLineOffset, endOffsetToUse),
         preferredWrapPosition, false, false
       );
-      if (wrapOffset < 0) {
+      if (wrapOffset < 0 // No appropriate wrap position is found.
+          // No point in splitting line when its left part contains only white spaces, example:
+          //    line start -> |                   | <- right margin
+          //                  |   aaaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaaaaaa() <- don't want to wrap this line even if it exceeds right margin
+          || CharArrayUtil.shiftBackward(text, startLineOffset, wrapOffset - 1, " \t") < startLineOffset) {
         continue;
       }
+
+      // Move caret to the target position and emulate pressing <enter>.
       editor.getCaretModel().moveToOffset(wrapOffset);
-      
-      // There is a possible case that formatting is performed from project view and editor is not opened yet. The problem is that
-      // its data context doesn't contain information about project then. So, we explicitly support that here (see IDEA-72791).
-      final DataContext baseDataContext = DataManager.getInstance().getDataContext(editor.getComponent());
-      final DataContext dataContext = new DelegatingDataContext(baseDataContext) {
-        @Override
-        public Object getData(@NonNls String dataId) {
-          Object result = baseDataContext.getData(dataId);
-          if (result == null && PlatformDataKeys.PROJECT.is(dataId)) {
-            result = project;
-          } 
-          return result;
-        }
-      };
-      
-
-      SelectionModel selectionModel = editor.getSelectionModel();
-      int startSelectionOffset = 0;
-      int endSelectionOffset = 0;
-      boolean restoreSelection = selectionModel.hasSelection();
-      if (restoreSelection) {
-        startSelectionOffset = selectionModel.getSelectionStart();
-        endSelectionOffset = selectionModel.getSelectionEnd();
-        selectionModel.removeSelection();
-      }
-      int textLengthBeforeWrap = document.getTextLength();
-
-      DataManager.getInstance().saveInDataContext(dataContext, WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY, true);
-      CommandProcessor commandProcessor = CommandProcessor.getInstance();
-      try {
-        Runnable command = new Runnable() {
-          @Override
-          public void run() {
-            EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor, dataContext);
-          }
-        };
-        if (commandProcessor.getCurrentCommand() == null) {
-          commandProcessor.executeCommand(editor.getProject(), command, WRAP_LINE_COMMAND_NAME, null);
-        }
-        else {
-          command.run();
-        }
-      }
-      finally {
-        DataManager.getInstance().saveInDataContext(dataContext, WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY, null);
-      }
-      if (restoreSelection) {
-        int symbolsDiff = document.getTextLength() - textLengthBeforeWrap;
-        int newSelectionStart = startSelectionOffset;
-        int newSelectionEnd = endSelectionOffset;
-        if (startSelectionOffset >= wrapOffset) {
-          newSelectionStart += symbolsDiff;
-        }
-        if (endSelectionOffset >= wrapOffset) {
-          newSelectionEnd += symbolsDiff;
-        }
-        selectionModel.setSelection(newSelectionStart, newSelectionEnd);
-      }
+      emulateEnter(editor, project, shifts);
 
       // We know that number of lines is just increased, hence, update the data accordingly.
-      maxLine++;
+      maxLine += shifts[0];
+      endOffsetToUse += shifts[1];
     }
   }
-  
+
+  /**
+   * Emulates pressing <code>Enter</code> at current caret position.
+   *
+   * @param editor       target editor
+   * @param project      target project
+   * @param shifts       two-elements array which is expected to be filled with the following info:
+   *                       1. The first element holds added lines number;
+   *                       2. The second element holds added symbols number;  
+   */
+  private static void emulateEnter(@NotNull final Editor editor, @NotNull Project project, int[] shifts) {
+    final DataContext dataContext = prepareContext(editor.getComponent(), project);
+    int caretOffset = editor.getCaretModel().getOffset();
+    Document document = editor.getDocument();
+    SelectionModel selectionModel = editor.getSelectionModel();
+    int startSelectionOffset = 0;
+    int endSelectionOffset = 0;
+    boolean restoreSelection = selectionModel.hasSelection();
+    if (restoreSelection) {
+      startSelectionOffset = selectionModel.getSelectionStart();
+      endSelectionOffset = selectionModel.getSelectionEnd();
+      selectionModel.removeSelection();
+    }
+    int textLengthBeforeWrap = document.getTextLength();
+    int lineCountBeforeWrap = document.getLineCount();
+
+    DataManager.getInstance().saveInDataContext(dataContext, WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY, true);
+    CommandProcessor commandProcessor = CommandProcessor.getInstance();
+    try {
+      Runnable command = new Runnable() {
+        @Override
+        public void run() {
+          EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor, dataContext);
+        }
+      };
+      if (commandProcessor.getCurrentCommand() == null) {
+        commandProcessor.executeCommand(editor.getProject(), command, WRAP_LINE_COMMAND_NAME, null);
+      }
+      else {
+        command.run();
+      }
+    }
+    finally {
+      DataManager.getInstance().saveInDataContext(dataContext, WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY, null);
+    }
+    int symbolsDiff = document.getTextLength() - textLengthBeforeWrap;
+    if (restoreSelection) {
+      int newSelectionStart = startSelectionOffset;
+      int newSelectionEnd = endSelectionOffset;
+      if (startSelectionOffset >= caretOffset) {
+        newSelectionStart += symbolsDiff;
+      }
+      if (endSelectionOffset >= caretOffset) {
+        newSelectionEnd += symbolsDiff;
+      }
+      selectionModel.setSelection(newSelectionStart, newSelectionEnd);
+    }
+    shifts[0] = document.getLineCount() - lineCountBeforeWrap;
+    shifts[1] = symbolsDiff;
+  }
+
+  /**
+   * Checks if it's worth to try to wrap target line (it's long enough) and tries to calculate preferred wrap position.
+   *
+   * @param editor                target editor
+   * @param text                  text contained at the given editor
+   * @param tabSize               tab space to use (number of visual columns occupied by a tab)
+   * @param spaceSize             space width in pixels
+   * @param startLineOffset       start offset of the text line to process
+   * @param endLineOffset         end offset of the text line to process
+   * @param targetRangeEndOffset  target text region's end offset
+   * @return                      negative value if no wrapping should be performed for the target line;
+   *                              preferred wrap position otherwise
+   */
+  private int calculatePreferredWrapPosition(@NotNull Editor editor,
+                                             @NotNull CharSequence text,
+                                             int tabSize,
+                                             int spaceSize,
+                                             int startLineOffset,
+                                             int endLineOffset,
+                                             int targetRangeEndOffset) {
+    boolean hasTabs = false;
+    boolean canOptimize = true;
+    boolean hasNonSpaceSymbols = false;
+    loop:
+    for (int i = startLineOffset; i < Math.min(endLineOffset, targetRangeEndOffset); i++) {
+      char c = text.charAt(i);
+      switch (c) {
+        case '\t': {
+          hasTabs = true;
+          if (hasNonSpaceSymbols) {
+            canOptimize = false;
+            break loop;
+          }
+        }
+        case ' ': break;
+        default: hasNonSpaceSymbols = true;
+      }
+    }
+
+    if (!hasTabs) {
+      return wrapPositionForTextWithoutTabs(startLineOffset, endLineOffset, targetRangeEndOffset);
+    }
+    else if (canOptimize) {
+      return wrapPositionForTabbedTextWithOptimization(text, tabSize, startLineOffset, endLineOffset, targetRangeEndOffset);
+    }
+    else {
+      return wrapPositionForTabbedTextWithoutOptimization(editor, text, spaceSize, startLineOffset, endLineOffset, targetRangeEndOffset);
+    }
+  }
+
+  private int wrapPositionForTextWithoutTabs(int startLineOffset, int endLineOffset, int targetRangeEndOffset) {
+    if (Math.min(endLineOffset, targetRangeEndOffset) - startLineOffset > mySettings.RIGHT_MARGIN) {
+      return startLineOffset + mySettings.RIGHT_MARGIN - FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS;
+    }
+    return -1;
+  }
+
+  private int wrapPositionForTabbedTextWithOptimization(@NotNull CharSequence text,
+                                                        int tabSize,
+                                                        int startLineOffset,
+                                                        int endLineOffset,
+                                                        int targetRangeEndOffset)
+  {
+    int width = 0;
+    int symbolWidth;
+    int result = Integer.MAX_VALUE;
+    boolean wrapLine = false;
+    for (int i = startLineOffset; i < Math.min(endLineOffset, targetRangeEndOffset); i++) {
+      char c = text.charAt(i);
+      switch (c) {
+        case '\t': symbolWidth = tabSize - (width % tabSize); break;
+        default: symbolWidth = 1;
+      }
+      if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN
+          && (Math.min(endLineOffset, targetRangeEndOffset) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS)
+      {
+        // Remember preferred position.
+        result = i - 1;
+      }
+      if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
+        wrapLine = true;
+        break;
+      }
+      width += symbolWidth;
+    }
+    return wrapLine ? result : -1;
+  }
+
+  private int wrapPositionForTabbedTextWithoutOptimization(@NotNull Editor editor,
+                                                           @NotNull CharSequence text,
+                                                           int spaceSize,
+                                                           int startLineOffset,
+                                                           int endLineOffset,
+                                                           int targetRangeEndOffset)
+  {
+    int width = 0;
+    int x = 0;
+    int newX;
+    int symbolWidth;
+    int result = Integer.MAX_VALUE;
+    boolean wrapLine = false;
+    for (int i = startLineOffset; i < Math.min(endLineOffset, targetRangeEndOffset); i++) {
+      char c = text.charAt(i);
+      switch (c) {
+        case '\t':
+          newX = EditorUtil.nextTabStop(x, editor);
+          int diffInPixels = newX - x;
+          symbolWidth = diffInPixels / spaceSize;
+          if (diffInPixels % spaceSize > 0) {
+            symbolWidth++;
+          }
+          break;
+        default: newX = x + EditorUtil.charWidth(c, Font.PLAIN, editor); symbolWidth = 1;
+      }
+      if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN
+          && (Math.min(endLineOffset, targetRangeEndOffset) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS)
+      {
+        result = i - 1;
+      }
+      if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
+        wrapLine = true;
+        break;
+      }
+      x = newX;
+      width += symbolWidth;
+    }
+    return wrapLine ? result : -1;
+  }
+
+  @NotNull
+  private static DataContext prepareContext(@NotNull Component component, @NotNull final Project project) {
+    // There is a possible case that formatting is performed from project view and editor is not opened yet. The problem is that
+    // its data context doesn't contain information about project then. So, we explicitly support that here (see IDEA-72791).
+    final DataContext baseDataContext = DataManager.getInstance().getDataContext(component);
+    return new DelegatingDataContext(baseDataContext) {
+      @Override
+      public Object getData(@NonNls String dataId) {
+        Object result = baseDataContext.getData(dataId);
+        if (result == null && PlatformDataKeys.PROJECT.is(dataId)) {
+          result = project;
+        }
+        return result;
+      }
+    };
+  }
+
   private static class DelegatingDataContext implements DataContext, UserDataHolder {
-    
+
     private final DataContext myDataContextDelegate;
     private final UserDataHolder myDataHolderDelegate;
 

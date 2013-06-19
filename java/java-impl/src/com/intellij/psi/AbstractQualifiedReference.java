@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import com.intellij.extapi.psi.ASTWrapperPsiElement;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.impl.CheckUtil;
-import com.intellij.psi.impl.source.codeStyle.ReferenceAdjuster;
+import com.intellij.psi.impl.source.codeStyle.JavaReferenceAdjuster;
 import com.intellij.psi.impl.source.resolve.JavaResolveUtil;
 import com.intellij.psi.impl.source.resolve.ResolveCache;
 import com.intellij.psi.meta.PsiMetaData;
@@ -40,7 +40,8 @@ import java.util.Set;
 /**
  * @author peter
  */
-public abstract class AbstractQualifiedReference<T extends AbstractQualifiedReference<T>> extends ASTWrapperPsiElement implements PsiPolyVariantReference, PsiQualifiedReference {
+public abstract class AbstractQualifiedReference<T extends AbstractQualifiedReference<T>> extends ASTWrapperPsiElement
+  implements PsiPolyVariantReference, PsiQualifiedReferenceElement {
   private static final ResolveCache.PolyVariantResolver<AbstractQualifiedReference> MY_RESOLVER = new ResolveCache.PolyVariantResolver<AbstractQualifiedReference>() {
     @NotNull
     @Override
@@ -68,7 +69,8 @@ public abstract class AbstractQualifiedReference<T extends AbstractQualifiedRefe
   @Override
   @NotNull
   public final ResolveResult[] multiResolve(final boolean incompleteCode) {
-    return ResolveCache.getInstance(getProject()).resolveWithCaching(this, MY_RESOLVER, true, false);
+    PsiFile file = getContainingFile();
+    return ResolveCache.getInstance(file.getProject()).resolveWithCaching(this, MY_RESOLVER, true, false,file);
   }
 
   @Override
@@ -185,7 +187,7 @@ public abstract class AbstractQualifiedReference<T extends AbstractQualifiedRefe
   protected AbstractQualifiedReference shortenReferences() {
     final PsiElement refElement = resolve();
     if (refElement instanceof PsiClass) {
-      final PsiQualifiedReference reference = ReferenceAdjuster.getClassReferenceToShorten((PsiClass)refElement, false, this);
+      final PsiQualifiedReference reference = JavaReferenceAdjuster.getClassReferenceToShorten((PsiClass)refElement, false, this);
       if (reference instanceof AbstractQualifiedReference) {
         ((AbstractQualifiedReference)reference).dequalify();
       }

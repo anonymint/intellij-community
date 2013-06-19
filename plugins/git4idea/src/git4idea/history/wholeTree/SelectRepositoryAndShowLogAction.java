@@ -140,7 +140,12 @@ public class SelectRepositoryAndShowLogAction extends AnAction {
           contentComponent.setRoots(correctRoots);
           contentComponent.add(gitLog.getVisualComponent(), BorderLayout.CENTER);
           final Content content = contentFactory.createContent(contentComponent, "Log (" + cnt + ")", false);
-          content.setDescription("test!");
+          content.setDescription("Log for " + StringUtil.join(correctRoots, new Function<VirtualFile, String>() {
+            @Override
+            public String fun(VirtualFile file) {
+              return file.getPath();
+            }
+          }, "\n"));
           content.setCloseable(true);
           Disposer.register(content, gitLog);
           cm.addContent(content);
@@ -289,6 +294,7 @@ public class SelectRepositoryAndShowLogAction extends AnAction {
       return myGitLog.getVisualComponent();
     }
 
+    @NotNull
     @Override
     protected Action[] createActions() {
       return new Action[0];

@@ -2,6 +2,7 @@ package com.intellij.codeInsight.javadoc;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.CodeInsightTestCase;
+import com.intellij.lang.java.JavaDocumentationProvider;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -58,7 +59,25 @@ public class JavaDocInfoGeneratorTest extends CodeInsightTestCase {
   public void testInitializerWithNew() throws Exception {
     doTestField();
   }
-  
+
+  public void testInitializerWithReference() throws Exception {
+    doTestField();
+  }
+
+  public void testLiteral() throws Exception {
+    doTestField();
+  }
+
+  public void testEnumConstantOrdinal() throws Exception {
+    PsiClass psiClass = getTestClass();
+    PsiField field = psiClass.getFields() [0];
+    final File htmlPath = new File(JavaTestUtil.getJavaTestDataPath() + "/codeInsight/javadocIG/" + getTestName(true) + ".html");
+    String htmlText = FileUtil.loadFile(htmlPath);
+    String docInfo = new JavaDocumentationProvider().getQuickNavigateInfo(field, field);
+    assertNotNull(docInfo);
+    assertEquals(StringUtil.convertLineSeparators(htmlText.trim()), StringUtil.convertLineSeparators(docInfo.trim()));
+  }
+
   private void doTestField() throws Exception {
     PsiClass psiClass = getTestClass();
     PsiField field = psiClass.getFields() [0];
@@ -80,6 +99,7 @@ public class JavaDocInfoGeneratorTest extends CodeInsightTestCase {
     final File htmlPath = new File(JavaTestUtil.getJavaTestDataPath() + "/codeInsight/javadocIG/" + getTestName(true) + ".html");
     String htmlText = FileUtil.loadFile(htmlPath);
     String docInfo = new JavaDocInfoGenerator(getProject(), field).generateDocInfo(null);
+    assertNotNull(docInfo);
     assertEquals(StringUtil.convertLineSeparators(htmlText.trim()), StringUtil.convertLineSeparators(docInfo.trim()));
   }
 
@@ -90,6 +110,7 @@ public class JavaDocInfoGeneratorTest extends CodeInsightTestCase {
     final String info =
       new JavaDocInfoGenerator(getProject(), JavaPsiFacade.getInstance(getProject()).findPackage(getTestName(true))).generateDocInfo(null);
     String htmlText = FileUtil.loadFile(new File(packageInfo + File.separator + "packageInfo.html"));
+    assertNotNull(info);
     assertEquals(StringUtil.convertLineSeparators(htmlText.trim()), StringUtil.convertLineSeparators(info.trim()));
   }
 

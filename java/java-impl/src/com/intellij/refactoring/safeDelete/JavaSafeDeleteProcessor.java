@@ -15,7 +15,7 @@
  */
 package com.intellij.refactoring.safeDelete;
 
-import com.intellij.codeInsight.daemon.impl.quickfix.RemoveUnusedVariableFix;
+import com.intellij.codeInsight.daemon.impl.quickfix.RemoveUnusedVariableUtil;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.ide.util.SuperMethodWarningUtil;
 import com.intellij.openapi.application.ApplicationManager;
@@ -88,7 +88,9 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         boolean hasSideEffects = false;
         if (PsiUtil.isOnAssignmentLeftHand(referencedElement)) {
           hasSideEffects =
-            RemoveUnusedVariableFix.checkSideEffects(((PsiAssignmentExpression)referencedElement.getParent()).getRExpression(), ((PsiLocalVariable)element), new ArrayList<PsiElement>());
+            RemoveUnusedVariableUtil
+              .checkSideEffects(((PsiAssignmentExpression)referencedElement.getParent()).getRExpression(), ((PsiLocalVariable)element),
+                                new ArrayList<PsiElement>());
         }
         usages.add(new SafeDeleteReferenceJavaDeleteUsageInfo(statement, element, isSafeToDelete && !hasSideEffects));
       }
@@ -111,7 +113,9 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
         SuperMethodWarningUtil.checkSuperMethods((PsiMethod)element, RefactoringBundle.message("to.delete.with.usage.search"),
                                                  allElementsToDelete);
       if (methods.length == 0) return null;
-      return Arrays.asList(methods);
+      final ArrayList<PsiMethod> psiMethods = new ArrayList<PsiMethod>(Arrays.asList(methods));
+      psiMethods.add((PsiMethod)element);
+      return psiMethods;
     }
     else if (element instanceof PsiParameter && ((PsiParameter) element).getDeclarationScope() instanceof PsiMethod) {
       PsiMethod method = (PsiMethod) ((PsiParameter) element).getDeclarationScope();
@@ -734,7 +738,7 @@ public class JavaSafeDeleteProcessor extends SafeDeleteProcessorDelegateBase {
 
   public static boolean isInside (PsiElement place, PsiElement ancestor) {
     if (SafeDeleteProcessor.isInside(place, ancestor)) return true;
-    if (place instanceof PsiComment && ancestor instanceof PsiClass) {
+    if (PsiTreeUtil.getParentOfType(place, PsiComment.class, false) != null && ancestor instanceof PsiClass) {
       final PsiClass aClass = (PsiClass)ancestor;
       if (aClass.getParent() instanceof PsiJavaFile) {
         final PsiJavaFile file = (PsiJavaFile)aClass.getParent();

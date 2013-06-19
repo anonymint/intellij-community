@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,14 @@ import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.ide.actions.ShowFilePathAction;
 import com.intellij.notification.*;
-import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationBundle;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.ManagingFS;
-import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
+import com.intellij.util.SmartList;
 import com.intellij.util.TimeoutUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -43,7 +40,12 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.intellij.util.containers.ContainerUtil.*;
 
@@ -61,6 +63,12 @@ public class FileWatcher {
     }
   };
 
+  public static class DirtyPaths {
+    public final List<String> dirtyPaths = newArrayList();
+    public final List<String> dirtyPathsRecursive = newArrayList();
+    public final List<String> dirtyDirectories = newArrayList();
+  }
+
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vfs.impl.local.FileWatcher");
 
   @NonNls private static final String ROOTS_COMMAND = "ROOTS";
@@ -68,31 +76,28 @@ public class FileWatcher {
 
   private static final int MAX_PROCESS_LAUNCH_ATTEMPT_COUNT = 10;
 
-  private final Object myLock = new Object();
-
-  private List<String> myDirtyPaths = newArrayList();
-  private List<String> myDirtyRecursivePaths = newArrayList();
-  private List<String> myDirtyDirs = newArrayList();
-  private List<String> myManualWatchRoots = newArrayList();
-  private List<String> myRecursiveWatchRoots = newArrayList();
-  private List<String> myFlatWatchRoots = newArrayList();
-  private final List<Pair<String, String>> myMapping = newArrayList();
-  private final Collection<String> myAllPaths = newArrayListWithExpectedSize(2);
-  private final Collection<String> myWatchedPaths = newArrayListWithExpectedSize(2);
-
   private final ManagingFS myManagingFS;
   private final File myExecutable;
   private volatile MyProcessHandler myProcessHandler;
   private volatile int myStartAttemptCount = 0;
   private volatile boolean myIsShuttingDown = false;
-  private volatile boolean myFailureShownToTheUser = false;
+  private final AtomicBoolean myFailureShownToTheUser = new AtomicBoolean(false);
+  private final AtomicInteger mySettingRoots = new AtomicInteger(0);
+
+  private volatile List<String> myRecursiveWatchRoots = emptyList();
+  private volatile List<String> myFlatWatchRoots = emptyList();
+  private volatile List<String> myManualWatchRoots = emptyList();
+  private volatile List<Pair<String, String>> myMapping = emptyList();
+
+  private final Object myLock = new Object();
+  private DirtyPaths myDirtyPaths = new DirtyPaths();
 
   /** @deprecated use {@linkplain com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl#getFileWatcher()} (to remove in IDEA 13) */
   public static FileWatcher getInstance() {
     return ((LocalFileSystemImpl)LocalFileSystem.getInstance()).getFileWatcher();
   }
 
-  FileWatcher(@NotNull final ManagingFS managingFS) {
+  FileWatcher(@NotNull ManagingFS managingFS) {
     myManagingFS = managingFS;
 
     boolean disabled = Boolean.parseBoolean(System.getProperty(PROPERTY_WATCHER_DISABLED));
@@ -115,6 +120,9 @@ public class FileWatcher {
         }
       });
     }
+    else if (!isUpToDate(myExecutable)) {
+      notifyOnFailure(ApplicationBundle.message("watcher.exe.outdated"), null);
+    }
     else {
       try {
         startupProcess(false);
@@ -131,6 +139,38 @@ public class FileWatcher {
     myIsShuttingDown = true;
     shutdownProcess();
   }
+
+  public boolean isOperational() {
+    return myProcessHandler != null;
+  }
+
+  public boolean isSettingRoots() {
+    return isOperational() && mySettingRoots.get() > 0;
+  }
+
+  @NotNull
+  public DirtyPaths getDirtyPaths() {
+    synchronized (myLock) {
+      DirtyPaths dirtyPaths = myDirtyPaths;
+      myDirtyPaths = new DirtyPaths();
+      return dirtyPaths;
+    }
+  }
+
+  @NotNull
+  public List<String> getManualWatchRoots() {
+    return myManualWatchRoots;
+  }
+
+  public void setWatchRoots(@NotNull List<String> recursive, @NotNull List<String> flat) {
+    setWatchRoots(recursive, flat, false);
+  }
+
+  public boolean isWatched(@NotNull VirtualFile file) {
+    return isOperational() && !checkWatchable(file.getPresentableUrl(), true, true).isEmpty();
+  }
+
+  /* internal stuff */
 
   @Nullable
   private static File getExecutable() {
@@ -168,26 +208,39 @@ public class FileWatcher {
     return null;
   }
 
-  private void notifyOnFailure(final String cause, @Nullable final NotificationListener listener) {
+  private static boolean isUpToDate(File executable) {
+    long length = SystemInfo.isWindows ? 70216 :
+                  SystemInfo.isMac ? 13924 :
+                  SystemInfo.isLinux ? SystemInfo.isAMD64 ? 29155 : 22791 :
+                  -1;
+    return length < 0 || length == executable.length();
+  }
+
+  public void notifyOnFailure(final String cause, @Nullable final NotificationListener listener) {
     LOG.warn(cause);
 
-    if (!myFailureShownToTheUser) {
-      myFailureShownToTheUser = true;
+    if (myFailureShownToTheUser.compareAndSet(false, true)) {
       ApplicationManager.getApplication().invokeLater(new Runnable() {
         public void run() {
           String title = ApplicationBundle.message("watcher.slow.sync");
           Notifications.Bus.notify(NOTIFICATION_GROUP.getValue().createNotification(title, cause, NotificationType.WARNING, listener));
         }
-      });
+      }, ModalityState.NON_MODAL);
     }
   }
 
-  private void startupProcess(final boolean restart) throws IOException {
-    if (myIsShuttingDown) return;
+  private void startupProcess(boolean restart) throws IOException {
+    if (myIsShuttingDown) {
+      return;
+    }
+    if (ShutDownTracker.isShutdownHookRunning()) {
+      myIsShuttingDown = true;
+      return;
+    }
 
     if (myStartAttemptCount++ > MAX_PROCESS_LAUNCH_ATTEMPT_COUNT) {
       notifyOnFailure(ApplicationBundle.message("watcher.failed.to.start"), null);
-      throw new IOException("Can't launch process anymore");
+      return;
     }
 
     if (restart) {
@@ -195,16 +248,17 @@ public class FileWatcher {
     }
 
     LOG.info("Starting file watcher: " + myExecutable);
-    final Process process = Runtime.getRuntime().exec(new String[]{myExecutable.getAbsolutePath()});  // use array to allow spaces in path
+    ProcessBuilder processBuilder = new ProcessBuilder(myExecutable.getAbsolutePath());
+    Process process = processBuilder.start();
     myProcessHandler = new MyProcessHandler(process);
     myProcessHandler.addProcessListener(new MyProcessAdapter());
     myProcessHandler.startNotify();
 
     if (restart) {
-      synchronized (myLock) {
-        if (myRecursiveWatchRoots.size() + myFlatWatchRoots.size() > 0) {
-          setWatchRoots(myRecursiveWatchRoots, myFlatWatchRoots, true);
-        }
+      List<String> recursive = myRecursiveWatchRoots;
+      List<String> flat = myFlatWatchRoots;
+      if (recursive.size() + flat.size() > 0) {
+        setWatchRoots(recursive, flat, true);
       }
     }
   }
@@ -213,84 +267,52 @@ public class FileWatcher {
     final OSProcessHandler processHandler = myProcessHandler;
     if (processHandler != null) {
       if (!processHandler.isProcessTerminated()) {
+        boolean forceQuite = true;
         try {
           writeLine(EXIT_COMMAND);
+          forceQuite = !processHandler.waitFor(500);
+          if (forceQuite) {
+            LOG.warn("File watcher is still alive. Doing a force quit.");
+          }
         }
         catch (IOException ignore) { }
-        processHandler.destroyProcess();
+        if (forceQuite) {
+          processHandler.destroyProcess();
+        }
       }
 
       myProcessHandler = null;
     }
   }
 
-  public boolean isOperational() {
-    return myProcessHandler != null;
-  }
-
-  public static class DirtyPaths {
-    public final List<String> dirtyPaths;
-    public final List<String> dirtyPathsRecursive;
-    public final List<String> dirtyDirectories;
-
-    private DirtyPaths(List<String> dirtyPaths, List<String> dirtyPathsRecursive, List<String> dirtyDirectories) {
-      this.dirtyPaths = dirtyPaths;
-      this.dirtyPathsRecursive = dirtyPathsRecursive;
-      this.dirtyDirectories = dirtyDirectories;
-    }
-  }
-
-  public DirtyPaths getDirtyPaths() {
-    synchronized (myLock) {
-      final DirtyPaths dirtyPaths = new DirtyPaths(myDirtyPaths, myDirtyRecursivePaths, myDirtyDirs);
-      myDirtyPaths = new ArrayList<String>();
-      myDirtyRecursivePaths = new ArrayList<String>();
-      myDirtyDirs = new ArrayList<String>();
-      return dirtyPaths;
-    }
-  }
-
-  public List<String> getManualWatchRoots() {
-    synchronized (myLock) {
-      return Collections.unmodifiableList(myManualWatchRoots);
-    }
-  }
-
-  public void setWatchRoots(final List<String> recursive, final List<String> flat) {
-    setWatchRoots(recursive, flat, false);
-  }
-
-  private void setWatchRoots(List<String> recursive, List<String> flat, final boolean restart) {
+  private synchronized void setWatchRoots(List<String> recursive, List<String> flat, boolean restart) {
     if (myProcessHandler == null || myProcessHandler.isProcessTerminated()) return;
 
     if (ApplicationManager.getApplication().isDisposeInProgress()) {
       recursive = flat = Collections.emptyList();
     }
 
-    synchronized (myLock) {
-      if (!restart && myRecursiveWatchRoots.equals(recursive) && myFlatWatchRoots.equals(flat)) {
-        return;
-      }
+    if (!restart && myRecursiveWatchRoots.equals(recursive) && myFlatWatchRoots.equals(flat)) {
+      return;
+    }
 
-      myMapping.clear();
+    mySettingRoots.incrementAndGet();
+    myMapping = emptyList();
+    myRecursiveWatchRoots = recursive;
+    myFlatWatchRoots = flat;
 
-      try {
-        writeLine(ROOTS_COMMAND);
-        for (String path : recursive) {
-          writeLine(path);
-        }
-        for (String path : flat) {
-          writeLine("|" + path);
-        }
-        writeLine("#");
+    try {
+      writeLine(ROOTS_COMMAND);
+      for (String path : recursive) {
+        writeLine(path);
       }
-      catch (IOException e) {
-        LOG.error(e);
-        shutdownProcess();
+      for (String path : flat) {
+        writeLine("|" + path);
       }
-
-      myRecursiveWatchRoots = recursive;
-      myFlatWatchRoots = flat;
+      writeLine("#");
+    }
+    catch (IOException e) {
+      LOG.warn(e);
     }
   }
 
@@ -314,64 +336,80 @@ public class FileWatcher {
       myWriter = new BufferedWriter(new OutputStreamWriter(process.getOutputStream()));
     }
 
-    private void writeLine(final String line) throws IOException {
+    private void writeLine(String line) throws IOException {
       myWriter.write(line);
       myWriter.newLine();
       myWriter.flush();
     }
-  }
 
-  public boolean isWatched(@NotNull final VirtualFile file) {
-    if (isOperational()) {
-      synchronized (myLock) {
-        return !checkWatchable(file.getPresentableUrl(), true).isEmpty();
-      }
+    @Override
+    protected boolean useAdaptiveSleepingPolicyWhenReadingOutput() {
+      return true;
     }
-    return false;
+
+    @Override
+    protected boolean processHasSeparateErrorStream() {
+      return false;
+    }
   }
 
   @NotNull
-  private Collection<String> checkWatchable(final String reportedPath, final boolean checkParent) {
+  private Collection<String> checkWatchable(String reportedPath, boolean isExact, boolean fastPath) {
     if (reportedPath == null) return Collections.emptyList();
 
-    myAllPaths.clear();
-    myAllPaths.add(reportedPath);
-    for (Pair<String, String> map : myMapping) {
+    List<String> flatWatchRoots = myFlatWatchRoots;
+    List<String> recursiveWatchRoots = myRecursiveWatchRoots;
+    if (flatWatchRoots.isEmpty() && recursiveWatchRoots.isEmpty()) return Collections.emptyList();
+
+    List<Pair<String, String>> mapping = myMapping;
+    Collection <String> affectedPaths = new SmartList<String>(reportedPath);
+    for (Pair<String, String> map : mapping) {
       if (FileUtil.startsWith(reportedPath, map.first)) {
-        myAllPaths.add(map.second + reportedPath.substring(map.first.length()));
+        affectedPaths.add(map.second + reportedPath.substring(map.first.length()));
       }
       else if (FileUtil.startsWith(reportedPath, map.second)) {
-        myAllPaths.add(map.first + reportedPath.substring(map.second.length()));
+        affectedPaths.add(map.first + reportedPath.substring(map.second.length()));
       }
     }
 
-    myWatchedPaths.clear();
+    Collection<String> changedPaths = new SmartList<String>();
     ext:
-    for (String path : myAllPaths) {
-      for (String root : myRecursiveWatchRoots) {
-        if (FileUtil.startsWith(path, root)) {
-          myWatchedPaths.add(path);
+    for (String path : affectedPaths) {
+      if (fastPath && !changedPaths.isEmpty()) break;
+
+      for (String root : flatWatchRoots) {
+        if (FileUtil.pathsEqual(path, root)) {
+          changedPaths.add(path);
           continue ext;
+        }
+        if (isExact) {
+          String parentPath = new File(path).getParent();
+          if (parentPath != null && FileUtil.pathsEqual(parentPath, root)) {
+            changedPaths.add(path);
+            continue ext;
+          }
         }
       }
 
-      for (String root : myFlatWatchRoots) {
-        if (FileUtil.pathsEqual(path, root)) {
-          myWatchedPaths.add(path);
+      for (String root : recursiveWatchRoots) {
+        if (FileUtil.startsWith(path, root)) {
+          changedPaths.add(path);
           continue ext;
         }
-        if (checkParent) {
-          final File parentFile = new File(path).getParentFile();
-          if (parentFile != null && FileUtil.pathsEqual(parentFile.getPath(), root)) {
-            myWatchedPaths.add(path);
+        if (!isExact) {
+          String parentPath = new File(root).getParent();
+          if (parentPath != null && FileUtil.pathsEqual(path, parentPath)) {
+            changedPaths.add(root);
             continue ext;
           }
         }
       }
     }
-    return myWatchedPaths;
+
+    return changedPaths;
   }
 
+  @SuppressWarnings("SpellCheckingInspection")
   private enum WatcherOp {
     GIVEUP, RESET, UNWATCHEABLE, REMAP, MESSAGE, CREATE, DELETE, STATS, CHANGE, DIRTY, RECDIRTY
   }
@@ -382,7 +420,7 @@ public class FileWatcher {
 
     @Override
     public void processTerminated(ProcessEvent event) {
-      LOG.warn("Watcher terminated.");
+      LOG.warn("Watcher terminated with exit code " + event.getExitCode());
 
       myProcessHandler = null;
 
@@ -397,7 +435,12 @@ public class FileWatcher {
 
     @Override
     public void onTextAvailable(ProcessEvent event, Key outputType) {
-      if (outputType != ProcessOutputTypes.STDOUT) return;
+      if (outputType == ProcessOutputTypes.STDERR) {
+        LOG.warn(event.getText());
+      }
+      if (outputType != ProcessOutputTypes.STDOUT) {
+        return;
+      }
 
       final String line = event.getText().trim();
       if (LOG.isDebugEnabled()) {
@@ -416,9 +459,8 @@ public class FileWatcher {
         }
 
         if (watcherOp == WatcherOp.GIVEUP) {
-          LOG.info("Native file watcher gives up to operate on this platform");
+          notifyOnFailure(ApplicationBundle.message("watcher.gave.up"), null);
           myIsShuttingDown = true;
-          shutdownProcess();
         }
         else if (watcherOp == WatcherOp.RESET) {
           reset();
@@ -428,9 +470,7 @@ public class FileWatcher {
         }
       }
       else if (myLastOp == WatcherOp.MESSAGE) {
-        Notifications.Bus.notify(
-          new Notification(Notifications.SYSTEM_MESSAGES_GROUP_ID, "File Watcher", line, NotificationType.WARNING, NotificationListener.URL_OPENING_LISTENER)
-        );
+        notifyOnFailure(line, NotificationListener.URL_OPENING_LISTENER);
         myLastOp = null;
       }
       else if (myLastOp == WatcherOp.REMAP || myLastOp == WatcherOp.UNWATCHEABLE) {
@@ -439,6 +479,7 @@ public class FileWatcher {
             processRemap();
           }
           else {
+            mySettingRoots.decrementAndGet();
             processUnwatchable();
           }
           myLines.clear();
@@ -449,104 +490,94 @@ public class FileWatcher {
         }
       }
       else {
-        processChange(line, myLastOp);
+        String path = line.replace('\0', '\n');  // unescape
+        processChange(path, myLastOp);
         myLastOp = null;
       }
     }
 
     private void processRemap() {
-      final Set<Pair<String, String>> pairs = newHashSet();
+      Set<Pair<String, String>> pairs = newHashSet();
       for (int i = 0; i < myLines.size() - 1; i += 2) {
-        final String pathA = preparePathForMapping(myLines.get(i));
-        final String pathB = preparePathForMapping(myLines.get(i + 1));
+        String pathA = preparePathForMapping(myLines.get(i));
+        String pathB = preparePathForMapping(myLines.get(i + 1));
         pairs.add(Pair.create(pathA, pathB));
       }
-
-      synchronized (myLock) {
-        myMapping.clear();
-        myMapping.addAll(pairs);
-      }
-
+      myMapping = newArrayList(pairs);
       notifyOnEvent();
     }
 
-    private String preparePathForMapping(final String path) {
-      final String localPath = FileUtil.toSystemDependentName(path);
+    private String preparePathForMapping(String path) {
+      String localPath = FileUtil.toSystemDependentName(path);
       return localPath.endsWith(File.separator) ? localPath : localPath + File.separator;
     }
 
     private void processUnwatchable() {
-      synchronized (myLock) {
-        myManualWatchRoots = newArrayList(myLines);
-      }
-
+      myManualWatchRoots = Collections.unmodifiableList(newArrayList(myLines));
       notifyOnEvent();
     }
 
     private void reset() {
+      VirtualFile[] localRoots = myManagingFS.getLocalRoots();
       synchronized (myLock) {
-        myDirtyPaths.clear();
-        myDirtyDirs.clear();
-        myDirtyRecursivePaths.clear();
-
-        for (VirtualFile root : myManagingFS.getLocalRoots()) {
-          ((NewVirtualFile)root).markDirtyRecursively();
+        for (VirtualFile root : localRoots) {
+          myDirtyPaths.dirtyPathsRecursive.add(root.getPresentableUrl());
         }
       }
-
       notifyOnEvent();
     }
 
-    private void processChange(final String path, final WatcherOp op) {
+    private void processChange(String path, WatcherOp op) {
       if (SystemInfo.isWindows && op == WatcherOp.RECDIRTY && path.length() == 3 && Character.isLetter(path.charAt(0))) {
-        final VirtualFile root = LocalFileSystem.getInstance().findFileByPath(path);
-        if (root instanceof NewVirtualFile) {
-          ((NewVirtualFile)root).markDirtyRecursively();
+        VirtualFile root = LocalFileSystem.getInstance().findFileByPath(path);
+        if (root != null) {
+          synchronized (myLock) {
+            myDirtyPaths.dirtyPathsRecursive.add(root.getPresentableUrl());
+          }
         }
-
         notifyOnEvent();
         return;
       }
 
-      synchronized (myLock) {
-        final boolean checkParent = !(op == WatcherOp.DIRTY || op == WatcherOp.RECDIRTY);
-        final Collection<String> paths = checkWatchable(path, checkParent);
+      boolean exactPath = op != WatcherOp.DIRTY && op != WatcherOp.RECDIRTY;
+      Collection<String> paths = checkWatchable(path, exactPath, false);
 
-        if (paths.isEmpty()) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Not watchable, filtered: " + path);
-          }
-          return;
+      if (paths.isEmpty()) {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Not watchable, filtered: " + path);
         }
+        return;
+      }
 
+      synchronized (myLock) {
         switch (op) {
           case STATS:
           case CHANGE:
-            myDirtyPaths.addAll(paths);
+            myDirtyPaths.dirtyPaths.addAll(paths);
             break;
 
           case CREATE:
           case DELETE:
             for (String p : paths) {
-              final File parent = new File(p).getParentFile();
-              myDirtyPaths.add(parent != null ? parent.getPath() : p);
+              String parentPath = new File(p).getParent();
+              myDirtyPaths.dirtyPaths.add(parentPath != null ? parentPath : p);
             }
             break;
 
           case DIRTY:
-            myDirtyDirs.addAll(paths);
+            myDirtyPaths.dirtyDirectories.addAll(paths);
             break;
 
           case RECDIRTY:
-            myDirtyRecursivePaths.addAll(paths);
+            myDirtyPaths.dirtyPathsRecursive.addAll(paths);
             break;
 
           default:
             LOG.error("Unexpected op: " + op);
         }
-
-        notifyOnEvent();
       }
+
+      notifyOnEvent();
     }
   }
 

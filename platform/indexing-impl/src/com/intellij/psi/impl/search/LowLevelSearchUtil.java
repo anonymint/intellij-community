@@ -20,8 +20,10 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLanguageInjectionHost;
@@ -47,9 +49,9 @@ public class LowLevelSearchUtil {
   private static Boolean processInjectedFile(PsiElement element,
                                              final TextOccurenceProcessor processor,
                                              final StringSearcher searcher,
-                                             ProgressIndicator progress) {
+                                             ProgressIndicator progress,
+                                             InjectedLanguageManager injectedLanguageManager) {
     if (!(element instanceof PsiLanguageInjectionHost)) return null;
-    InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(element.getProject());
     if (injectedLanguageManager == null) return null;
     List<Pair<PsiElement,TextRange>> list = injectedLanguageManager.getInjectedPsiFiles(element);
     if (list == null) return null;
@@ -60,7 +62,8 @@ public class LowLevelSearchUtil {
     return Boolean.TRUE;
   }
 
-  private static boolean processTreeUp(@NotNull TextOccurenceProcessor processor,
+  private static boolean processTreeUp(@NotNull Project project,
+                                       @NotNull TextOccurenceProcessor processor,
                                        @NotNull PsiElement scope,
                                        @NotNull StringSearcher searcher,
                                        final int offset,
@@ -92,13 +95,13 @@ public class LowLevelSearchUtil {
       start = offset - leafElement.getTextRange().getStartOffset() + scopeStartOffset;
     }
     if (start < 0) {
-      LOG.error("offset=" + offset + " scopeStartOffset=" + scopeStartOffset + " leafElement=" + leafElement + " " +
-                                  " scope=" + scope.toString());
+      LOG.error("offset=" + offset + " scopeStartOffset=" + scopeStartOffset + " leafElement=" + leafElement + "  scope=" + scope);
     }
     boolean contains = false;
     PsiElement prev = null;
     TreeElement prevNode = null;
     PsiElement run = null;
+    InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(project);
     while (run != scope) {
       if (progress != null) progress.checkCanceled();
       if (useTree) {
@@ -114,7 +117,7 @@ public class LowLevelSearchUtil {
       if (!contains) contains = run.getTextLength() - start >= patternLength;  //do not compute if already contains
       if (contains) {
         if (processInjectedPsi) {
-          Boolean result = processInjectedFile(run, processor, searcher, progress);
+          Boolean result = processInjectedFile(run, processor, searcher, progress, injectedLanguageManager);
           if (result != null) {
             return result.booleanValue();
           }
@@ -138,7 +141,7 @@ public class LowLevelSearchUtil {
   }
   //@RequiresReadAction
   public static boolean processElementsContainingWordInElement(@NotNull TextOccurenceProcessor processor,
-                                                               @NotNull PsiElement scope,
+                                                               @NotNull final PsiElement scope,
                                                                @NotNull StringSearcher searcher,
                                                                final boolean processInjectedPsi,
                                                                ProgressIndicator progress) {
@@ -161,13 +164,14 @@ public class LowLevelSearchUtil {
 
     final char[] bufferArray = CharArrayUtil.fromSequenceWithoutCopying(buffer);
 
+    Project project = file.getProject();
     do {
       if (progress != null) progress.checkCanceled();
       startOffset  = searchWord(buffer, bufferArray, startOffset, endOffset, searcher, progress);
       if (startOffset < 0) {
         return true;
       }
-      if (!processTreeUp(processor, scope, searcher, startOffset - scopeStart, processInjectedPsi, progress)) return false;
+      if (!processTreeUp(project, processor, scope, searcher, startOffset - scopeStart, processInjectedPsi, progress)) return false;
 
       startOffset++;
     }
@@ -185,7 +189,7 @@ public class LowLevelSearchUtil {
   }
 
   public static int searchWord(@NotNull CharSequence text,
-                               char[] textArray,
+                               @Nullable char[] textArray,
                                int startOffset,
                                int endOffset,
                                @NotNull StringSearcher searcher,
@@ -204,9 +208,12 @@ public class LowLevelSearchUtil {
       if (index > startOffset) {
         char c = textArray != null ? textArray[index - 1]:text.charAt(index - 1);
         if (Character.isJavaIdentifierPart(c) && c != '$') {
-          if (index < 2 || (textArray != null ? textArray[index - 2]:text.charAt(index - 2)) != '\\') { //escape sequence
+          if (!searcher.isHandleEscapeSequences() || (index < 2 || !isNotEscapedBackslash(text, textArray, startOffset, index-2))) { //escape sequence
             continue;
           }
+        }
+        else if (index > 0 && searcher.isHandleEscapeSequences() && isNotEscapedBackslash(text, textArray, startOffset, index-1)) {
+          continue;
         }
       }
 
@@ -220,5 +227,11 @@ public class LowLevelSearchUtil {
       return index;
     }
     return -1;
+  }
+
+  private static boolean isNotEscapedBackslash(CharSequence text, char[] textArray, int startOffset, int index) {
+    return textArray != null
+                 ? StringUtil.isNotEscapedBackslash(textArray, startOffset, index)
+                 : StringUtil.isNotEscapedBackslash(text, startOffset, index);
   }
 }

@@ -40,6 +40,7 @@ import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComponentContainer;
 import com.intellij.openapi.util.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.containers.ContainerUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -53,7 +54,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public class AbstractRerunFailedTestsAction extends AnAction implements AnAction.TransparentUpdate, Disposable {
-  private static final List<AbstractRerunFailedTestsAction> registry = ContainerUtil.createEmptyCOWList();
+  private static final List<AbstractRerunFailedTestsAction> registry = ContainerUtil.createLockFreeCopyOnWriteList();
   private static final Logger LOG = Logger.getInstance("#com.intellij.execution.junit2.ui.actions.RerunFailedTestsAction");
   private TestFrameworkRunningModel myModel;
   private Getter<TestFrameworkRunningModel> myModelProvider;
@@ -95,7 +96,7 @@ public class AbstractRerunFailedTestsAction extends AnAction implements AnAction
 
   @NotNull
   private AbstractRerunFailedTestsAction findActualAction() {
-    if (myParent != null  || registry.isEmpty())
+    if (myParent != null || registry.isEmpty())
       return this;
     List<AbstractRerunFailedTestsAction> candidates = new ArrayList<AbstractRerunFailedTestsAction>(registry);
     Collections.sort(candidates, new Comparator<AbstractRerunFailedTestsAction>() {
@@ -131,23 +132,27 @@ public class AbstractRerunFailedTestsAction extends AnAction implements AnAction
     TestFrameworkRunningModel model = getModel();
     if (model == null || model.getRoot() == null) return false;
     final List<? extends AbstractTestProxy> myAllTests = model.getRoot().getAllTests();
+    final GlobalSearchScope searchScope = model.getProperties().getScope();
     for (Object test : myAllTests) {
-      if (getFilter(project).shouldAccept((AbstractTestProxy)test)) return true;
+      if (getFilter(project, searchScope).shouldAccept((AbstractTestProxy)test)) return true;
     }
     return false;
   }
 
   @NotNull
-  protected List<AbstractTestProxy> getFailedTests(Project project){
+  protected List<AbstractTestProxy> getFailedTests(Project project) {
     TestFrameworkRunningModel model = getModel();
     final List<? extends AbstractTestProxy> myAllTests = model != null
                                                          ? model.getRoot().getAllTests()
                                                          : Collections.<AbstractTestProxy>emptyList();
-    return getFilter(project).select(myAllTests);
+    return getFilter(project, model != null ? model.getProperties().getScope() : GlobalSearchScope.allScope(project)).select(myAllTests);
   }
 
   @NotNull
-  protected Filter getFilter(Project project) {
+  protected Filter getFilter(Project project, GlobalSearchScope searchScope) {
+    if (TestConsoleProperties.INCLUDE_NON_STARTED_IN_RERUN_FAILED.value(myConsoleProperties)) {
+      return Filter.NOT_PASSED.or(Filter.FAILED_OR_INTERRUPTED);
+    }
     return Filter.FAILED_OR_INTERRUPTED;
   }
 
@@ -196,8 +201,15 @@ public class AbstractRerunFailedTestsAction extends AnAction implements AnAction
     return null;
   }
 
-  protected static abstract class MyRunProfile extends RunConfigurationBase implements ModuleRunProfile{
+  protected static abstract class MyRunProfile extends RunConfigurationBase implements ModuleRunProfile,
+                                                                                       WrappingRunConfiguration<RunConfigurationBase> {
+    @Deprecated
     public RunConfigurationBase getConfiguration() {
+      return getPeer();
+    }
+
+    @Override
+    public RunConfigurationBase getPeer() {
       return myConfiguration;
     }
 
@@ -208,10 +220,12 @@ public class AbstractRerunFailedTestsAction extends AnAction implements AnAction
       myConfiguration = configuration;
     }
 
-    public void clear() {    }
+    public void clear() {
+    }
 
 
-    public void checkConfiguration() throws RuntimeConfigurationException {}
+    public void checkConfiguration() throws RuntimeConfigurationException {
+    }
 
     ///////////////////////////////////Delegates
     public void readExternal(final Element element) throws InvalidDataException {

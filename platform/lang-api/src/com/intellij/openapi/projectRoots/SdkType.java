@@ -54,7 +54,7 @@ public abstract class SdkType implements SdkTypeId {
   /**
    * If a path selected in the file chooser is not a valid SDK home path, returns an adjusted version of the path that is again
    * checked for validity.
-   * 
+   *
    * @param homePath the path selected in the file chooser.
    * @return the path to be used as the SDK home.
    */
@@ -99,6 +99,7 @@ public abstract class SdkType implements SdkTypeId {
     return null;
   }
 
+  @Override
   @Nullable
   public SdkAdditionalData loadAdditionalData(Sdk currentSdk, Element additional) {
     return loadAdditionalData(additional);
@@ -109,6 +110,7 @@ public abstract class SdkType implements SdkTypeId {
     myName = name;
   }
 
+  @Override
   public String getName() {
     return myName;
   }
@@ -150,6 +152,7 @@ public abstract class SdkType implements SdkTypeId {
 
   public FileChooserDescriptor getHomeChooserDescriptor() {
     final FileChooserDescriptor descriptor = new FileChooserDescriptor(false, true, false, false, false, false) {
+      @Override
       public void validateSelectedFiles(VirtualFile[] files) throws Exception {
         if (files.length != 0){
           final String selectedPath = files[0].getPath();
@@ -223,5 +226,18 @@ public abstract class SdkType implements SdkTypeId {
    * @since 12.0
    */
   public void showCustomCreateUI(SdkModel sdkModel, JComponent parentComponent, Consumer<Sdk> sdkCreatedCallback) {
+  }
+
+  /**
+   * Checks if the home directory of the specified SDK is valid. By default, checks that the directory points to a valid local
+   * path. Can be overridden for remote SDKs.
+   *
+   * @param sdk the SDK to validate the path for.
+   * @return true if the home path is valid, false otherwise.
+   * @since 12.1
+   */
+  public boolean sdkHasValidPath(@NotNull Sdk sdk) {
+    VirtualFile homeDir = sdk.getHomeDirectory();
+    return homeDir != null && homeDir.isValid();
   }
 }

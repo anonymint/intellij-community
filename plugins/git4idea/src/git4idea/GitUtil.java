@@ -79,6 +79,12 @@ public class GitUtil {
       if (o2 == null) {
         return 1;
       }
+      if (o1.getPresentableUrl() == null) {
+        return -1;
+      }
+      if (o2.getPresentableUrl() == null) {
+        return 1;
+      }
       return o1.getPresentableUrl().compareTo(o2.getPresentableUrl());
     }
   };
@@ -143,7 +149,7 @@ public class GitUtil {
       }
       pathToDir = FileUtil.toSystemIndependentName(canonicalPath);
     }
-    return VcsUtil.getVirtualFile(pathToDir);
+    return VcsUtil.getVirtualFileWithRefresh(new File(pathToDir));
   }
 
   /**
@@ -331,7 +337,7 @@ public class GitUtil {
    * @deprecated because uses the java.io.File.
    * @use GitRepositoryManager#getRepositoryForFile().
    */
-  public static VirtualFile getGitRoot(final FilePath filePath) throws VcsException {
+  public static VirtualFile getGitRoot(@NotNull FilePath filePath) throws VcsException {
     VirtualFile root = getGitRootOrNull(filePath);
     if (root != null) {
       return root;
@@ -522,7 +528,6 @@ public class GitUtil {
                                               final Consumer<GitCommittedChangeList> consumer, boolean skipDiffsForMerge) throws VcsException {
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LOG);
     h.setSilent(true);
-    h.setNoSSH(true);
     h.addParameters("--pretty=format:%x04%x01" + GitChangeUtils.COMMITTED_CHANGELIST_FORMAT, "--name-status");
     parametersSpecifier.consume(h);
 
@@ -937,7 +942,6 @@ public class GitUtil {
     if (staged) {
       diff.addParameters("--cached");
     }
-    diff.setNoSSH(true);
     diff.setStdoutSuppressed(true);
     diff.setStderrSuppressed(true);
     diff.setSilent(true);

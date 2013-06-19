@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.peer.ComponentPeer;
 import java.awt.peer.FramePeer;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
@@ -69,7 +70,8 @@ import java.util.Set;
 public final class WindowManagerImpl extends WindowManagerEx implements ApplicationComponent, NamedJDOMExternalizable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.wm.impl.WindowManagerImpl");
 
-  private static boolean ourAlphaModeLibraryLoaded;
+  @NonNls public static final String FULL_SCREEN = "ide.frame.full.screen";
+
   @NonNls private static final String FOCUSED_WINDOW_PROPERTY_NAME = "focusedWindow";
   @NonNls private static final String X_ATTR = "x";
   @NonNls private static final String FRAME_ELEMENT = "frame";
@@ -77,24 +79,19 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
   @NonNls private static final String WIDTH_ATTR = "width";
   @NonNls private static final String HEIGHT_ATTR = "height";
   @NonNls private static final String EXTENDED_STATE_ATTR = "extended-state";
+
+  static {
+    try {
+      System.loadLibrary("jawt");
+    }
+    catch (Throwable t) {
+      LOG.info("jawt failed to load", t);
+    }
+  }
+
   private Boolean myAlphaModeSupported = null;
 
   private final EventDispatcher<WindowManagerListener> myEventDispatcher = EventDispatcher.create(WindowManagerListener.class);
-
-  static {
-    initialize();
-  }
-
-  @SuppressWarnings({"HardCodedStringLiteral"})
-  private static void initialize() {
-    try {
-      System.loadLibrary("jawt");
-      ourAlphaModeLibraryLoaded = true;
-    }
-    catch (Throwable exc) {
-      ourAlphaModeLibraryLoaded = false;
-    }
-  }
 
   /**
    * Union of bounds of all available default screen devices.
@@ -186,14 +183,14 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
         }
       }
     };
-    
+
     bus.connect().subscribe(AppLifecycleListener.TOPIC, new AppLifecycleListener.Adapter() {
       @Override
       public void appClosing() {
-        // save fullscreen window states
-        if (SystemInfo.isMacOSLion && GeneralSettings.getInstance().isReopenLastProject()) {
+        // save full screen window states
+        if (isFullScreenSupportedInCurrentOS() && GeneralSettings.getInstance().isReopenLastProject()) {
           Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
-          
+
           if (openProjects.length > 0) {
             WindowManagerEx wm = WindowManagerEx.getInstanceEx();
             for (Project project : openProjects) {
@@ -230,9 +227,7 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
   @Override
   public JFrame findVisibleFrame() {
     IdeFrameImpl[] frames = getAllProjectFrames();
-
-    if (frames.length > 0) return frames[0];
-    return WelcomeFrame.getInstance();
+    return frames.length > 0 ? frames[0] : (JFrame)WelcomeFrame.getInstance();
   }
 
   @Override
@@ -246,11 +241,6 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
 
   public final Rectangle getScreenBounds() {
     return myScreenBounds;
-  }
-
-  @Override
-  public boolean isFullScreen(@NotNull Frame frame) {
-    return frame instanceof IdeFrameImpl && ((IdeFrameImpl)frame).isInFullScreen();
   }
 
   @Override
@@ -541,17 +531,17 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
                                                 ApplicationManager.getApplication());
     myProject2Frame.put(null, frame);
 
-    if (myFrameBounds == null
-        || !ScreenUtil.isVisible(myFrameBounds)) { //avoid situations when IdeFrame is out of all screens
-      Rectangle rect = ScreenUtil.getScreenRectangle(0, 0);
+    if (myFrameBounds == null || !ScreenUtil.isVisible(myFrameBounds)) { //avoid situations when IdeFrame is out of all screens
+      Rectangle rect = ScreenUtil.getMainScreenBounds();
       int yParts = rect.height / 6;
       int xParts = rect.width / 5;
       myFrameBounds = new Rectangle(xParts, yParts, xParts * 3, yParts * 4);
     }
 
     frame.setBounds(myFrameBounds);
-    frame.setVisible(true);
     frame.setExtendedState(myFrameExtendedState);
+    frame.setVisible(true);
+
   }
 
   public final IdeFrameImpl allocateFrame(final Project project) {
@@ -574,9 +564,9 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
       else if (myFrameBounds != null) {
         frame.setBounds(myFrameBounds);
       }
-      frame.setExtendedState(myFrameExtendedState);
       frame.setProject(project);
       myProject2Frame.put(project, frame);
+      frame.setExtendedState(myFrameExtendedState);
       frame.setVisible(true);
     }
 
@@ -620,8 +610,13 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
     frame.setFileTitle(null, null);
 
     myProject2Frame.remove(project);
-    Disposer.dispose(frame.getStatusBar());
-    frame.dispose();
+    if (myProject2Frame.isEmpty()) {
+      myProject2Frame.put(null, frame);
+    }
+    else {
+      Disposer.dispose(frame.getStatusBar());
+      frame.dispose();
+    }
   }
 
   public final void disposeRootFrame() {
@@ -713,29 +708,32 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
     final Element frameElement = new Element(FRAME_ELEMENT);
     element.addContent(frameElement);
     final Project[] projects = ProjectManager.getInstance().getOpenProjects();
-    final Project project;
-    if (projects.length > 0) {
-      project = projects[projects.length - 1];
-    }
-    else {
-      project = null;
-    }
+    final Project project = projects.length > 0 ? projects[0] : null;
 
     final IdeFrameImpl frame = getFrame(project);
     if (frame != null) {
       int extendedState = frame.getExtendedState();
-      if (SystemInfo.isMacOSLion && frame.getPeer() instanceof FramePeer) {
-        // frame.state is not updated by jdk so get it directly from peer
-        extendedState = ((FramePeer)frame.getPeer()).getState();
+      if (SystemInfo.isMacOSLion) {
+        @SuppressWarnings("deprecation") ComponentPeer peer = frame.getPeer();
+        if (peer instanceof FramePeer) {
+          // frame.state is not updated by jdk so get it directly from peer
+          extendedState = ((FramePeer)peer).getState();
+        }
       }
-      boolean usePreviousBounds = extendedState == Frame.MAXIMIZED_BOTH ||
-                                  SystemInfo.isMacOSLion && WindowManagerEx.getInstanceEx().isFullScreen(frame);
-      final Rectangle rectangle = usePreviousBounds ? myFrameBounds : frame.getBounds();
+      boolean isMaximized = extendedState == Frame.MAXIMIZED_BOTH ||
+                            isFullScreenSupportedInCurrentOS() && frame.isInFullScreen();
+      boolean usePreviousBounds = isMaximized &&
+                                  myFrameBounds != null &&
+                                  frame.getBounds().contains(new Point((int)myFrameBounds.getCenterX(), (int)myFrameBounds.getCenterY()));
+      Rectangle rectangle = usePreviousBounds ? myFrameBounds : frame.getBounds();
       frameElement.setAttribute(X_ATTR, Integer.toString(rectangle.x));
       frameElement.setAttribute(Y_ATTR, Integer.toString(rectangle.y));
       frameElement.setAttribute(WIDTH_ATTR, Integer.toString(rectangle.width));
       frameElement.setAttribute(HEIGHT_ATTR, Integer.toString(rectangle.height));
-      frameElement.setAttribute(EXTENDED_STATE_ATTR, Integer.toString(extendedState));
+
+      if (!(frame.isInFullScreen() && SystemInfo.isAppleJvm)) {
+        frameElement.setAttribute(EXTENDED_STATE_ATTR, Integer.toString(extendedState));
+      }
 
       // Save default layout
       final Element layoutElement = new Element(DesktopLayout.TAG);
@@ -759,7 +757,7 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
 
   /**
    * We cannot clear selected menu path just by changing of focused window. Under Windows LAF
-   * focused window changes sporadically when user clickes on menu item or submenu. The problem
+   * focused window changes sporadically when user clicks on menu item or sub-menu. The problem
    * is that all popups under Windows LAF always has native window ancestor. This window isn't
    * focusable but by mouse click focused window changes in this manner:
    * InitialFocusedWindow->null
@@ -817,5 +815,13 @@ public final class WindowManagerImpl extends WindowManagerEx implements Applicat
 
   public WindowWatcher getWindowWatcher() {
     return myWindowWatcher;
+  }
+
+  public boolean isFullScreenSupportedInCurrentOS() {
+    return SystemInfo.isMacOSLion || SystemInfo.isWindows || SystemInfo.isXWindow && X11UiUtil.isFullScreenSupported();
+  }
+
+  public static boolean isFloatingMenuBarSupported() {
+    return !SystemInfo.isMac && getInstance().isFullScreenSupportedInCurrentOS();
   }
 }

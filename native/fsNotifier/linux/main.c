@@ -25,6 +25,7 @@
 #include <string.h>
 #include <sys/inotify.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <syslog.h>
 #include <unistd.h>
 
@@ -35,43 +36,54 @@
 #define LOG_ENV_ERROR "error"
 #define LOG_ENV_OFF "off"
 
-#define VERSION "1.2"
+#define VERSION "20130617.1935"
 #define VERSION_MSG "fsnotifier " VERSION "\n"
 
 #define USAGE_MSG \
     "fsnotifier - IntelliJ IDEA companion program for watching and reporting file and directory structure modifications.\n\n" \
     "fsnotifier utilizes \"user\" facility of syslog(3) - messages usually can be found in /var/log/user.log.\n" \
     "Verbosity is regulated via " LOG_ENV " environment variable, possible values are: " \
-    LOG_ENV_DEBUG ", " LOG_ENV_INFO ", " LOG_ENV_WARNING ", " LOG_ENV_ERROR ", " LOG_ENV_OFF "; latter is the default.\n\n" \
+    LOG_ENV_DEBUG ", " LOG_ENV_INFO ", " LOG_ENV_WARNING ", " LOG_ENV_ERROR ", " LOG_ENV_OFF "; default is " LOG_ENV_WARNING ".\n\n" \
     "Use 'fsnotifier --selftest' to perform some self-diagnostics (output will be logged and printed to console).\n"
 
 #define HELP_MSG \
     "Try 'fsnotifier --help' for more information.\n"
 
-#define INOTIFY_LIMIT_MSG \
-    "The current <b>inotify</b>(7) watch limit of %d is too low. " \
+#define INSTANCE_LIMIT_TEXT \
+    "The <b>inotify</b>(7) instances limit reached. " \
+    "<a href=\"http://confluence.jetbrains.net/display/IDEADEV/Inotify+Instances+Limit\">More details.</a>\n"
+
+#define WATCH_LIMIT_TEXT \
+    "The current <b>inotify</b>(7) watch limit is too low. " \
     "<a href=\"http://confluence.jetbrains.net/display/IDEADEV/Inotify+Watches+Limit\">More details.</a>\n"
 
+#define MISSING_ROOT_TIMEOUT 1
+
+#define UNFLATTEN(root) (root[0] == '|' ? root + 1 : root)
+
 typedef struct {
-  char* name;
-  int id;
+  char* path;
+  int id;  // negative value means missing root
 } watch_root;
 
 static array* roots = NULL;
 
-static bool show_warning = true;
+static int log_level = 0;
 static bool self_test = false;
 
 static void init_log();
 static void run_self_test();
-static void main_loop();
-static bool read_input();
+static bool main_loop();
+static int read_input();
 static bool update_roots(array* new_roots);
 static void unregister_roots();
 static bool register_roots(array* new_roots, array* unwatchable, array* mounts);
 static array* unwatchable_mounts();
 static void inotify_callback(char* path, int event);
+static void report_event(char* event, char* path);
 static void output(const char* format, ...);
+static void check_missing_roots();
+static void check_root_removal(char*);
 
 
 int main(int argc, char** argv) {
@@ -103,14 +115,16 @@ int main(int argc, char** argv) {
   }
 
   setvbuf(stdin, NULL, _IONBF, 0);
-  setvbuf(stdout, NULL, _IONBF, 0);
 
+  int rv = 0;
   roots = array_create(20);
-  if (init_inotify() && roots != NULL) {
+  if (roots != NULL && init_inotify()) {
     set_inotify_callback(&inotify_callback);
 
     if (!self_test) {
-      main_loop();
+      if (!main_loop()) {
+        rv = 3;
+      }
     }
     else {
       run_self_test();
@@ -119,21 +133,23 @@ int main(int argc, char** argv) {
     unregister_roots();
   }
   else {
-    printf("GIVEUP\n");
+    output("GIVEUP\n");
+    rv = 2;
   }
   close_inotify();
   array_delete(roots);
 
-  userlog(LOG_INFO, "finished");
+  userlog(LOG_INFO, "finished (%d)", rv);
   closelog();
 
-  return 0;
+  return rv;
 }
 
 
 static void init_log() {
+  int level = LOG_WARNING;
+
   char* env_level = getenv(LOG_ENV);
-  int level = LOG_EMERG;
   if (env_level != NULL) {
     if (strcmp(env_level, LOG_ENV_DEBUG) == 0)  level = LOG_DEBUG;
     else if (strcmp(env_level, LOG_ENV_INFO) == 0)  level = LOG_INFO;
@@ -148,13 +164,29 @@ static void init_log() {
   char ident[32];
   snprintf(ident, sizeof(ident), "fsnotifier[%d]", getpid());
   openlog(ident, 0, LOG_USER);
-  setlogmask(LOG_UPTO(level));
+  log_level = level;
+}
+
+
+void message(MSG id) {
+  if (id == MSG_INSTANCE_LIMIT) {
+    output("MESSAGE\n" INSTANCE_LIMIT_TEXT);
+  }
+  else if (id == MSG_WATCH_LIMIT) {
+    output("MESSAGE\n" WATCH_LIMIT_TEXT);
+  }
+  else {
+    userlog(LOG_ERR, "unknown message: %d", id);
+  }
 }
 
 
 void userlog(int priority, const char* format, ...) {
-  va_list ap;
+  if (priority > log_level) {
+    return;
+  }
 
+  va_list ap;
   va_start(ap, format);
   vsyslog(priority, format, ap);
   va_end(ap);
@@ -188,48 +220,59 @@ static void run_self_test() {
 }
 
 
-static void main_loop() {
+static bool main_loop() {
   int input_fd = fileno(stdin), inotify_fd = get_inotify_fd();
   int nfds = (inotify_fd > input_fd ? inotify_fd : input_fd) + 1;
   fd_set rfds;
-  bool go_on = true;
+  struct timeval timeout;
 
-  while (go_on) {
+  while (true) {
+    usleep(50000);
+
     FD_ZERO(&rfds);
     FD_SET(input_fd, &rfds);
     FD_SET(inotify_fd, &rfds);
-    if (select(nfds, &rfds, NULL, NULL, NULL) < 0) {
-      userlog(LOG_ERR, "select: %s", strerror(errno));
-      go_on = false;
+    timeout = (struct timeval){MISSING_ROOT_TIMEOUT, 0};
+
+    if (select(nfds, &rfds, NULL, NULL, &timeout) < 0) {
+      if (errno != EINTR) {
+        userlog(LOG_ERR, "select: %s", strerror(errno));
+        return false;
+      }
     }
     else if (FD_ISSET(input_fd, &rfds)) {
-      go_on = read_input();
+      int result = read_input();
+      if (result == 0) return true;
+      else if (result != ERR_CONTINUE) return false;
     }
     else if (FD_ISSET(inotify_fd, &rfds)) {
-      go_on = process_inotify_input();
+      if (!process_inotify_input()) return false;
+    }
+    else {
+      check_missing_roots();
     }
   }
 }
 
 
-static bool read_input() {
+static int read_input() {
   char* line = read_line(stdin);
   userlog(LOG_DEBUG, "input: %s", (line ? line : "<null>"));
 
   if (line == NULL || strcmp(line, "EXIT") == 0) {
     userlog(LOG_INFO, "exiting: %s", line);
-    return false;
+    return 0;
   }
 
   if (strcmp(line, "ROOTS") == 0) {
     array* new_roots = array_create(20);
-    CHECK_NULL(new_roots, false);
+    CHECK_NULL(new_roots, ERR_ABORT);
 
     while (1) {
       line = read_line(stdin);
       userlog(LOG_DEBUG, "input: %s", (line ? line : "<null>"));
       if (line == NULL || strlen(line) == 0) {
-        return false;
+        return 0;
       }
       else if (strcmp(line, "#") == 0) {
         break;
@@ -237,15 +280,15 @@ static bool read_input() {
       else {
         int l = strlen(line);
         if (l > 1 && line[l-1] == '/')  line[l-1] = '\0';
-        CHECK_NULL(array_push(new_roots, strdup(line)), false);
+        CHECK_NULL(array_push(new_roots, strdup(line)), ERR_ABORT);
       }
     }
 
-    return update_roots(new_roots);
+    return update_roots(new_roots) ? ERR_CONTINUE : ERR_ABORT;
   }
 
-  userlog(LOG_INFO, "unrecognised command: %s", line);
-  return true;
+  userlog(LOG_WARNING, "unrecognised command: %s", line);
+  return ERR_CONTINUE;
 }
 
 
@@ -295,9 +338,9 @@ static bool update_roots(array* new_roots) {
 static void unregister_roots() {
   watch_root* root;
   while ((root = array_pop(roots)) != NULL) {
-    userlog(LOG_INFO, "unregistering root: %s", root->name);
+    userlog(LOG_INFO, "unregistering root: %s", root->path);
     unwatch(root->id);
-    free(root->name);
+    free(root->path);
     free(root);
   };
 }
@@ -306,12 +349,11 @@ static void unregister_roots() {
 static bool register_roots(array* new_roots, array* unwatchable, array* mounts) {
   for (int i=0; i<array_size(new_roots); i++) {
     char* new_root = array_get(new_roots, i);
-    char* unflattened = new_root;
-    if (unflattened[0] == '|') ++unflattened;
+    char* unflattened = UNFLATTEN(new_root);
     userlog(LOG_INFO, "registering root: %s", new_root);
 
     if (unflattened[0] != '/') {
-      userlog(LOG_WARNING, "  ... not valid, skipped");
+      userlog(LOG_WARNING, "invalid root: %s", new_root);
       continue;
     }
 
@@ -322,13 +364,13 @@ static bool register_roots(array* new_roots, array* unwatchable, array* mounts) 
     for (int j=0; j<array_size(mounts); j++) {
       char* mount = array_get(mounts, j);
       if (is_parent_path(mount, unflattened)) {
-        userlog(LOG_DEBUG, "watch root '%s' is under mount point '%s' - skipping", unflattened, mount);
+        userlog(LOG_INFO, "watch root '%s' is under mount point '%s' - skipping", unflattened, mount);
         CHECK_NULL(array_push(unwatchable, strdup(unflattened)), false);
         skip = true;
         break;
       }
       else if (is_parent_path(unflattened, mount)) {
-        userlog(LOG_DEBUG, "watch root '%s' contains mount point '%s' - partial watch", unflattened, mount);
+        userlog(LOG_INFO, "watch root '%s' contains mount point '%s' - partial watch", unflattened, mount);
         char* copy = strdup(mount);
         CHECK_NULL(array_push(unwatchable, copy), false);
         CHECK_NULL(array_push(inner_mounts, copy), false);
@@ -341,24 +383,19 @@ static bool register_roots(array* new_roots, array* unwatchable, array* mounts) 
     int id = watch(new_root, inner_mounts);
     array_delete(inner_mounts);
 
-    if (id >= 0) {
+    if (id >= 0 || id == ERR_MISSING) {
       watch_root* root = malloc(sizeof(watch_root));
       CHECK_NULL(root, false);
       root->id = id;
-      root->name = strdup(new_root);
-      CHECK_NULL(root->name, false);
+      root->path = strdup(new_root);
+      CHECK_NULL(root->path, false);
       CHECK_NULL(array_push(roots, root), false);
     }
     else if (id == ERR_ABORT) {
       return false;
     }
     else if (id != ERR_IGNORE) {
-      if (show_warning && watch_limit_reached()) {
-        int limit = get_watch_count();
-        userlog(LOG_WARNING, "watch limit (%d) reached", limit);
-        output("MESSAGE\n" INOTIFY_LIMIT_MSG, limit);
-        show_warning = false;  // warn only once
-      }
+      userlog(LOG_WARNING, "watch root '%s' cannot be watched: %d", unflattened, id);
       CHECK_NULL(array_push(unwatchable, strdup(unflattened)), false);
     }
   }
@@ -370,7 +407,8 @@ static bool register_roots(array* new_roots, array* unwatchable, array* mounts) 
 static bool is_watchable(const char* fs) {
   // don't watch special and network filesystems
   return !(strncmp(fs, "dev", 3) == 0 || strcmp(fs, "proc") == 0 || strcmp(fs, "sysfs") == 0 || strcmp(fs, MNTTYPE_SWAP) == 0 ||
-           strncmp(fs, "fuse", 4) == 0 || strcmp(fs, "cifs") == 0 || strcmp(fs, MNTTYPE_NFS) == 0);
+           (strncmp(fs, "fuse", 4) == 0 && strcmp(fs, "fuseblk") != 0) ||
+           strcmp(fs, "cifs") == 0 || strcmp(fs, MNTTYPE_NFS) == 0);
 }
 
 static array* unwatchable_mounts() {
@@ -397,35 +435,44 @@ static array* unwatchable_mounts() {
 
 
 static void inotify_callback(char* path, int event) {
-  if (event & IN_CREATE || event & IN_MOVED_TO) {
-    output("CREATE\n%s\nCHANGE\n%s\n", path, path);
-    userlog(LOG_DEBUG, "CREATE: %s", path);
-    return;
+  if (event & (IN_CREATE | IN_MOVED_TO)) {
+    report_event("CREATE", path);
+    report_event("CHANGE", path);
   }
-
-  if (event & IN_MODIFY) {
-    output("CHANGE\n%s\n", path);
-    userlog(LOG_DEBUG, "CHANGE: %s", path);
-    return;
+  else if (event & IN_MODIFY) {
+    report_event("CHANGE", path);
   }
-
-  if (event & IN_ATTRIB) {
-    output("STATS\n%s\n", path);
-    userlog(LOG_DEBUG, "STATS: %s", path);
-    return;
+  else if (event & IN_ATTRIB) {
+    report_event("STATS", path);
   }
-
-  if (event & IN_DELETE || event & IN_MOVED_FROM) {
-    output("DELETE\n%s\n", path);
-    userlog(LOG_DEBUG, "DELETE: %s", path);
-    return;
+  else if (event & (IN_DELETE | IN_MOVED_FROM)) {
+    report_event("DELETE", path);
   }
-
-  if (event & IN_UNMOUNT) {
+  if (event & (IN_DELETE_SELF | IN_MOVE_SELF)) {
+    check_root_removal(path);
+  }
+  else if (event & IN_UNMOUNT) {
     output("RESET\n");
     userlog(LOG_DEBUG, "RESET");
-    return;
   }
+}
+
+static void report_event(char* event, char* path) {
+  userlog(LOG_DEBUG, "%s: %s", event, path);
+
+  int len = strlen(path);
+  for (char* p = path; *p != '\0'; p++) {
+    if (*p == '\n') {
+      *p = '\0';
+    }
+  }
+
+  fputs(event, stdout);
+  fputc('\n', stdout);
+  fwrite(path, len, 1, stdout);
+  fputc('\n', stdout);
+
+  fflush(stdout);
 }
 
 
@@ -438,4 +485,35 @@ static void output(const char* format, ...) {
   va_start(ap, format);
   vprintf(format, ap);
   va_end(ap);
+
+  fflush(stdout);
+}
+
+
+static void check_missing_roots() {
+  struct stat st;
+  for (int i=0; i<array_size(roots); i++) {
+    watch_root* root = array_get(roots, i);
+    if (root->id < 0) {
+      char* unflattened = UNFLATTEN(root->path);
+      if (stat(unflattened, &st) == 0) {
+        root->id = watch(root->path, NULL);
+        userlog(LOG_INFO, "root restored: %s\n", root->path);
+        report_event("CREATE", unflattened);
+        report_event("CHANGE", unflattened);
+      }
+    }
+  }
+}
+
+static void check_root_removal(char* path) {
+  for (int i=0; i<array_size(roots); i++) {
+    watch_root* root = array_get(roots, i);
+    if (root->id >= 0 && strcmp(path, UNFLATTEN(root->path)) == 0) {
+      unwatch(root->id);
+      root->id = -1;
+      userlog(LOG_INFO, "root deleted: %s\n", root->path);
+      report_event("DELETE", path);
+    }
+  }
 }

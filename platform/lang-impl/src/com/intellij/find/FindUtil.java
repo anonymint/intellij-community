@@ -21,6 +21,7 @@ import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.find.impl.FindInProjectUtil;
+import com.intellij.find.impl.livePreview.LivePreview;
 import com.intellij.find.replaceInProject.ReplaceInProjectManager;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -539,7 +540,8 @@ public class FindUtil {
       String foundString = document.getCharsSequence().subSequence(startOffset, endOffset).toString();
       String toReplace;
       try {
-        toReplace = findManager.getStringToReplace(foundString, model, startOffset, document.getText());
+        CharSequence textToMatch = document.getCharsSequence().subSequence(offset, document.getTextLength());
+        toReplace = findManager.getStringToReplace(foundString, model, startOffset - offset, textToMatch);
       }
       catch (FindManager.MalformedReplacementStringException e) {
         if (!ApplicationManager.getApplication().isUnitTestMode()) {
@@ -826,12 +828,17 @@ public class FindUtil {
       editor.getCaretModel().addCaretListener(listener);
     }
     JComponent component = HintUtil.createInformationLabel(JDOMUtil.escapeText(message, false, false));
-    final LightweightHint hint = new LightweightHint(component);
-    HintManagerImpl.getInstanceImpl().showEditorHint(hint, editor, position,
-                                                     HintManager.HIDE_BY_ANY_KEY |
-                                                     HintManager.HIDE_BY_TEXT_CHANGE |
-                                                     HintManager.HIDE_BY_SCROLLING,
-                                                     0, false);
+
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      LivePreview.processNotFound();
+    } else {
+      final LightweightHint hint = new LightweightHint(component);
+      HintManagerImpl.getInstanceImpl().showEditorHint(hint, editor, position,
+                                                       HintManager.HIDE_BY_ANY_KEY |
+                                                       HintManager.HIDE_BY_TEXT_CHANGE |
+                                                       HintManager.HIDE_BY_SCROLLING,
+                                                       0, false);
+    }
   }
 
   public static TextRange doReplace(final Project project,
@@ -914,7 +921,9 @@ public class FindUtil {
     boolean shouldReplace(TextRange range, String replace);
   }
 
-  public static UsageView showInUsageView(PsiElement sourceElement, final PsiElement[] targets, String title, Project project) {
+  @Nullable
+  public static UsageView showInUsageView(PsiElement sourceElement, @NotNull final PsiElement[] targets, String title, Project project) {
+    if (targets.length == 0) return null;
     final UsageViewPresentation presentation = new UsageViewPresentation();
     presentation.setCodeUsagesString(title);
     presentation.setTabName(title);
@@ -922,7 +931,7 @@ public class FindUtil {
     final UsageTarget[] usageTargets =
       sourceElement == null ? UsageTarget.EMPTY_ARRAY : new UsageTarget[]{new PsiElement2UsageTargetAdapter(sourceElement)};
 
-    final UsageInfoToUsageConverter.TargetElementsDescriptor targetElementsDescriptor = 
+    final UsageInfoToUsageConverter.TargetElementsDescriptor targetElementsDescriptor =
       sourceElement != null ? new UsageInfoToUsageConverter.TargetElementsDescriptor(sourceElement)
                             : new UsageInfoToUsageConverter.TargetElementsDescriptor(PsiElement.EMPTY_ARRAY);
     final Usage[] usages = {UsageInfoToUsageConverter.convert(targetElementsDescriptor, new UsageInfo(targets[0]))};
@@ -931,11 +940,12 @@ public class FindUtil {
     ProgressManager.getInstance().run(new Task.Backgroundable(project, "Updating Usage View ...") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        
+
         for (int i = 1; i < targets.length; i++) {
           if (((UsageViewImpl)view).isDisposed()) break;
           final PsiElement target = targets[i];
           ApplicationManager.getApplication().runReadAction(new Runnable() {
+            @Override
             public void run() {
               final Usage usage = UsageInfoToUsageConverter.convert(targetElementsDescriptor, new UsageInfo(target));
               view.appendUsage(usage);

@@ -21,12 +21,11 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.ExceptionUtil;
 import com.intellij.vcsUtil.VcsFileUtil;
 import git4idea.GitBranch;
+import git4idea.GitCommit;
 import git4idea.GitExecutionException;
 import git4idea.history.GitHistoryUtils;
-import git4idea.history.browser.GitCommit;
 import git4idea.push.GitPushSpec;
 import git4idea.repo.GitRemote;
 import git4idea.repo.GitRepository;
@@ -37,6 +36,7 @@ import java.io.File;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Easy-to-use wrapper of common native Git commands.
@@ -101,7 +101,6 @@ public class GitImpl implements Git {
     throws VcsException {
     final Set<VirtualFile> untrackedFiles = new HashSet<VirtualFile>();
     GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.LS_FILES);
-    h.setNoSSH(true);
     h.setSilent(true);
     h.addParameters("--exclude-standard", "--others", "-z");
     h.endOptions();
@@ -131,11 +130,14 @@ public class GitImpl implements Git {
   @Override
   @NotNull
   public GitCommandResult clone(@NotNull Project project, @NotNull File parentDirectory, @NotNull String url,
-                                @NotNull String clonedDirectoryName) {
+                                @NotNull String clonedDirectoryName, @NotNull GitLineHandlerListener... listeners) {
     GitLineHandlerPasswordRequestAware handler = new GitLineHandlerPasswordRequestAware(project, parentDirectory, GitCommand.CLONE);
+    handler.setUrl(url);
+    handler.addParameters("--progress");
     handler.addParameters(url);
     handler.addParameters(clonedDirectoryName);
-    return run(handler, true);
+    addListeners(handler, listeners);
+    return run(handler);
   }
 
   @NotNull
@@ -152,7 +154,6 @@ public class GitImpl implements Git {
     final GitLineHandler diff = new GitLineHandler(repository.getProject(), repository.getRoot(), GitCommand.DIFF);
     diff.addParameters(parameters);
     diff.addParameters(range);
-    diff.setNoSSH(true);
     diff.setStdoutSuppressed(true);
     diff.setStderrSuppressed(true);
     diff.setSilent(true);
@@ -355,25 +356,27 @@ public class GitImpl implements Git {
 
   @Override
   @NotNull
-  public GitCommandResult push(@NotNull GitRepository repository, @NotNull String remote, @NotNull String spec,
-                                      @NotNull GitLineHandlerListener... listeners) {
+  public GitCommandResult push(@NotNull GitRepository repository, @NotNull String remote, @NotNull String url, @NotNull String spec,
+                               @NotNull GitLineHandlerListener... listeners) {
     final GitLineHandlerPasswordRequestAware h = new GitLineHandlerPasswordRequestAware(repository.getProject(), repository.getRoot(),
                                                                                         GitCommand.PUSH);
+    h.setUrl(url);
     h.setSilent(false);
     addListeners(h, listeners);
+    h.addProgressParameter();
     h.addParameters(remote);
     h.addParameters(spec);
-    return run(h, true);
+    return run(h);
   }
 
   @Override
   @NotNull
-  public GitCommandResult push(@NotNull GitRepository repository, @NotNull GitPushSpec pushSpec,
-                                      @NotNull GitLineHandlerListener... listeners) {
+  public GitCommandResult push(@NotNull GitRepository repository, @NotNull GitPushSpec pushSpec, @NotNull String url,
+                               @NotNull GitLineHandlerListener... listeners) {
     GitRemote remote = pushSpec.getRemote();
     GitBranch remoteBranch = pushSpec.getDest();
     String destination = remoteBranch.getName().replaceFirst(remote.getName() + "/", "");
-    return push(repository, remote.getName(), pushSpec.getSource().getName() + ":" + destination, listeners);
+    return push(repository, remote.getName(), url, pushSpec.getSource().getName() + ":" + destination, listeners);
   }
 
   @NotNull
@@ -414,20 +417,15 @@ public class GitImpl implements Git {
     }
   }
 
-  private static GitCommandResult run(@NotNull GitLineHandler handler) {
-    return run(handler, false);
-  } 
-
   /**
    * Runs the given {@link GitLineHandler} in the current thread and returns the {@link GitCommandResult}.
    */
-  private static GitCommandResult run(@NotNull GitLineHandler handler, boolean remote) {
-    handler.setNoSSH(!remote);
-
+  private static GitCommandResult run(@NotNull GitLineHandler handler) {
     final List<String> errorOutput = new ArrayList<String>();
     final List<String> output = new ArrayList<String>();
     final AtomicInteger exitCode = new AtomicInteger();
     final AtomicBoolean startFailed = new AtomicBoolean();
+    final AtomicReference<Throwable> exception = new AtomicReference<Throwable>();
     
     handler.addLineListener(new GitLineHandlerListener() {
       @Override public void onLineAvailable(String line, Key outputType) {
@@ -442,10 +440,10 @@ public class GitImpl implements Git {
         exitCode.set(code);
       }
 
-      @Override public void startFailed(Throwable exception) {
+      @Override public void startFailed(Throwable t) {
         startFailed.set(true);
         errorOutput.add("Failed to start Git process");
-        errorOutput.add(ExceptionUtil.getThrowableText(exception));
+        exception.set(t);
       }
     });
     
@@ -455,8 +453,9 @@ public class GitImpl implements Git {
       errorOutput.add("Authentication failed");
     }
 
-    final boolean success = !startFailed.get() && errorOutput.isEmpty() && (handler.isIgnoredErrorCode(exitCode.get()) || exitCode.get() == 0);
-    return new GitCommandResult(success, exitCode.get(), errorOutput, output);
+    final boolean success = !startFailed.get() && errorOutput.isEmpty() &&
+                            (handler.isIgnoredErrorCode(exitCode.get()) || exitCode.get() == 0);
+    return new GitCommandResult(success, exitCode.get(), errorOutput, output, null);
   }
   
   /**
@@ -473,7 +472,8 @@ public class GitImpl implements Git {
 
   // could be upper-cased, so should check case-insensitively
   public static final String[] ERROR_INDICATORS = {
-    "error", "fatal", "Cannot apply", "Could not", "Interactive rebase already started", "refusing to pull", "cannot rebase:", "conflict",
+    "error", "remote: error", "fatal",
+    "Cannot apply", "Could not", "Interactive rebase already started", "refusing to pull", "cannot rebase:", "conflict",
     "unable"
   };
 

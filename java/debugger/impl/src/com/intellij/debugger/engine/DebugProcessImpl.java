@@ -74,6 +74,7 @@ import com.intellij.util.Alarm;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.concurrency.Semaphore;
+import com.intellij.util.containers.ContainerUtil;
 import com.sun.jdi.*;
 import com.sun.jdi.connect.*;
 import com.sun.jdi.request.EventRequest;
@@ -105,7 +106,7 @@ public abstract class DebugProcessImpl implements DebugProcess {
   protected EventDispatcher<DebugProcessListener> myDebugProcessDispatcher = EventDispatcher.create(DebugProcessListener.class);
   protected EventDispatcher<EvaluationListener> myEvaluationDispatcher = EventDispatcher.create(EvaluationListener.class);
 
-  private final List<ProcessListener> myProcessListeners = new ArrayList<ProcessListener>();
+  private final List<ProcessListener> myProcessListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   protected static final int STATE_INITIAL   = 0;
   protected static final int STATE_ATTACHED  = 1;
@@ -736,7 +737,6 @@ public abstract class DebugProcessImpl implements DebugProcess {
   public void appendPositionManager(final PositionManager positionManager) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     myPositionManager.appendPositionManager(positionManager);
-    DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager().updateBreakpoints(this);
   }
 
   private RunToCursorBreakpoint myRunToCursorBreakpoint;
@@ -762,6 +762,7 @@ public abstract class DebugProcessImpl implements DebugProcess {
         getManagerThread().close();
       }
       finally {
+        final VirtualMachineProxyImpl vm = myVirtualMachineProxy;
         myVirtualMachineProxy = null;
         myPositionManager = null;
         myReturnValueWatcher = null;
@@ -774,6 +775,13 @@ public abstract class DebugProcessImpl implements DebugProcess {
         }
         finally {
           setBreakpointsMuted(false);
+          if (vm != null) {
+            try {
+              vm.dispose(); // to be on the safe side ensure that VM mirror, if present, is disposed and invalidated
+            }
+            catch (Throwable ignored) {
+            }
+          }
           myWaitFor.up();
         }
       }
@@ -1343,8 +1351,12 @@ public abstract class DebugProcessImpl implements DebugProcess {
         else {
           // some VM's (like IBM VM 1.4.2 bundled with WebSpere) does not
           // resume threads on dispose() like it should
-          virtualMachineProxy.resume();
-          virtualMachineProxy.dispose();
+          try {
+            virtualMachineProxy.resume();
+          }
+          finally {
+            virtualMachineProxy.dispose();
+          }
         }
       }
       else {

@@ -16,10 +16,13 @@
 package com.intellij.debugger.ui;
 
 import com.intellij.debugger.ui.breakpoints.Breakpoint;
-import com.intellij.debugger.ui.breakpoints.BreakpointFactory;
+import com.intellij.icons.AllIcons;
 import com.intellij.xdebugger.breakpoints.ui.XBreakpointGroupingRule;
+import com.intellij.xdebugger.breakpoints.ui.XBreakpointsGroupingPriorities;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.util.Collection;
 
 class XBreakpointGroupingByClassRule<B> extends XBreakpointGroupingRule<B, XBreakpointClassGroup> {
@@ -30,6 +33,11 @@ class XBreakpointGroupingByClassRule<B> extends XBreakpointGroupingRule<B, XBrea
   @Override
   public boolean isAlwaysEnabled() {
     return false;
+  }
+
+  @Override
+  public int getPriority() {
+    return XBreakpointsGroupingPriorities.BY_CLASS;
   }
 
   @Override
@@ -49,5 +57,11 @@ class XBreakpointGroupingByClassRule<B> extends XBreakpointGroupingRule<B, XBrea
       return new XBreakpointClassGroup(packageName, className);
     }
     return null;
+  }
+
+  @Nullable
+  @Override
+  public Icon getIcon() {
+    return AllIcons.Nodes.Class;
   }
 }

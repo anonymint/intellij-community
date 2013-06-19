@@ -20,6 +20,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.Consumer;
+import org.jetbrains.idea.svn.SvnBindUtil;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.portable.SvnExceptionWrapper;
 import org.jetbrains.idea.svn.portable.SvnkitSvnWcClient;
@@ -70,12 +71,12 @@ public class SvnCommandLineInfoClient extends SvnkitSvnWcClient {
                      Collection changeLists,
                      final ISVNInfoHandler handler) throws SVNException {
     File base = path.isDirectory() ? path : path.getParentFile();
-    base = correctUpToExistingParent(base);
+    base = SvnBindUtil.correctUpToExistingParent(base);
     if (base == null) {
       // very unrealistic
       throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR), new RuntimeException("Can not find existing parent file"));
     }
-    final SvnSimpleCommand command = new SvnSimpleCommand(myProject, base, SvnCommandName.info);
+    final SvnSimpleCommand command = SvnCommandFactory.createSimpleCommand(myProject, base, SvnCommandName.info);
 
     if (depth != null) {
       command.addParameters("--depth", depth.getName());
@@ -123,20 +124,18 @@ public class SvnCommandLineInfoClient extends SvnkitSvnWcClient {
     }
     catch (VcsException e) {
       final String text = e.getMessage();
-      if (!StringUtil.isEmptyOrSpaces(text) && text.contains("W155010")) {
+      final boolean notEmpty = !StringUtil.isEmptyOrSpaces(text);
+      if (notEmpty && text.contains("W155010")) {
         // just null
         return;
       }
+      // not a working copy exception
+      // "E155007: '' is not a working copy"
+      if (notEmpty && text.contains("is not a working copy")) {
+        throw new SVNException(SVNErrorMessage.create(SVNErrorCode.WC_NOT_WORKING_COPY), e);
+      }
       throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR), e);
     }
-  }
-
-  private File correctUpToExistingParent(File base) {
-    while (base != null) {
-      if (base.exists()) return base;
-      base = base.getParentFile();
-    }
-    return null;
   }
 
   @Override

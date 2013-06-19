@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.jetbrains.plugins.groovy.lang.psi.api.statements.params;
 
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiParameter;
 import com.intellij.util.ArrayFactory;
 import org.jetbrains.annotations.NotNull;
@@ -33,6 +34,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeElement;
 public interface GrParameter extends PsiParameter, GrVariable, GrCondition {
   GrParameter[] EMPTY_ARRAY = new GrParameter[0];
   ArrayFactory<GrParameter> ARRAY_FACTORY = new ArrayFactory<GrParameter>() {
+    @NotNull
     @Override
     public GrParameter[] create(int count) {
       return new GrParameter[count];
@@ -49,4 +51,10 @@ public interface GrParameter extends PsiParameter, GrVariable, GrCondition {
   GrModifierList getModifierList();
 
   boolean isOptional();
+
+  /**
+   * parameter can be vararg while getEllipsisDots() return null
+   */
+  @Nullable
+  PsiElement getEllipsisDots();
 }

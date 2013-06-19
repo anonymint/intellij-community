@@ -16,7 +16,7 @@
 package com.intellij.codeInsight.daemon.quickFix;
 
 import com.intellij.codeInspection.*;
-import com.intellij.codeInspection.ex.InspectionTool;
+import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
 import com.intellij.psi.*;
@@ -25,14 +25,15 @@ import org.jetbrains.annotations.NotNull;
 
 
 public class RemoveRedundantUncheckedSuppressionTest extends LightQuickFixTestCase {
+  @NotNull
   @Override
   protected LocalInspectionTool[] configureLocalInspectionTools() {
     final PossibleHeapPollutionVarargsInspection varargsInspection = new PossibleHeapPollutionVarargsInspection();
     final UncheckedWarningLocalInspection warningLocalInspection = new UncheckedWarningLocalInspection();
     final RedundantSuppressInspection inspection = new RedundantSuppressInspection(){
       @Override
-      protected InspectionTool[] getInspectionTools(PsiElement psiElement, InspectionManager manager) {
-        return new InspectionTool[]{
+      protected InspectionToolWrapper[] getInspectionTools(PsiElement psiElement, InspectionManager manager) {
+        return new InspectionToolWrapper[]{
           new LocalInspectionToolWrapper(varargsInspection),
           new LocalInspectionToolWrapper(warningLocalInspection)
         };

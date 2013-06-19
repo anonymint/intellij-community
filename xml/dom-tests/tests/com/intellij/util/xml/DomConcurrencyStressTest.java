@@ -1,5 +1,17 @@
 /*
- * Copyright (c) 2000-2007 JetBrains s.r.o. All Rights Reserved.
+ * Copyright 2000-2013 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package com.intellij.util.xml;
 
@@ -16,6 +28,7 @@ import com.intellij.semantic.SemService;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.Timings;
 import com.intellij.util.xml.impl.DomFileElementImpl;
+import com.intellij.util.xml.impl.DomTestCase;
 import com.intellij.util.xml.reflect.DomExtender;
 import com.intellij.util.xml.reflect.DomExtenderEP;
 import com.intellij.util.xml.reflect.DomExtensionsRegistrar;
@@ -97,27 +110,30 @@ public class DomConcurrencyStressTest extends DomTestCase {
   }
 
   private static void runThreads(int threadCount, final Runnable runnable) throws Throwable {
-    final Ref<Throwable> exc = Ref.create(null);
+    for (int i=0; i<threadCount/8 + 1; i++) {
+      final Ref<Throwable> exc = Ref.create(null);
 
-    final CountDownLatch reads = new CountDownLatch(threadCount);
-    for (int j = 0; j < threadCount; j++) {
-      new Thread(){
-        @Override
-        public void run() {
-          try {
-            runnable.run();
+      final CountDownLatch reads = new CountDownLatch(8);
+      for (int j = 0; j < 8; j++) {
+        new Thread(){
+          @Override
+          public void run() {
+            try {
+              runnable.run();
+            }
+            catch (Throwable e) {
+              exc.set(e);
+            }
+            finally {
+              reads.countDown();
+            }
           }
-          catch (Throwable e) {
-            exc.set(e);
-          } finally {
-            reads.countDown();
-          }
-        }
-      }.start();
-    }
-    reads.await();
-    if (!exc.isNull()) {
-      throw exc.get();
+        }.start();
+      }
+      reads.await();
+      if (!exc.isNull()) {
+        throw exc.get();
+      }
     }
   }
 

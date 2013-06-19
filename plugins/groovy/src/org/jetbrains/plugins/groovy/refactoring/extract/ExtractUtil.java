@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,18 +18,19 @@ package org.jetbrains.plugins.groovy.refactoring.extract;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.CommonClassNames;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPrimitiveType;
 import com.intellij.psi.PsiType;
+import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.groovy.lang.GrReferenceAdjuster;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyRecursiveElementVisitor;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrStatement;
@@ -47,10 +48,14 @@ import org.jetbrains.plugins.groovy.lang.psi.dataFlow.reachingDefs.VariableInfo;
 import org.jetbrains.plugins.groovy.lang.psi.impl.ApplicationStatementUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
+import org.jetbrains.plugins.groovy.lang.psi.util.GrStringUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
+import org.jetbrains.plugins.groovy.refactoring.GroovyNamesUtil;
 import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringUtil;
 import org.jetbrains.plugins.groovy.refactoring.extract.method.ExtractMethodInfoHelper;
+import org.jetbrains.plugins.groovy.refactoring.introduce.GrIntroduceHandlerBase;
+import org.jetbrains.plugins.groovy.refactoring.introduce.StringPartInfo;
 
 import java.util.*;
 
@@ -63,9 +68,9 @@ public class ExtractUtil {
   private ExtractUtil() {
   }
 
-  public static GrStatement replaceStatement(GrStatementOwner declarationOwner, ExtractInfoHelper helper) {
+  public static GrStatement replaceStatement(@Nullable GrStatementOwner declarationOwner, @NotNull ExtractInfoHelper helper) {
     GrStatement realStatement;
-    if (declarationOwner != null && !isSingleExpression(helper.getStatements())) {
+    if (declarationOwner != null && !isSingleExpression(helper.getStatements()) && helper.getStringPartInfo() == null) {
       // Replace set of statements
       final GrStatement[] newStatement = createResultStatement(helper);
       // add call statement
@@ -74,7 +79,7 @@ public class ExtractUtil {
       realStatement = null;
       for (GrStatement statement : newStatement) {
         realStatement = declarationOwner.addStatementBefore(statement, statements[0]);
-        GrReferenceAdjuster.shortenReferences(realStatement);
+        JavaCodeStyleManager.getInstance(realStatement.getProject()).shortenClassReferences(realStatement);
       }
       LOG.assertTrue(realStatement != null);
       // remove old statements
@@ -82,11 +87,18 @@ public class ExtractUtil {
       PsiImplUtil.removeNewLineAfter(realStatement);
     }
     else {
+      GrExpression oldExpr;
+      if (helper.getStringPartInfo() != null) {
+        oldExpr = GrIntroduceHandlerBase.processLiteral(helper.getName(), helper.getStringPartInfo(), helper.getProject());
+      }
+      else {
+        oldExpr = (GrExpression)helper.getStatements()[0];
+      }
+
       // Expression call replace
       GrExpression methodCall = createMethodCall(helper);
-      GrExpression oldExpr = (GrExpression)helper.getStatements()[0];
       realStatement = oldExpr.replaceWithExpression(methodCall, true);
-      GrReferenceAdjuster.shortenReferences(realStatement);
+      JavaCodeStyleManager.getInstance(realStatement.getProject()).shortenClassReferences(realStatement);
     }
     return realStatement;
   }
@@ -177,7 +189,7 @@ public class ExtractUtil {
 
     if (distinctDeclaration) {
       for (VariableInfo info : varInfos) {
-        result.add(factory.createVariableDeclaration(ArrayUtil.EMPTY_STRING_ARRAY, null, info.getType(), info.getName()));
+        result.add(factory.createVariableDeclaration(ArrayUtil.EMPTY_STRING_ARRAY, "", info.getType(), info.getName()));
       }
     }
     else {
@@ -250,11 +262,25 @@ public class ExtractUtil {
     return result;
   }
 
-  private static Collection<GrVariable> collectUsedLocalVarsOrParamsDeclaredOutside(GrStatement[] statements) {
+  public static TextRange getRangeOfRefactoring(ExtractInfoHelper helper) {
+    final StringPartInfo stringPartInfo = helper.getStringPartInfo();
+    if (stringPartInfo != null) {
+      return stringPartInfo.getRange();
+    }
+    else {
+      final GrStatement[] statements = helper.getStatements();
+      int start = statements[0].getTextRange().getStartOffset();
+      int end = statements[statements.length - 1].getTextRange().getEndOffset();
+      return new TextRange(start, end);
+    }
+  }
+
+  private static Collection<GrVariable> collectUsedLocalVarsOrParamsDeclaredOutside(ExtractInfoHelper helper) {
     final Collection<GrVariable> result = new HashSet<GrVariable>();
 
-    final int start = statements[0].getTextRange().getStartOffset();
-    final int end = statements[statements.length - 1].getTextRange().getEndOffset();
+    final TextRange range = getRangeOfRefactoring(helper);
+    final int start = range.getStartOffset();
+    final int end = range.getEndOffset();
 
     final GroovyRecursiveElementVisitor visitor = new GroovyRecursiveElementVisitor() {
       @Override
@@ -270,6 +296,7 @@ public class ExtractUtil {
       }
     };
 
+    final GrStatement[] statements = helper.getStatements();
     for (GrStatement statement : statements) {
       statement.accept(visitor);
     }
@@ -288,7 +315,9 @@ public class ExtractUtil {
     String typeText = getTypeString(helper, false, modifier);
     buffer.append(modifier);
     buffer.append(typeText);
-    buffer.append(helper.getName());
+
+    appendName(buffer, helper.getName());
+
     buffer.append("(");
     for (String param : getParameterString(helper, true)) {
       buffer.append(param);
@@ -306,6 +335,17 @@ public class ExtractUtil {
     return method;
   }
 
+  public static void appendName(@NotNull final StringBuilder buffer, @NotNull final String name) {
+    if (GroovyNamesUtil.isIdentifier(name)) {
+      buffer.append(name);
+    }
+    else {
+      buffer.append("'");
+      buffer.append(GrStringUtil.escapeSymbolsForString(name, true, false));
+      buffer.append("'");
+    }
+  }
+
   public static void generateBody(ExtractInfoHelper helper, boolean isVoid, StringBuilder buffer, boolean forceReturn) {
     VariableInfo[] outputInfos = helper.getOutputVariableInfos();
 
@@ -321,7 +361,7 @@ public class ExtractUtil {
     }
 
     List<VariableInfo> genDecl = new ArrayList<VariableInfo>();
-    final Collection<GrVariable> outside = collectUsedLocalVarsOrParamsDeclaredOutside(helper.getStatements());
+    final Collection<GrVariable> outside = collectUsedLocalVarsOrParamsDeclaredOutside(helper);
 
     for (final GrVariable variable : outside) {
       if (!declaredVars.contains(variable.getName())) {
@@ -344,7 +384,8 @@ public class ExtractUtil {
       buffer.append(statement.getText()).append('\n');
     }
 
-    if (!isSingleExpression(helper.getStatements()) || statements.size() > 0) {
+    final StringPartInfo stringPartInfo = helper.getStringPartInfo();
+    if (!isSingleExpression(helper.getStatements()) && stringPartInfo == null) {
       for (PsiElement element : helper.getInnerElements()) {
         buffer.append(element.getText());
       }
@@ -363,7 +404,9 @@ public class ExtractUtil {
       }
     }
     else {
-      GrExpression expr = (GrExpression)PsiUtil.skipParentheses(helper.getStatements()[0], false);
+      GrExpression expr = stringPartInfo != null
+                          ? GrIntroduceHandlerBase.generateExpressionFromStringPart(stringPartInfo, helper.getProject())
+                          : (GrExpression)PsiUtil.skipParentheses(helper.getStatements()[0], false);
       boolean addReturn = !isVoid && forceReturn;
       if (addReturn) {
         buffer.append("return ");
@@ -389,9 +432,9 @@ public class ExtractUtil {
         PsiType paramType = info.getType();
         final PsiPrimitiveType unboxed = PsiPrimitiveType.getUnboxedType(paramType);
         if (unboxed != null) paramType = unboxed;
-        String paramTypeText;
 
-        if (paramType == null || paramType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
+        String paramTypeText;
+        if (paramType == null || paramType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT) || paramType.equals(PsiType.NULL)) {
           paramTypeText = "";
         }
         else {
@@ -404,21 +447,20 @@ public class ExtractUtil {
     return ArrayUtil.toStringArray(params);
   }
 
-  public static String getTypeString(ExtractMethodInfoHelper helper, boolean forPresentation, String modifier) {
-    PsiType type = helper.getOutputType();
-    final PsiPrimitiveType outUnboxed = PsiPrimitiveType.getUnboxedType(type);
-    if (outUnboxed != null) type = outUnboxed;
+  @NotNull
+  public static String getTypeString(@NotNull ExtractMethodInfoHelper helper, boolean forPresentation, @NotNull String modifier) {
+    if (!helper.specifyType()) {
+      return modifier.isEmpty() ? "def " : "";
+    }
 
-    String typeText = forPresentation ? type.getPresentableText() : type.getCanonicalText();
-    String returnType = typeText == null || !helper.specifyType() ? "" : typeText;
+    PsiType type = helper.getOutputType();
+    final PsiPrimitiveType unboxed = PsiPrimitiveType.getUnboxedType(type);
+    if (unboxed != null) type = unboxed;
+
+    final String returnType = StringUtil.notNullize(forPresentation ? type.getPresentableText() : type.getCanonicalText());
 
     if (StringUtil.isEmptyOrSpaces(returnType) || "null".equals(returnType)) {
-      if (modifier.length() == 0) {
-        return "def ";
-      }
-      else {
-        return "";
-      }
+      return modifier.isEmpty() ? "def " : "";
     }
     else {
       return returnType + " ";
@@ -432,7 +474,8 @@ public class ExtractUtil {
 
   private static GrMethodCallExpression createMethodCall(ExtractInfoHelper helper) {
     StringBuilder buffer = new StringBuilder();
-    buffer.append(helper.getName()).append("(");
+    appendName(buffer, helper.getName());
+    buffer.append("(");
     int number = 0;
     for (ParameterInfo info : helper.getParameterInfos()) {
       if (info.passAsParameter()) number++;

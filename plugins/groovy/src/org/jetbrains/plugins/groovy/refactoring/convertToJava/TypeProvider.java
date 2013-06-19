@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ public class TypeProvider {
 
   @SuppressWarnings({"MethodMayBeStatic"})
   @NotNull
-  public PsiType getReturnType(PsiMethod method) {
+  public PsiType getReturnType(@NotNull PsiMethod method) {
     if (method instanceof GrMethod) {
       GrTypeElement typeElement = ((GrMethod)method).getReturnTypeElementGroovy();
       if (typeElement != null) return typeElement.getType();
@@ -63,8 +63,13 @@ public class TypeProvider {
 
   @SuppressWarnings({"MethodMayBeStatic"})
   @NotNull
-  public PsiType getVarType(PsiVariable variable) {
+  public PsiType getVarType(@NotNull PsiVariable variable) {
     if (variable instanceof PsiParameter) return getParameterType((PsiParameter)variable);
+    return getVariableTypeInner(variable);
+  }
+
+  @NotNull
+  private static PsiType getVariableTypeInner(@NotNull PsiVariable variable) {
     PsiType type = null;
     if (variable instanceof GrVariable) {
       type = ((GrVariable)variable).getDeclaredType();
@@ -79,7 +84,7 @@ public class TypeProvider {
   }
 
   @NotNull
-  public PsiType getParameterType(PsiParameter parameter) {
+  public PsiType getParameterType(@NotNull PsiParameter parameter) {
     if (!(parameter instanceof GrParameter)) {
       PsiElement scope = parameter.getDeclarationScope();
       if (scope instanceof GrAccessorMethod) {
@@ -87,13 +92,11 @@ public class TypeProvider {
       }
       return parameter.getType();
     }
-    /*GrTypeElement typeElementGroovy = ((GrParameter)parameter).getTypeElementGroovy();
-    if (typeElementGroovy != null) {
-      return parameter.getType();
-    }*/
 
     PsiElement parent = parameter.getParent();
-    if (!(parent instanceof GrParameterList)) return parameter.getType();
+    if (!(parent instanceof GrParameterList)) {
+      return getVariableTypeInner(parameter);
+    }
 
     PsiElement pparent = parent.getParent();
     if (!(pparent instanceof GrMethod)) return parameter.getType();
@@ -102,7 +105,8 @@ public class TypeProvider {
     return types[((GrParameterList)parent).getParameterNumber((GrParameter)parameter)];
   }
 
-  private PsiType[] inferMethodParameters(GrMethod method) {
+  @NotNull
+  private PsiType[] inferMethodParameters(@NotNull GrMethod method) {
     PsiType[] psiTypes = inferredTypes.get(method);
     if (psiTypes != null) return psiTypes;
 
@@ -148,7 +152,9 @@ public class TypeProvider {
     paramInds.forEach(new TIntProcedure() {
       @Override
       public boolean execute(int i) {
-        if (types[i]==null) types[i] = parameters[i].getType();
+        if (types[i] == null || types[i] == PsiType.NULL) {
+          types[i] = parameters[i].getType();
+        }
         return true;
       }
     });

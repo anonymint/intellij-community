@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,19 +25,32 @@ import org.jetbrains.annotations.Nullable;
 import java.awt.*;
 
 public class DialogWrapperPeerFactoryImpl extends DialogWrapperPeerFactory {
-  public DialogWrapperPeer createPeer(DialogWrapper wrapper, @Nullable Project project, boolean canBeParent) {
+  @Override
+  public DialogWrapperPeer createPeer(@NotNull DialogWrapper wrapper, @Nullable Project project, boolean canBeParent) {
     return new DialogWrapperPeerImpl(wrapper, project, canBeParent);
   }
 
-  public DialogWrapperPeer createPeer(DialogWrapper wrapper, boolean canBeParent) {
+  @Override
+  public DialogWrapperPeer createPeer(@NotNull DialogWrapper wrapper, boolean canBeParent) {
     return new DialogWrapperPeerImpl(wrapper, canBeParent);
   }
 
-  public DialogWrapperPeer createPeer(final DialogWrapper wrapper, final boolean canBeParent, final boolean tryToolkitModal) {
-    return new DialogWrapperPeerImpl(wrapper, canBeParent, tryToolkitModal);
+  /**
+   * {@inheritDoc}
+   */
+  @Deprecated
+  @Override
+  public DialogWrapperPeer createPeer(@NotNull final DialogWrapper wrapper, final boolean canBeParent, final boolean applicationModalIfPossible) {
+    return new DialogWrapperPeerImpl(wrapper, null, canBeParent, applicationModalIfPossible);
   }
 
-  public DialogWrapperPeer createPeer(DialogWrapper wrapper, @NotNull Component parent, boolean canBeParent) {
+  @Override
+  public DialogWrapperPeer createPeer(@NotNull final DialogWrapper wrapper, final Window owner, final boolean canBeParent, final boolean applicationModalIfPossible) {
+    return new DialogWrapperPeerImpl(wrapper, owner, canBeParent, applicationModalIfPossible);
+  }
+
+  @Override
+  public DialogWrapperPeer createPeer(@NotNull DialogWrapper wrapper, @NotNull Component parent, boolean canBeParent) {
     return new DialogWrapperPeerImpl(wrapper, parent, canBeParent);
   }
 }

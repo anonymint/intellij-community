@@ -28,11 +28,13 @@ public class IntroduceVariableAction extends BasePlatformRefactoringAction {
     setInjectedContext(true);
   }
 
+  @Override
   protected boolean isAvailableInEditorOnly() {
     return true;
   }
 
-  protected boolean isEnabledOnElements(PsiElement[] elements) {
+  @Override
+  protected boolean isEnabledOnElements(@NotNull PsiElement[] elements) {
     return false;
   }
 

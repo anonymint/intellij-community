@@ -17,8 +17,8 @@
 package com.intellij.codeInspection.uncheckedWarnings;
 
 import com.intellij.codeInsight.daemon.JavaErrorMessages;
-import com.intellij.codeInsight.daemon.impl.analysis.GenericsHighlightUtil;
-import com.intellij.codeInsight.daemon.impl.analysis.HighlightUtil;
+import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
+import com.intellij.codeInsight.daemon.impl.analysis.JavaHighlightUtil;
 import com.intellij.codeInsight.daemon.impl.quickfix.GenerifyFileFix;
 import com.intellij.codeInsight.daemon.impl.quickfix.VariableArrayTypeFix;
 import com.intellij.codeInsight.intention.IntentionAction;
@@ -63,22 +63,26 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
   public boolean IGNORE_UNCHECKED_CAST = false;
   public boolean IGNORE_UNCHECKED_OVERRIDING = false;
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return "";
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return DISPLAY_NAME;
   }
 
+  @Override
   @NotNull
   @NonNls
   public String getShortName() {
     return SHORT_NAME;
   }
 
+  @Override
   @Pattern(VALID_ID_PATTERN)
   @NotNull
   @NonNls
@@ -86,12 +90,13 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
     return ID;
   }
 
+  @Override
   public boolean isEnabledByDefault() {
     return true;
   }
 
   @Override
-  public void writeSettings(Element node) throws WriteExternalException {
+  public void writeSettings(@NotNull Element node) throws WriteExternalException {
     if (IGNORE_UNCHECKED_ASSIGNMENT ||
         IGNORE_UNCHECKED_CALL ||
         IGNORE_UNCHECKED_CAST ||
@@ -172,7 +177,7 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
     };
   }
 
-  public abstract class UncheckedWarningsVisitor extends JavaElementVisitor {
+  private abstract class UncheckedWarningsVisitor extends JavaElementVisitor {
     private final boolean myOnTheFly;
     private final LocalQuickFix[] myGenerifyFixes;
 
@@ -189,7 +194,7 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       if (IGNORE_UNCHECKED_GENERICS_ARRAY_CREATION) return;
       if (!PsiUtil.isLanguageLevel5OrHigher(expression)) return;
       final JavaResolveResult result = expression.advancedResolve(false);
-      if (GenericsHighlightUtil.isUncheckedWarning(expression, result)) {
+      if (JavaGenericsUtil.isUncheckedWarning(expression, result)) {
         registerProblem("Unchecked generics array creation for varargs parameter", expression, LocalQuickFix.EMPTY_ARRAY);
       }
     }
@@ -200,7 +205,7 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       if (IGNORE_UNCHECKED_GENERICS_ARRAY_CREATION) return;
       if (!PsiUtil.isLanguageLevel5OrHigher(expression)) return;
       final PsiJavaCodeReferenceElement classReference = expression.getClassOrAnonymousClassReference();
-      if (GenericsHighlightUtil.isUncheckedWarning(classReference, expression.resolveMethodGenerics())) {
+      if (JavaGenericsUtil.isUncheckedWarning(classReference, expression.resolveMethodGenerics())) {
         registerProblem("Unchecked generics array creation for varargs parameter", classReference, LocalQuickFix.EMPTY_ARRAY);
       }
     }
@@ -218,9 +223,10 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       final PsiType exprType = operand.getType();
       if (exprType == null) return;
       if (!TypeConversionUtil.areTypesConvertible(exprType, castType)) return;
-      if (GenericsHighlightUtil.isUncheckedCast(castType, exprType)) {
+      if (JavaGenericsUtil.isUncheckedCast(castType, exprType)) {
         final String description =
-          JavaErrorMessages.message("generics.unchecked.cast", HighlightUtil.formatType(exprType), HighlightUtil.formatType(castType));
+          JavaErrorMessages.message("generics.unchecked.cast", JavaHighlightUtil.formatType(exprType), JavaHighlightUtil
+            .formatType(castType));
         registerProblem(description, expression, myGenerifyFixes);
       }
     }
@@ -271,7 +277,7 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       PsiExpression initializer = variable.getInitializer();
       if (initializer == null || initializer instanceof PsiArrayInitializerExpression) return;
       final PsiType initializerType = initializer.getType();
-      checkRawToGenericsAssignment(initializer, variable.getType(), initializerType, true, 
+      checkRawToGenericsAssignment(initializer, variable.getType(), initializerType, true,
                                    myOnTheFly ? getChangeVariableTypeFixes(variable, initializerType) : LocalQuickFix.EMPTY_ARRAY);
     }
 
@@ -284,7 +290,7 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       final PsiType parameterType = parameter.getType();
       final PsiExpression iteratedValue = statement.getIteratedValue();
       if (iteratedValue == null) return;
-      final PsiType itemType = GenericsHighlightUtil.getCollectionItemType(iteratedValue);
+      final PsiType itemType = JavaGenericsUtil.getCollectionItemType(iteratedValue);
       if (!PsiUtil.isLanguageLevel5OrHigher(statement)) return;
       checkRawToGenericsAssignment(parameter, parameterType, itemType, true, myOnTheFly ? getChangeVariableTypeFixes(parameter, itemType) : LocalQuickFix.EMPTY_ARRAY);
     }
@@ -330,12 +336,12 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
 
         if (itemType == null) continue;
         if (!TypeConversionUtil.isAssignable(componentType, itemType)) continue;
-        if (GenericsHighlightUtil.isRawToGeneric(componentType, itemType)) {
+        if (JavaGenericsUtil.isRawToGeneric(componentType, itemType)) {
           String description = JavaErrorMessages.message("generics.unchecked.assignment",
-                                                         HighlightUtil.formatType(itemType),
-                                                         HighlightUtil.formatType(componentType));
+                                                         JavaHighlightUtil.formatType(itemType),
+                                                         JavaHighlightUtil.formatType(componentType));
           if (!arrayTypeFixChecked) {
-            final PsiType checkResult = HighlightUtil.sameType(initializers);
+            final PsiType checkResult = JavaHighlightUtil.sameType(initializers);
             fix = checkResult != null ? new VariableArrayTypeFix(arrayInitializer, checkResult) : null;
             arrayTypeFixChecked = true;
           }
@@ -354,10 +360,10 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
                                               @NotNull LocalQuickFix[] quickFixes) {
       if (parameterType == null || itemType == null) return;
       if (checkAssignability && !TypeConversionUtil.isAssignable(parameterType, itemType)) return;
-      if (GenericsHighlightUtil.isRawToGeneric(parameterType, itemType)) {
+      if (JavaGenericsUtil.isRawToGeneric(parameterType, itemType)) {
         String description = JavaErrorMessages.message("generics.unchecked.assignment",
-                                                       HighlightUtil.formatType(itemType),
-                                                       HighlightUtil.formatType(parameterType));
+                                                       JavaHighlightUtil.formatType(itemType),
+                                                       JavaHighlightUtil.formatType(parameterType));
         registerProblem(description, parameter, quickFixes);
       }
     }
@@ -379,10 +385,10 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
             final PsiType baseReturnType = substitutor.substitute(baseMethod.getReturnType());
             final PsiType overriderReturnType = method.getReturnType();
             if (baseReturnType == null || overriderReturnType == null) return;
-            if (GenericsHighlightUtil.isRawToGeneric(baseReturnType, overriderReturnType)) {
+            if (JavaGenericsUtil.isRawToGeneric(baseReturnType, overriderReturnType)) {
               final String message = JavaErrorMessages.message("unchecked.overriding.incompatible.return.type",
-                                                               HighlightUtil.formatType(overriderReturnType),
-                                                               HighlightUtil.formatType(baseReturnType));
+                                                               JavaHighlightUtil.formatType(overriderReturnType),
+                                                               JavaHighlightUtil.formatType(baseReturnType));
 
               final PsiTypeElement returnTypeElement = method.getReturnTypeElement();
               LOG.assertTrue(returnTypeElement != null);
@@ -426,17 +432,21 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
       for (final PsiParameter parameter : parameters) {
         final PsiType parameterType = parameter.getType();
         if (parameterType.accept(new PsiTypeVisitor<Boolean>() {
+          @Override
           public Boolean visitPrimitiveType(PsiPrimitiveType primitiveType) {
             return Boolean.FALSE;
           }
 
+          @Override
           public Boolean visitArrayType(PsiArrayType arrayType) {
             return arrayType.getComponentType().accept(this);
           }
 
+          @Override
           public Boolean visitClassType(PsiClassType classType) {
             PsiClass psiClass = classType.resolve();
             if (psiClass instanceof PsiTypeParameter) {
+              if (((PsiTypeParameter)psiClass).getOwner() == method) return Boolean.FALSE;
               return substitutor.substitute((PsiTypeParameter)psiClass) == null ? Boolean.TRUE : Boolean.FALSE;
             }
             PsiType[] parameters = classType.getParameters();
@@ -446,12 +456,14 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
             return Boolean.FALSE;
           }
 
+          @Override
           public Boolean visitWildcardType(PsiWildcardType wildcardType) {
             PsiType bound = wildcardType.getBound();
             if (bound != null) return bound.accept(this);
             return Boolean.TRUE;
           }
 
+          @Override
           public Boolean visitEllipsisType(PsiEllipsisType ellipsisType) {
             return ellipsisType.getComponentType().accept(this);
           }
@@ -459,8 +471,8 @@ public class UncheckedWarningLocalInspection extends BaseJavaLocalInspectionTool
           final PsiElementFactory elementFactory = JavaPsiFacade.getInstance(method.getProject()).getElementFactory();
           PsiType type = elementFactory.createType(method.getContainingClass(), substitutor);
           return JavaErrorMessages.message("generics.unchecked.call.to.member.of.raw.type",
-                                                         HighlightUtil.formatMethod(method),
-                                                         HighlightUtil.formatType(type));
+                                                         JavaHighlightUtil.formatMethod(method),
+                                                         JavaHighlightUtil.formatType(type));
         }
       }
       return null;

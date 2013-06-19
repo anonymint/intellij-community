@@ -28,7 +28,6 @@ import com.intellij.openapi.ui.Queryable;
 import com.intellij.openapi.ui.TypingTarget;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.ui.components.Magnificator;
-import com.intellij.util.Consumer;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -148,15 +147,9 @@ public class EditorComponentImpl extends JComponent implements Scrollable, DataP
     myApplication.editorPaintStart();
 
     try {
-      UIUtil.paintWithRetina(getSize(), g, myEditor.paintBlockCaret(), new Consumer<Graphics2D>() {
-        @Override
-        public void consume(Graphics2D graphics) {
-          UIUtil.setupComposite(graphics);
-
-          UISettings.setupAntialiasing(graphics);
-          myEditor.paint(graphics);
-        }
-      });
+      UIUtil.setupComposite((Graphics2D)g);
+      UISettings.setupAntialiasing(g);
+      myEditor.paint((Graphics2D)g);
     }
     finally {
       myApplication.editorPaintFinish();

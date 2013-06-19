@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,16 @@ import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.reference.RefElement;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.reference.RefManagerImpl;
+import com.intellij.codeInspection.ui.InspectionNode;
 import com.intellij.codeInspection.ui.InspectionResultsView;
 import com.intellij.codeInspection.ui.InspectionTreeNode;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NotNullLazyValue;
+import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
 import com.intellij.util.TripleFunction;
 import com.intellij.util.containers.HashSet;
@@ -47,11 +50,12 @@ public class LocalInspectionToolWrapper extends InspectionToolWrapper<LocalInspe
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.ex.LocalInspectionToolWrapper");
 
   /** This should be used in tests primarily */
+  @TestOnly
   public LocalInspectionToolWrapper(@NotNull LocalInspectionTool tool) {
     super(tool, ourEPMap.getValue().get(tool.getShortName()));
   }
 
-  public LocalInspectionToolWrapper(LocalInspectionEP ep) {
+  public LocalInspectionToolWrapper(@NotNull LocalInspectionEP ep) {
     super(ep);
   }
 
@@ -60,129 +64,118 @@ public class LocalInspectionToolWrapper extends InspectionToolWrapper<LocalInspe
     super(tool, ep);
   }
 
-  private LocalInspectionToolWrapper(LocalInspectionToolWrapper other) {
+  private LocalInspectionToolWrapper(@NotNull LocalInspectionToolWrapper other) {
     super(other);
   }
 
+  @NotNull
   @Override
   public LocalInspectionToolWrapper createCopy() {
     return new LocalInspectionToolWrapper(this);
   }
 
-  public void processFile(PsiFile file, final boolean filterSuppressed, final InspectionManager manager) {
-    processFile(file, filterSuppressed, manager, false);
+  public void processFile(@NotNull PsiFile file, final boolean filterSuppressed, @NotNull InspectionManager manager) {
+    List<ProblemDescriptor> results = getTool().processFile(file, manager);
+    addProblemDescriptors(results, this, filterSuppressed, getContext(), getTool());
   }
 
-  public void processFile(final PsiFile file, final boolean filterSuppressed, final InspectionManager manager, final boolean isOnTheFly) {
-    final ProblemsHolder holder = new ProblemsHolder(manager, file, isOnTheFly);
-    LocalInspectionToolSession session = new LocalInspectionToolSession(file, 0, file.getTextLength());
-    final PsiElementVisitor customVisitor = getTool().buildVisitor(holder, isOnTheFly, session);
-    LOG.assertTrue(!(customVisitor instanceof PsiRecursiveElementVisitor), "The visitor returned from LocalInspectionTool.buildVisitor() must not be recursive");
-
-    getTool().inspectionStarted(session, isOnTheFly);
-
-    file.accept(new PsiRecursiveElementWalkingVisitor() {
-      @Override public void visitElement(PsiElement element) {
-        element.accept(customVisitor);
-        super.visitElement(element);
-      }
-    });
-
-    getTool().inspectionFinished(session, holder);
-
-    addProblemDescriptors(holder.getResults(), filterSuppressed);
-  }
-
+  @Override
   @NotNull
-  public JobDescriptor[] getJobDescriptors(GlobalInspectionContext context) {
-    return ((GlobalInspectionContextImpl)context).LOCAL_ANALYSIS_ARRAY;
+  public JobDescriptor[] getJobDescriptors(@NotNull GlobalInspectionContext context) {
+    return context.getStdJobDescriptors().LOCAL_ANALYSIS_ARRAY;
   }
 
-  public void addProblemDescriptors(List<ProblemDescriptor> descriptors, final boolean filterSuppressed) {
-    final GlobalInspectionContextImpl context = getContext();
-    if (context != null) { //can be already closed
-      addProblemDescriptors(descriptors, filterSuppressed, context, getTool(), CONVERT, this);
-    }
+  public static void addProblemDescriptors(@NotNull List<ProblemDescriptor> descriptors,
+                                           @NotNull DescriptorProviderInspection dpi,
+                                           boolean filterSuppressed,
+                                           @NotNull GlobalInspectionContext inspectionContext,
+                                           @NotNull LocalInspectionTool tool) {
+    addProblemDescriptors(descriptors, filterSuppressed, inspectionContext, tool, CONVERT, dpi);
   }
+
   private static final TripleFunction<LocalInspectionTool, PsiElement, GlobalInspectionContext,RefElement> CONVERT = new TripleFunction<LocalInspectionTool, PsiElement, GlobalInspectionContext,RefElement>() {
     @Override
-    public RefElement fun(LocalInspectionTool tool, PsiElement elt, GlobalInspectionContext context) {
-      final PsiNamedElement problemElement = tool.getProblemElement(elt);
+    public RefElement fun(LocalInspectionTool tool, PsiElement element, GlobalInspectionContext context) {
+      final PsiNamedElement problemElement = tool.getProblemElement(element);
 
       RefElement refElement = context.getRefManager().getReference(problemElement);
       if (refElement == null && problemElement != null) {  // no need to lose collected results
-        refElement = GlobalInspectionUtil.retrieveRefElement(elt, context);
+        refElement = GlobalInspectionUtil.retrieveRefElement(element, context);
       }
       return refElement;
     }
   };
 
   @Override
-  protected void addProblemElement(RefEntity refElement, boolean filterSuppressed, CommonProblemDescriptor... descriptions) {
+  protected void addProblemElement(RefEntity refElement, boolean filterSuppressed, @NotNull CommonProblemDescriptor... descriptions) {
     final GlobalInspectionContextImpl context = getContext();
     if (context == null) return;
     super.addProblemElement(refElement, filterSuppressed, descriptions);
     final InspectionResultsView view = context.getView();
-    if (view != null && refElement instanceof RefElement) {
-      if (myToolNode == null) {
-        final HighlightSeverity currentSeverity = getCurrentSeverity((RefElement)refElement);
-        view.addTool(this, HighlightDisplayLevel.find(currentSeverity), context.getUIOptions().GROUP_BY_SEVERITY);
-      }  else if (myToolNode.getProblemCount() > 1000) {
-        return;
-      }
-      final HashMap<RefEntity, CommonProblemDescriptor[]> problems = new HashMap<RefEntity, CommonProblemDescriptor[]>();
-      problems.put(refElement, descriptions);
-      final HashMap<String, Set<RefEntity>> contents = new HashMap<String, Set<RefEntity>>();
-      final String groupName = refElement.getRefManager().getGroupName((RefElement)refElement);
-      Set<RefEntity> content = contents.get(groupName);
-      if (content == null) {
-        content = new HashSet<RefEntity>();
-        contents.put(groupName, content);
-      }
-      content.add(refElement);
-
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        public void run() {
-          final GlobalInspectionContextImpl context = getContext();
-          if (context != null) {
-            view.getProvider().appendToolNodeContent(myToolNode,
-                                                     (InspectionTreeNode)myToolNode.getParent(), context.getUIOptions().SHOW_STRUCTURE,
-                                                     contents, problems, (DefaultTreeModel)view.getTree().getModel());
-            context.addView(view);
-          }
-        }
-      });
+    if (view == null || !(refElement instanceof RefElement)) {
+      return;
     }
+    final InspectionNode toolNode = myToolNode;
+    if (toolNode == null) {
+      final HighlightSeverity currentSeverity = getCurrentSeverity((RefElement)refElement);
+      view.addTool(this, HighlightDisplayLevel.find(currentSeverity), context.getUIOptions().GROUP_BY_SEVERITY);
+    }
+    else if (toolNode.isTooBigForOnlineRefresh()) {
+      return;
+    }
+    final HashMap<RefEntity, CommonProblemDescriptor[]> problems = new HashMap<RefEntity, CommonProblemDescriptor[]>();
+    problems.put(refElement, descriptions);
+    final HashMap<String, Set<RefEntity>> contents = new HashMap<String, Set<RefEntity>>();
+    final String groupName = refElement.getRefManager().getGroupName((RefElement)refElement);
+    Set<RefEntity> content = contents.get(groupName);
+    if (content == null) {
+      content = new HashSet<RefEntity>();
+      contents.put(groupName, content);
+    }
+    content.add(refElement);
+
+    UIUtil.invokeLaterIfNeeded(new Runnable() {
+      @Override
+      public void run() {
+        final GlobalInspectionContextImpl context = getContext();
+        if (context != null) {
+          view.getProvider().appendToolNodeContent(myToolNode,
+                                                   (InspectionTreeNode)myToolNode.getParent(), context.getUIOptions().SHOW_STRUCTURE,
+                                                   contents, problems, (DefaultTreeModel)view.getTree().getModel());
+          context.addView(view);
+        }
+      }
+    });
   }
 
-  public static void addProblemDescriptors(List<ProblemDescriptor> descriptors,
-                                           boolean filterSuppressed,
-                                           @NotNull GlobalInspectionContextImpl context,
-                                           LocalInspectionTool tool,
-                                           @NotNull TripleFunction<LocalInspectionTool, PsiElement, GlobalInspectionContext, RefElement> getProblemElementFunction,
-                                           @NotNull DescriptorProviderInspection dpi) {
-    if (descriptors == null || descriptors.isEmpty()) return;
+  static void addProblemDescriptors(@NotNull List<ProblemDescriptor> descriptors,
+                                    boolean filterSuppressed,
+                                    @NotNull GlobalInspectionContext context,
+                                    @Nullable LocalInspectionTool tool,
+                                    @NotNull TripleFunction<LocalInspectionTool, PsiElement, GlobalInspectionContext, RefElement> getProblemElementFunction,
+                                    @NotNull DescriptorProviderInspection dpi) {
+    if (descriptors.isEmpty()) return;
 
     Map<RefElement, List<ProblemDescriptor>> problems = new HashMap<RefElement, List<ProblemDescriptor>>();
     final RefManagerImpl refManager = (RefManagerImpl)context.getRefManager();
     for (ProblemDescriptor descriptor : descriptors) {
-      final PsiElement elt = descriptor.getPsiElement();
-      if (elt == null) continue;
+      final PsiElement element = descriptor.getPsiElement();
+      if (element == null) continue;
       if (filterSuppressed) {
         String alternativeId;
         String id;
         if (refManager.isDeclarationsFound() &&
-            (context.isSuppressed(elt, id = tool.getID()) ||
+            (context.isSuppressed(element, id = tool.getID()) ||
              (alternativeId = tool.getAlternativeID()) != null &&
              !alternativeId.equals(id) &&
-             context.isSuppressed(elt, alternativeId))) {
+             context.isSuppressed(element, alternativeId))) {
           continue;
         }
-        if (InspectionManagerEx.inspectionResultSuppressed(elt, tool)) continue;
+        if (InspectionManagerEx.inspectionResultSuppressed(element, tool)) continue;
       }
 
 
-      RefElement refElement = getProblemElementFunction.fun(tool, elt, context);
+      RefElement refElement = getProblemElementFunction.fun(tool, element, context);
 
       List<ProblemDescriptor> elementProblems = problems.get(refElement);
       if (elementProblems == null) {
@@ -194,12 +187,13 @@ public class LocalInspectionToolWrapper extends InspectionToolWrapper<LocalInspe
 
     for (Map.Entry<RefElement, List<ProblemDescriptor>> entry : problems.entrySet()) {
       final List<ProblemDescriptor> problemDescriptors = entry.getValue();
-      dpi.addProblemElement(entry.getKey(),
-                            filterSuppressed,
-                            problemDescriptors.toArray(new CommonProblemDescriptor[problemDescriptors.size()]));
+      RefElement refElement = entry.getKey();
+      CommonProblemDescriptor[] descriptions = problemDescriptors.toArray(new CommonProblemDescriptor[problemDescriptors.size()]);
+      dpi.addProblemElement(refElement, filterSuppressed, descriptions);
     }
   }
 
+  @Override
   public void runInspection(@NotNull AnalysisScope scope, @NotNull final InspectionManager manager) {
     LOG.assertTrue(ApplicationManager.getApplication().isUnitTestMode());
     scope.accept(new PsiRecursiveElementVisitor() {
@@ -226,7 +220,7 @@ public class LocalInspectionToolWrapper extends InspectionToolWrapper<LocalInspe
     return myEP == null ? getTool().runForWholeFile() : myEP.runForWholeFile;
   }
 
-  private final static NotNullLazyValue<Map<String, LocalInspectionEP>> ourEPMap = new NotNullLazyValue<Map<String, LocalInspectionEP>>() {
+  private static final NotNullLazyValue<Map<String, LocalInspectionEP>> ourEPMap = new NotNullLazyValue<Map<String, LocalInspectionEP>>() {
     @NotNull
     @Override
     protected Map<String, LocalInspectionEP> compute() {
@@ -237,4 +231,20 @@ public class LocalInspectionToolWrapper extends InspectionToolWrapper<LocalInspe
       return map;
     }
   };
+
+  public static InspectionToolWrapper findTool2RunInBatch(@NotNull Project project, @Nullable PsiElement element, @NotNull String name) {
+    final InspectionProfile inspectionProfile = InspectionProjectProfileManager.getInstance(project).getInspectionProfile();
+    final InspectionToolWrapper tool = element != null ? (InspectionToolWrapper)inspectionProfile.getInspectionTool(name, element) : (InspectionToolWrapper)inspectionProfile.getInspectionTool(name);
+    if (tool instanceof LocalInspectionToolWrapper && ((LocalInspectionToolWrapper)tool).isUnfair()) {
+      final LocalInspectionTool inspectionTool = ((LocalInspectionToolWrapper)tool).getTool();
+      if (inspectionTool instanceof PairedUnfairLocalInspectionTool) {
+        final String oppositeShortName = ((PairedUnfairLocalInspectionTool)inspectionTool).getInspectionForBatchShortName();
+        if (oppositeShortName != null) {
+          return element != null ? (InspectionToolWrapper)inspectionProfile.getInspectionTool(oppositeShortName, element) : (InspectionToolWrapper)inspectionProfile.getInspectionTool(oppositeShortName);
+        }
+      }
+      return null;
+    }
+    return tool;
+  }
 }

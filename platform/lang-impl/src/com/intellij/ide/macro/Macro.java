@@ -38,6 +38,11 @@ public abstract class Macro {
   @Nullable
   public abstract String expand(DataContext dataContext) throws ExecutionCancelledException;
 
+  @Nullable
+  public String expand(DataContext dataContext, String... args) throws ExecutionCancelledException{
+    return expand(dataContext);
+  }
+
   public void cachePreview(DataContext dataContext) {
     try{
       myCachedPreview = expand(dataContext);
@@ -80,14 +85,17 @@ public abstract class Macro {
       myValue = value;
     }
 
+    @Override
     public String expand(DataContext dataContext) throws ExecutionCancelledException {
       return myValue;
     }
 
+    @Override
     public String getDescription() {
       return myDelegate.getDescription();
     }
 
+    @Override
     public String getName() {
       return myDelegate.getName();
     }

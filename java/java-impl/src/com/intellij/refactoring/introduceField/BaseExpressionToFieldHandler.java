@@ -44,7 +44,6 @@ import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Pass;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.psi.*;
@@ -55,7 +54,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiElementProcessor;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.psi.util.PsiUtilBase;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.IntroduceHandlerBase;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.introduce.inplace.AbstractInplaceIntroducer;
@@ -63,6 +62,7 @@ import com.intellij.refactoring.introduceVariable.IntroduceVariableBase;
 import com.intellij.refactoring.rename.RenameJavaVariableProcessor;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.EnumConstantsUtil;
+import com.intellij.refactoring.util.RefactoringChangeUtil;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.refactoring.util.occurrences.OccurrenceManager;
 import com.intellij.util.IncorrectOperationException;
@@ -374,7 +374,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
         PsiStatement assignment = createAssignment(field, initializerExpression, body.getLastChild(), parentClass);
         assignment = (PsiStatement) body.add(assignment);
         ChangeContextUtil.decodeContextInfo(assignment, field.getContainingClass(),
-                                            RefactoringUtil.createThisExpression(field.getManager(), null));
+                                            RefactoringChangeUtil.createThisExpression(field.getManager(), null));
         added = true;
       }
       if (!added && enclosingConstructor == null) {
@@ -384,7 +384,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
         PsiStatement assignment = createAssignment(field, initializerExpression, body.getLastChild(), parentClass);
         assignment = (PsiStatement) body.add(assignment);
         ChangeContextUtil.decodeContextInfo(assignment, field.getContainingClass(),
-                                            RefactoringUtil.createThisExpression(field.getManager(), null));
+                                            RefactoringChangeUtil.createThisExpression(field.getManager(), null));
       }
     }
     catch (IncorrectOperationException e) {
@@ -445,10 +445,16 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
       return null;
     }
   }
-  
 
-  protected Pass<ElementToWorkOn> getElementProcessor(final Project project, final Editor editor) {
-    return new Pass<ElementToWorkOn>() {
+  protected abstract boolean accept(ElementToWorkOn elementToWorkOn);
+
+  protected ElementToWorkOn.ElementsProcessor<ElementToWorkOn> getElementProcessor(final Project project, final Editor editor) {
+    return new ElementToWorkOn.ElementsProcessor<ElementToWorkOn>() {
+      @Override
+      public boolean accept(ElementToWorkOn el) {
+        return BaseExpressionToFieldHandler.this.accept(el);
+      }
+
       @Override
       public void pass(final ElementToWorkOn elementToWorkOn) {
         if (elementToWorkOn == null) return;
@@ -702,7 +708,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
         }
 
         initializer = IntroduceVariableBase.replaceExplicitWithDiamondWhenApplicable(initializer, myType);
-        
+
         final PsiMethod enclosingConstructor = getEnclosingConstructor(myParentClass, myAnchorElement);
         PsiClass destClass = mySettings.getDestinationClass() == null ? myParentClass : mySettings.getDestinationClass();
 
@@ -813,7 +819,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
 
           if (myEditor != null) {
             if (!ApplicationManager.getApplication().isUnitTestMode()) {
-              PsiElement[] exprsToHighlight = PsiUtilBase.toPsiElementArray(array);
+              PsiElement[] exprsToHighlight = PsiUtilCore.toPsiElementArray(array);
               HighlightManager highlightManager = HighlightManager.getInstance(myProject);
               highlightManager.addOccurrenceHighlights(myEditor, exprsToHighlight, highlightAttributes(), true, null);
               WindowManager
@@ -856,7 +862,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
       }
       return true;
     }
-    
+
     static PsiField appendField(final PsiExpression initializer,
                                 InitializationPlace initializerPlace, final PsiClass destClass,
                                 final PsiClass parentClass,
@@ -872,13 +878,13 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
                                        final PsiField forwardReference) {
       final PsiClass parentClass = PsiTreeUtil.getParentOfType(anchorMember, PsiClass.class);
 
-      if (anchorMember instanceof PsiField && 
+      if (anchorMember instanceof PsiField &&
           anchorMember.getParent() == parentClass &&
           destClass == parentClass &&
           ((PsiField)anchorMember).hasModifierProperty(PsiModifier.STATIC) == psiField.hasModifierProperty(PsiModifier.STATIC)) {
         return (PsiField)destClass.addBefore(psiField, anchorMember);
       }
-      else if (anchorMember instanceof PsiClassInitializer && 
+      else if (anchorMember instanceof PsiClassInitializer &&
                anchorMember.getParent() == parentClass &&
                destClass == parentClass) {
         PsiField field = (PsiField)destClass.addBefore(psiField, anchorMember);

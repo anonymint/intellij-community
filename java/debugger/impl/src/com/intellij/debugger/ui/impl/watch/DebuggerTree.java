@@ -31,12 +31,14 @@ import com.intellij.debugger.engine.events.DebuggerContextCommandImpl;
 import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerSession;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.jdi.LocalVariableProxyImpl;
 import com.intellij.debugger.jdi.StackFrameProxyImpl;
 import com.intellij.debugger.jdi.ThreadGroupReferenceProxyImpl;
 import com.intellij.debugger.jdi.ThreadReferenceProxyImpl;
 import com.intellij.debugger.settings.NodeRendererSettings;
 import com.intellij.debugger.settings.ThreadsViewSettings;
+import com.intellij.debugger.ui.breakpoints.Breakpoint;
 import com.intellij.debugger.ui.impl.DebuggerTreeBase;
 import com.intellij.debugger.ui.impl.tree.TreeBuilder;
 import com.intellij.debugger.ui.impl.tree.TreeBuilderNode;
@@ -56,6 +58,8 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.SpeedSearchComparator;
 import com.intellij.ui.TreeSpeedSearch;
 import com.sun.jdi.*;
+import com.sun.jdi.event.Event;
+import com.sun.jdi.event.ExceptionEvent;
 
 import javax.swing.*;
 import javax.swing.event.TreeModelEvent;
@@ -312,14 +316,17 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
   protected abstract void build(DebuggerContextImpl context);
 
   protected final void buildWhenPaused(DebuggerContextImpl context, RefreshDebuggerTreeCommand command) {
-    DebuggerSession debuggerSession = context.getDebuggerSession();
+    DebuggerSession session = context.getDebuggerSession();
 
-    if (ApplicationManager.getApplication().isUnitTestMode() || debuggerSession.getState() == DebuggerSession.STATE_PAUSED) {
+    if (ApplicationManager.getApplication().isUnitTestMode() || (session != null && session.getState() == DebuggerSession.STATE_PAUSED)) {
       showMessage(MessageDescriptor.EVALUATING);
       context.getDebugProcess().getManagerThread().schedule(command);
     }
     else {
-      showMessage(context.getDebuggerSession().getStateDescription());
+      showMessage(session != null? session.getStateDescription() : DebuggerBundle.message("status.debug.stopped"));
+      if (session == null || session.isStopped()) {
+        getNodeFactory().clearHistory(); // save memory by clearing references on JDI objects
+      }
     }
   }
 
@@ -482,6 +489,19 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
           final DebuggerTreeNodeImpl methodReturnValueNode = myNodeManager.createNode(returnValueDescriptor, evaluationContext);
           myChildren.add(1, methodReturnValueNode);
         }
+        // add context exceptions
+        for (Pair<Breakpoint, Event> pair : DebuggerUtilsEx.getEventDescriptors(getSuspendContext())) {
+          final Event debugEvent = pair.getSecond();
+          if (debugEvent instanceof ExceptionEvent) {
+            final ObjectReference exception = ((ExceptionEvent)debugEvent).exception();
+            if (exception != null) {
+              final ValueDescriptorImpl exceptionDescriptor = myNodeManager.getThrownExceptionObjectDescriptor(stackDescriptor, exception);
+              final DebuggerTreeNodeImpl exceptionNode = myNodeManager.createNode(exceptionDescriptor, evaluationContext);
+              myChildren.add(1, exceptionNode);
+            }
+          }
+        }
+
       }
       catch (EvaluateException e) {
         myChildren.clear();
@@ -523,16 +543,24 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
     }
 
     public void threadAction() {
-      ValueDescriptorImpl descriptor = (ValueDescriptorImpl)getNode().getDescriptor();
+      final DebuggerTreeNodeImpl node = getNode();
+      ValueDescriptorImpl descriptor = (ValueDescriptorImpl)node.getDescriptor();
       try {
         final NodeRenderer renderer = descriptor.getRenderer(getSuspendContext().getDebugProcess());
         renderer.buildChildren(descriptor.getValue(), this, getDebuggerContext().createEvaluationContext());
       }
       catch (ObjectCollectedException e) {
-        getNode().removeAllChildren();
-        getNode().add(getNodeFactory().createMessageNode(
-          new MessageDescriptor(DebuggerBundle.message("error.cannot.build.node.children.object.collected", e.getMessage()))));
-        getNode().childrenChanged(false);
+        final String message = e.getMessage();
+        DebuggerInvocationUtil.swingInvokeLater(getProject(), new Runnable() {
+          @Override
+          public void run() {
+            node.removeAllChildren();
+            node.add(getNodeFactory().createMessageNode(
+              new MessageDescriptor(DebuggerBundle.message("error.cannot.build.node.children.object.collected", message)))
+            );
+            node.childrenChanged(false);
+          }
+        });
       }
     }
 
@@ -635,7 +663,7 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
 
       final DebuggerContextImpl debuggerContext = getDebuggerContext();
       final SuspendContextImpl suspendContext = debuggerContext.getSuspendContext();
-      final EvaluationContextImpl evaluationContext = suspendContext != null? debuggerContext.createEvaluationContext() : null;
+      final EvaluationContextImpl evaluationContext = suspendContext != null && !suspendContext.isResumed()? debuggerContext.createEvaluationContext() : null;
 
       boolean showCurrent = ThreadsViewSettings.getInstance().SHOW_CURRENT_THREAD;
 

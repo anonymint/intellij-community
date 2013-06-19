@@ -18,6 +18,7 @@ package com.intellij.util.xmlb;
 
 import com.intellij.openapi.util.JDOMUtil;
 import org.jdom.Text;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 class PrimitiveValueBinding implements Binding {
@@ -28,12 +29,14 @@ class PrimitiveValueBinding implements Binding {
     this.myType = myType;
   }
 
+  @Override
   public Object serialize(Object o, Object context, SerializationFilter filter) {
     return new Text(String.valueOf(o));
   }
 
+  @Override
   @Nullable
-  public Object deserialize(Object o, Object... nodes) {
+  public Object deserialize(Object o, @NotNull Object... nodes) {
     assert nodes != null;
 
     if (nodes.length == 0) {
@@ -57,14 +60,17 @@ class PrimitiveValueBinding implements Binding {
     return XmlSerializerImpl.convert(value, myType);
   }
 
+  @Override
   public boolean isBoundTo(Object node) {
     throw new UnsupportedOperationException("Method isBoundTo is not supported in " + getClass());
   }
 
+  @Override
   public Class getBoundNodeType() {
     return Text.class;
   }
 
+  @Override
   public void init() {
   }
 }

@@ -19,12 +19,10 @@ package com.intellij.codeInspection.ui.actions;
 import com.intellij.codeEditor.printing.ExportToHTMLSettings;
 import com.intellij.codeInspection.InspectionApplication;
 import com.intellij.codeInspection.InspectionsBundle;
-import com.intellij.codeInspection.ex.GlobalInspectionContextImpl;
-import com.intellij.codeInspection.ex.InspectionTool;
-import com.intellij.codeInspection.ex.ScopeToolState;
-import com.intellij.codeInspection.ex.Tools;
+import com.intellij.codeInspection.ex.*;
 import com.intellij.codeInspection.export.ExportToHTMLDialog;
 import com.intellij.codeInspection.export.HTMLExportFrameMaker;
+import com.intellij.codeInspection.export.HTMLExportUtil;
 import com.intellij.codeInspection.export.HTMLExporter;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.reference.RefModule;
@@ -50,6 +48,7 @@ import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.JDOMUtil;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jdom.Document;
 import org.jdom.Element;
@@ -75,9 +74,11 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
     myView = view;
   }
 
+  @Override
   public void actionPerformed(AnActionEvent e) {
     final ListPopup popup = JBPopupFactory.getInstance().createListPopup(
       new BaseListPopupStep<String>(InspectionsBundle.message("inspection.action.export.popup.title"), new String[]{HTML, XML}) {
+        @Override
         public PopupStep onChosen(final String selectedValue, final boolean finalChoice) {
           exportHTML(Comparing.strEqual(selectedValue, HTML));
           return PopupStep.FINAL_CHOICE;
@@ -101,8 +102,10 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
 
     final String outputDirectoryName = exportToHTMLSettings.OUTPUT_DIRECTORY;
     ApplicationManager.getApplication().invokeLater(new Runnable() {
+      @Override
       public void run() {
         final Runnable exportRunnable = new Runnable() {
+          @Override
           public void run() {
             if (!exportToHTML) {
               dupm2XML(outputDirectoryName);
@@ -112,6 +115,7 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
               try {
                 final InspectionTreeNode root = myView.getTree().getRoot();
                 TreeUtil.traverse(root, new TreeUtil.Traverse() {
+                  @Override
                   public boolean accept(final Object node) {
                     if (node instanceof InspectionNode) {
                       exportHTML(maker, (InspectionNode)node);
@@ -136,7 +140,7 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
         }
 
         if (exportToHTML && exportToHTMLSettings.OPEN_IN_BROWSER) {
-          BrowserUtil.launchBrowser(exportToHTMLSettings.OUTPUT_DIRECTORY + File.separator + "index.html");
+          BrowserUtil.browse(new File(exportToHTMLSettings.OUTPUT_DIRECTORY, "index.html"));
         }
       }
     });
@@ -148,6 +152,7 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
       final InspectionTreeNode root = myView.getTree().getRoot();
       final IOException[] ex = new IOException[1];
       TreeUtil.traverse(root, new TreeUtil.Traverse() {
+        @Override
         public boolean accept(final Object node) {
           if (node instanceof InspectionNode) {
             InspectionNode toolNode = (InspectionNode)node;
@@ -184,6 +189,7 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
     }
     catch (final IOException e) {
       SwingUtilities.invokeLater(new Runnable() {
+        @Override
         public void run() {
           Messages.showErrorDialog(myView, e.getMessage());
         }
@@ -203,24 +209,30 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
     final Tools tools = context.getTools().get(shortName);
     if (tools != null) {   //dummy entry points tool
       for (ScopeToolState state : tools.getTools()) {
-        result.add((InspectionTool)state.getTool());
+        InspectionToolWrapper toolWrapper = (InspectionToolWrapper)state.getTool();
+        result.add(toolWrapper);
       }
     }
     return result;
   }
 
   private void exportHTML(HTMLExportFrameMaker frameMaker, InspectionNode node) {
-    Set<InspectionTool> tools = getWorkedTools(node);
+    final Set<InspectionTool> tools = getWorkedTools(node);
     final InspectionTool tool = node.getTool();
-    HTMLExporter exporter =
-      new HTMLExporter(frameMaker.getRootFolder() + "/" + tool.getShortName(), tool.getComposer(), myView.getProject());
+    final HTMLExporter exporter =
+      new HTMLExporter(frameMaker.getRootFolder() + "/" + tool.getShortName(), tool.getComposer());
     frameMaker.startInspection(tool);
-    exportHTML(tools, exporter);
-    exporter.generateReferencedPages();
+    HTMLExportUtil.runExport(myView.getProject(), new ThrowableRunnable<IOException>() {
+      @Override
+      public void run() throws IOException {
+        exportHTML(tools, exporter);
+        exporter.generateReferencedPages();
+      }
+    });
   }
 
   @SuppressWarnings({"HardCodedStringLiteral"})
-  private void exportHTML(Set<InspectionTool> tools, HTMLExporter exporter) {
+  private void exportHTML(Set<InspectionTool> tools, HTMLExporter exporter) throws IOException {
     StringBuffer packageIndex = new StringBuffer();
     packageIndex.append("<html><body>");
 
@@ -259,7 +271,7 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
       }
 
       contentIndex.append("</body></html>");
-      HTMLExporter.writeFile(exporter.getRootFolder(), packageName + "-index.html", contentIndex, myView.getProject());
+      HTMLExportUtil.writeFile(exporter.getRootFolder(), packageName + "-index.html", contentIndex, myView.getProject());
     }
 
     final Set<RefModule> modules = new HashSet<RefModule>();
@@ -285,12 +297,12 @@ public class ExportHTMLAction extends AnAction implements DumbAware {
       exporter.createPage(module);
 
       contentIndex.append("</body></html>");
-      HTMLExporter.writeFile(exporter.getRootFolder(), module.getName() + "-index.html", contentIndex, myView.getProject());
+      HTMLExportUtil.writeFile(exporter.getRootFolder(), module.getName() + "-index.html", contentIndex, myView.getProject());
     }
 
     packageIndex.append("</body></html>");
 
-    HTMLExporter.writeFile(exporter.getRootFolder(), "index.html", packageIndex, myView.getProject());
+    HTMLExportUtil.writeFile(exporter.getRootFolder(), "index.html", packageIndex, myView.getProject());
   }
 
   @SuppressWarnings({"HardCodedStringLiteral"})

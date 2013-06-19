@@ -23,17 +23,17 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.IconLoader;
-import com.intellij.openapi.util.NotNullLazyValue;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.util.SystemProperties;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
 
-public class WizardContext {
+public class WizardContext extends UserDataHolderBase {
   private static final Icon NEW_PROJECT_ICON = IconLoader.getIcon("/newprojectwizard.png");
   private static final Icon NEW_MODULE_ICON = IconLoader.getIcon("/addmodulewizard.png");
   /**
@@ -46,19 +46,8 @@ public class WizardContext {
   private String myCompilerOutputDirectory;
   private Sdk myProjectJdk;
   private ProjectBuilder myProjectBuilder;
-  private final List<Listener> myListeners = new ArrayList<Listener>();
+  private final List<Listener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private StorageScheme myProjectStorageFormat = StorageScheme.DIRECTORY_BASED;
-
-  private final NotNullLazyValue<ModuleBuilder[]> myAllBuilders = new NotNullLazyValue<ModuleBuilder[]>() {
-    @NotNull
-    @Override
-    protected ModuleBuilder[] compute() {
-      List<ModuleBuilder> builders = ModuleBuilder.getAllBuilders();
-      return builders.toArray(new ModuleBuilder[builders.size()]);
-    }
-  };
-
-  private ModuleWizardStep myProjectSdkStep;
 
   public void setProjectStorageFormat(StorageScheme format) {
     myProjectStorageFormat = format;
@@ -79,14 +68,6 @@ public class WizardContext {
   @Nullable
   public Project getProject() {
     return myProject;
-  }
-
-  public ModuleWizardStep getProjectSdkStep() {
-    return myProjectSdkStep;
-  }
-
-  public void setProjectSdkStep(ModuleWizardStep projectSdkStep) {
-    myProjectSdkStep = projectSdkStep;
   }
 
   @NotNull
@@ -137,15 +118,13 @@ public class WizardContext {
   }
 
   public void requestWizardButtonsUpdate() {
-    final Listener[] listeners = myListeners.toArray(new Listener[myListeners.size()]);
-    for (Listener listener : listeners) {
+    for (Listener listener : myListeners) {
       listener.buttonsUpdateRequested();
     }
   }
 
   public void requestNextStep() {
-    final Listener[] listeners = myListeners.toArray(new Listener[myListeners.size()]);
-    for (Listener listener : listeners) {
+    for (Listener listener : myListeners) {
       listener.nextStepRequested();
     }
   }
@@ -181,9 +160,5 @@ public class WizardContext {
 
   public StorageScheme getProjectStorageFormat() {
     return myProjectStorageFormat;
-  }
-
-  public ModuleBuilder[] getAllBuilders() {
-    return myAllBuilders.getValue();
   }
 }

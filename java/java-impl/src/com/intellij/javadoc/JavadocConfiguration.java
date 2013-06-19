@@ -42,6 +42,7 @@ import com.intellij.openapi.projectRoots.ex.PathUtilEx;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.jsp.JspFile;
@@ -259,7 +260,12 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
           final Collection<String> sources = new HashSet<String>();
           final Runnable findRunnable = new Runnable() {
             public void run() {
-              myGenerationOptions.accept(new MyContentIterator(myProject, packages, sources));
+              final int scopeType = myGenerationOptions.getScopeType();
+              final boolean usePackageNotation = scopeType == AnalysisScope.MODULE ||
+                                                 scopeType == AnalysisScope.MODULES ||
+                                                 scopeType == AnalysisScope.PROJECT ||
+                                                 scopeType == AnalysisScope.DIRECTORY;
+              myGenerationOptions.accept(new MyContentIterator(myProject, packages, sources, usePackageNotation));
             }
           };
           if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(findRunnable, "Search for sources to generate javadoc in...", false, myProject)) {
@@ -271,8 +277,9 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
           for (String aPackage : packages) {
             writer.println(aPackage);
           }
+          //http://docs.oracle.com/javase/7/docs/technotes/tools/windows/javadoc.html#runningjavadoc
           for (String source : sources) {
-            writer.println(source);
+            writer.println(StringUtil.wrapWithDoubleQuote(source));
           }
           writer.println("-sourcepath");
           OrderEnumerator enumerator = OrderEnumerator.orderEntries(myProject);
@@ -294,7 +301,7 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
             }
             sourcePath.append(file.getPath());
           }
-          writer.println(sourcePath.toString());
+          writer.println(StringUtil.wrapWithDoubleQuote(sourcePath.toString()));
         }
         finally {
           writer.close();
@@ -314,7 +321,7 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
           if (OPEN_IN_BROWSER) {
             File url = new File(OUTPUT_DIRECTORY, INDEX_HTML);
             if (url.exists() && event.getExitCode() == 0) {
-              BrowserUtil.launchBrowser(url.getPath());
+              BrowserUtil.browse(url);
             }
           }
         }
@@ -327,8 +334,10 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
     private final PsiManager myPsiManager;
     private final Collection<String> myPackages;
     private final Collection<String> mySourceFiles;
+    private final boolean myUsePackageNotation;
 
-    public MyContentIterator(Project project, Collection<String> packages, Collection<String> sources) {
+    public MyContentIterator(Project project, Collection<String> packages, Collection<String> sources, boolean canUsePackageNotation) {
+      myUsePackageNotation = canUsePackageNotation;
       myPsiManager = PsiManager.getInstance(project);
       myPackages = packages;
       mySourceFiles = sources;
@@ -343,7 +352,7 @@ public class JavadocConfiguration implements ModuleRunProfile, JDOMExternalizabl
       if (file instanceof PsiJavaFile) {
         final PsiJavaFile javaFile = (PsiJavaFile)file;
         final String packageName = javaFile.getPackageName();
-        if (containsPackagePrefix(module, packageName) || (packageName.length() == 0 && !(javaFile instanceof JspFile))) {
+        if (containsPackagePrefix(module, packageName) || (packageName.length() == 0 && !(javaFile instanceof JspFile)) || !myUsePackageNotation) {
           mySourceFiles.add(FileUtil.toSystemIndependentName(fileOrDir.getPath()));
         }
         else {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,9 +40,9 @@ import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.psi.util.MethodSignature;
 import com.intellij.psi.util.MethodSignatureBackedByPsiMethod;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.reference.SoftReference;
 import com.intellij.ui.RowIcon;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.PatchedSoftReference;
 import com.intellij.util.PlatformIcons;
 import org.jetbrains.annotations.NotNull;
 
@@ -53,7 +53,7 @@ import java.util.Map;
 public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements PsiMethod, Queryable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.PsiMethodImpl");
 
-  private PatchedSoftReference<PsiType> myCachedType = null;
+  private SoftReference<PsiType> myCachedType = null;
 
   public PsiMethodImpl(final PsiMethodStub stub) {
     this(stub, JavaStubElementTypes.METHOD);
@@ -189,26 +189,7 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
 
   @Override
   public PsiType getReturnTypeNoResolve() {
-    if (isConstructor()) return null;
-
-    final PsiMethodStub stub = getStub();
-    if (stub != null) {
-      final String typeText = TypeInfo.createTypeText(stub.getReturnTypeText(false));
-      if (typeText == null) return null;
-
-      try {
-        return JavaPsiFacade.getInstance(getProject()).getElementFactory().createTypeFromText(typeText, this);
-      }
-      catch(IncorrectOperationException e){
-        LOG.error(e);
-        return null;
-      }
-    }
-
-    PsiTypeElement typeElement = getReturnTypeElement();
-    if (typeElement == null) return null;
-    PsiParameterList parameterList = getParameterList();
-    return JavaSharedImplUtil.getTypeNoResolve(typeElement, parameterList, this);
+    return getReturnType();
   }
 
   @Override
@@ -220,7 +201,7 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
       final String typeText = TypeInfo.createTypeText(stub.getReturnTypeText(true));
       if (typeText == null) return null;
 
-      PatchedSoftReference<PsiType> cachedType = myCachedType;
+      SoftReference<PsiType> cachedType = myCachedType;
       if (cachedType != null) {
         PsiType type = cachedType.get();
         if (type != null) return type;
@@ -228,7 +209,7 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
 
       try {
         final PsiType type = JavaPsiFacade.getInstance(getProject()).getElementFactory().createTypeFromText(typeText, this);
-        myCachedType = new PatchedSoftReference<PsiType>(type);
+        myCachedType = new SoftReference<PsiType>(type);
         return type;
       }
       catch (IncorrectOperationException e) {
@@ -241,7 +222,7 @@ public class PsiMethodImpl extends JavaStubPsiElement<PsiMethodStub> implements 
     PsiTypeElement typeElement = getReturnTypeElement();
     if (typeElement == null) return null;
     PsiParameterList parameterList = getParameterList();
-    return JavaSharedImplUtil.getType(typeElement, parameterList, this);
+    return JavaSharedImplUtil.getType(typeElement, parameterList);
   }
 
   @Override

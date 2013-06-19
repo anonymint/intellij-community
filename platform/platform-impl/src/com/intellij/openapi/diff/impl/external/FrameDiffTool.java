@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ public class FrameDiffTool implements DiffTool {
         builder.removeAllActions();
       }
       builder.setCenterPanel(diffPanel.getComponent());
-      builder.setPreferedFocusComponent(diffPanel.getPreferredFocusedComponent());
+      builder.setPreferredFocusComponent(diffPanel.getPreferredFocusedComponent());
       builder.setTitle(request.getWindowTitle());
       builder.setDimensionServiceKey(request.getGroupKey());
 
@@ -136,12 +136,16 @@ public class FrameDiffTool implements DiffTool {
   @Nullable
   private DiffPanelImpl createDiffPanelIfShouldShow(DiffRequest request, Window window, @NotNull Disposable parentDisposable,
                                                            final boolean showMessage) {
-    DiffPanelImpl diffPanel = (DiffPanelImpl)DiffManagerImpl.createDiffPanel(request, window, parentDisposable, this);
+    DiffPanelImpl diffPanel = createDiffPanelImpl(request, window, parentDisposable);
     if (checkNoDifferenceAndNotify(diffPanel, request, window, showMessage)) {
       Disposer.dispose(diffPanel);
       diffPanel = null;
     }
     return diffPanel;
+  }
+
+  protected DiffPanelImpl createDiffPanelImpl(@NotNull DiffRequest request, @Nullable Window window, @NotNull Disposable parentDisposable) {
+    return (DiffPanelImpl) DiffManagerImpl.createDiffPanel(request, window, parentDisposable, this);
   }
 
   static void showDiffDialog(DialogBuilder builder, Collection hints) {

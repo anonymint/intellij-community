@@ -142,13 +142,14 @@ public class GenericDomValueReference<T> extends PsiReferenceBase<XmlElement> im
     return StringUtil.notNullize(getStringValue());
   }
 
+  @NotNull
   public String getUnresolvedMessagePattern() {
-    final ConvertContextImpl context = getConvertContext();
+    final ConvertContext context = getConvertContext();
     return getConverter().getErrorMessage(getStringValue(), context);
   }
 
-  public final ConvertContextImpl getConvertContext() {
-    return new ConvertContextImpl(DomManagerImpl.getDomInvocationHandler(myGenericValue));
+  public final ConvertContext getConvertContext() {
+    return ConvertContextFactory.createConvertContext(DomManagerImpl.getDomInvocationHandler(myGenericValue));
   }
 
   public PsiElement handleElementRename(final String newElementName) throws IncorrectOperationException {

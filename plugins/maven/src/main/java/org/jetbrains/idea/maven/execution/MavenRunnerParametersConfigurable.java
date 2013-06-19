@@ -16,12 +16,14 @@
 package org.jetbrains.idea.maven.execution;
 
 import com.intellij.codeInsight.completion.CompletionResultSet;
-import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.execution.configurations.ParametersList;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.FixedSizeButton;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -29,19 +31,17 @@ import com.intellij.ui.EditorTextField;
 import com.intellij.ui.PanelWithAnchor;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.TextFieldCompletionProvider;
+import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.model.MavenConstants;
-import org.jetbrains.idea.maven.model.MavenPlugin;
-import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
-import org.jetbrains.idea.maven.utils.MavenArtifactUtil;
-import org.jetbrains.idea.maven.utils.MavenPluginInfo;
 import org.jetbrains.idea.maven.utils.Strings;
 
 import javax.swing.*;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * @author Vladislav.Kaznacheev
@@ -52,9 +52,11 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
   protected LabeledComponent<EditorTextField> goalsComponent;
   private LabeledComponent<EditorTextField> profilesComponent;
   private JBLabel myFakeLabel;
+  private JCheckBox myResolveToWorkspaceCheckBox;
+  private FixedSizeButton showProjectTreeButton;
   private JComponent anchor;
 
-  public MavenRunnerParametersConfigurable(@NotNull Project project) {
+  public MavenRunnerParametersConfigurable(@NotNull final Project project) {
     workingDirComponent.getComponent().addBrowseFolderListener(
       RunnerBundle.message("maven.select.maven.project.file"), "", project,
       new FileChooserDescriptor(false, true, false, false, false, false) {
@@ -66,7 +68,15 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
       });
 
     if (!project.isDefault()) {
-      MyCompletionProvider profilesCompletionProvider = new MyCompletionProvider(project) {
+      TextFieldCompletionProvider profilesCompletionProvider = new TextFieldCompletionProvider(true) {
+        @Override
+        protected final void addCompletionVariants(@NotNull String text, int offset, @NotNull String prefix, @NotNull CompletionResultSet result) {
+          MavenProjectsManager manager = MavenProjectsManager.getInstance(project);
+          for (String profile : manager.getAvailableProfiles()) {
+            result.addElement(LookupElementBuilder.create(profile));
+          }
+        }
+
         @NotNull
         @Override
         protected String getPrefix(@NotNull String currentTextPrefix) {
@@ -76,53 +86,19 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
           }
           return prefix;
         }
-
-        @Override
-        protected void addVariants(@NotNull CompletionResultSet result, MavenProjectsManager manager) {
-          for (String profile : manager.getAvailableProfiles()) {
-            result.addElement(LookupElementBuilder.create(profile));
-          }
-        }
       };
 
       profilesComponent.setComponent(profilesCompletionProvider.createEditor(project));
 
-      MyCompletionProvider goalsCompletionProvider = new MyCompletionProvider(project) {
-
-        private volatile List<LookupElement> myCachedElements;
-
-        @Override
-        protected void addVariants(@NotNull CompletionResultSet result, MavenProjectsManager manager) {
-          List<LookupElement> cachedElements = myCachedElements;
-          if (cachedElements == null) {
-            Set<String> goals = new HashSet<String>();
-            goals.addAll(MavenConstants.PHASES);
-
-            for (MavenProject mavenProject : manager.getProjects()) {
-              for (MavenPlugin plugin : mavenProject.getPlugins()) {
-                MavenPluginInfo pluginInfo = MavenArtifactUtil.readPluginInfo(manager.getLocalRepository(), plugin.getMavenId());
-                if (pluginInfo != null) {
-                  for (MavenPluginInfo.Mojo mojo : pluginInfo.getMojos()) {
-                    goals.add(mojo.getDisplayName());
-                  }
-                }
-              }
-            }
-
-            cachedElements = new ArrayList<LookupElement>(goals.size());
-            for (String goal : goals) {
-              cachedElements.add(LookupElementBuilder.create(goal).withIcon(icons.MavenIcons.Phase));
-            }
-
-            myCachedElements = cachedElements;
-          }
-
-          result.addAllElements(cachedElements);
-        }
-      };
-
-      goalsComponent.setComponent(goalsCompletionProvider.createEditor(project));
+      goalsComponent.setComponent(new MavenArgumentsCompletionProvider(project).createEditor(project));
     }
+
+    showProjectTreeButton.setIcon(AllIcons.Actions.Module);
+
+    MavenSelectProjectPopup.attachToWorkingDirectoryField(MavenProjectsManager.getInstance(project),
+                                                          workingDirComponent.getComponent().getTextField(),
+                                                          showProjectTreeButton,
+                                                          goalsComponent.getComponent());
 
     setAnchor(profilesComponent.getLabel());
   }
@@ -160,7 +136,8 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
 
   private void setData(final MavenRunnerParameters data) {
     data.setWorkingDirPath(workingDirComponent.getComponent().getText());
-    data.setGoals(Strings.tokenize(goalsComponent.getComponent().getText(), " "));
+    data.setGoals(ParametersListUtil.parse(goalsComponent.getComponent().getText()));
+    data.setResolveToWorkspace(myResolveToWorkspaceCheckBox.isSelected());
 
     Map<String, Boolean> profilesMap = new LinkedHashMap<String, Boolean>();
 
@@ -180,7 +157,8 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
 
   private void getData(final MavenRunnerParameters data) {
     workingDirComponent.getComponent().setText(data.getWorkingDirPath());
-    goalsComponent.getComponent().setText(Strings.detokenize(data.getGoals(), ' '));
+    goalsComponent.getComponent().setText(ParametersList.join(data.getGoals()));
+    myResolveToWorkspaceCheckBox.setSelected(data.isResolveToWorkspace());
 
     StringBuilder sb = new StringBuilder();
     for (Map.Entry<String, Boolean> entry : data.getProfilesMap().entrySet()) {
@@ -212,27 +190,4 @@ public abstract class MavenRunnerParametersConfigurable implements Configurable,
     profilesComponent.setAnchor(anchor);
     myFakeLabel.setAnchor(anchor);
   }
-  
-  private abstract class MyCompletionProvider extends TextFieldCompletionProvider {
-    private final Project myProject;
-
-    protected MyCompletionProvider(Project project) {
-      myProject = project;
-    }
-
-    @NotNull
-    @Override
-    protected String getPrefix(@NotNull String currentTextPrefix) {
-      return currentTextPrefix.substring(currentTextPrefix.lastIndexOf(' ') + 1);
-    }
-    
-    @Override
-    protected final void addCompletionVariants(@NotNull String text, int offset, @NotNull String prefix, @NotNull CompletionResultSet result) {
-      MavenProjectsManager manager = MavenProjectsManager.getInstance(myProject);
-      addVariants(result, manager);
-    }
-    
-    protected abstract void addVariants(@NotNull CompletionResultSet result, MavenProjectsManager manager);
-  }
-  
 }

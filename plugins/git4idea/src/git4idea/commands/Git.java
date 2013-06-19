@@ -18,7 +18,8 @@ package git4idea.commands;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
-import git4idea.history.browser.GitCommit;
+import git4idea.GitCommit;
+import git4idea.history.browser.GitHeavyCommit;
 import git4idea.push.GitPushSpec;
 import git4idea.repo.GitRepository;
 import org.jetbrains.annotations.NotNull;
@@ -47,7 +48,8 @@ public interface Git {
                                                 @Nullable List<String> relativePaths) throws VcsException;
 
   @NotNull
-  GitCommandResult clone(@NotNull Project project, @NotNull File parentDirectory, @NotNull String url, @NotNull String clonedDirectoryName);
+  GitCommandResult clone(@NotNull Project project, @NotNull File parentDirectory, @NotNull String url, @NotNull String clonedDirectoryName,
+                         @NotNull GitLineHandlerListener... progressListeners);
 
   @NotNull
   GitCommandResult config(@NotNull GitRepository repository, String... params);
@@ -91,11 +93,11 @@ public interface Git {
   GitCommandResult tip(@NotNull GitRepository repository, @NotNull String branchName);
 
   @NotNull
-  GitCommandResult push(@NotNull GitRepository repository, @NotNull String remote, @NotNull String spec,
+  GitCommandResult push(@NotNull GitRepository repository, @NotNull String remote, @NotNull String url, @NotNull String spec,
                         @NotNull GitLineHandlerListener... listeners);
 
   @NotNull
-  GitCommandResult push(@NotNull GitRepository repository, @NotNull GitPushSpec pushSpec,
+  GitCommandResult push(@NotNull GitRepository repository, @NotNull GitPushSpec spec, @NotNull String url,
                         @NotNull GitLineHandlerListener... listeners);
 
   @NotNull

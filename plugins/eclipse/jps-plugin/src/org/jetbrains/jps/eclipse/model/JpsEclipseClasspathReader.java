@@ -31,7 +31,6 @@ import org.jetbrains.jps.model.library.JpsOrderRootType;
 import org.jetbrains.jps.model.module.*;
 import org.jetbrains.jps.model.serialization.JpsMacroExpander;
 import org.jetbrains.jps.model.serialization.library.JpsLibraryTableSerializer;
-import org.jetbrains.jps.model.serialization.library.JpsSdkTableSerializer;
 
 import java.io.File;
 import java.io.FilenameFilter;
@@ -97,14 +96,6 @@ class JpsEclipseClasspathReader extends AbstractEclipseClasspathReader<JpsModule
                                 Collection<String> unknownJdks,
                                 EclipseModuleManager eclipseModuleManager,
                                 String jdkName) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("loading " + rootModel.getName() + ": set module jdk " + jdkName);
-    }
-    final JpsDependenciesList dependenciesList = rootModel.getDependenciesList();
-    dependenciesList.addSdkDependency(JpsJavaSdkType.INSTANCE);
-    if (jdkName != null) {
-      JpsSdkTableSerializer.setSdkReference(rootModel.getSdkReferencesTable(), jdkName, JpsJavaSdkType.INSTANCE);
-    }
   }
 
   @Override
@@ -200,6 +191,11 @@ class JpsEclipseClasspathReader extends AbstractEclipseClasspathReader<JpsModule
     return prepareValidUrlInsideJar(url);
   }
 
+  @Override
+  protected Set<String> getDefinedCons() {
+    return Collections.emptySet();
+  }
+
 
   @Override
   protected int rearrange(JpsModule rootModel) {
@@ -210,10 +206,11 @@ class JpsEclipseClasspathReader extends AbstractEclipseClasspathReader<JpsModule
                             final String testPattern,
                             Element classpathElement, JpsMacroExpander expander) throws IOException {
     LOG.debug("start loading classpath for " + model.getName());
+    final HashSet<String> libs = new HashSet<String>();
     for (Object o : classpathElement.getChildren(EclipseXml.CLASSPATHENTRY_TAG)) {
       try {
         readClasspathEntry(model, new ArrayList<String>(), new ArrayList<String>(), new HashSet<String>(), new HashSet<String>(),
-                           testPattern, (Element)o, 0, EclipseModuleManager.EMPTY, expander.getExpandMacroMap());
+                           testPattern, (Element)o, 0, EclipseModuleManager.EMPTY, expander.getExpandMacroMap(), libs);
       }
       catch (ConversionException e) {
         throw new IOException(e);

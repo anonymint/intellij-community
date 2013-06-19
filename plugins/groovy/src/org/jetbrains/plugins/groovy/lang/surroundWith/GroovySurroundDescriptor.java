@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ public class GroovySurroundDescriptor implements SurroundDescriptor {
     new WhileSurrounder(),
     //there's no do-while in Groovy
     new SurrounderByClosure(),
+    new GrBracesSurrounder(),
     //like in Java
     new ForSurrounder(),
     new TryCatchSurrounder(),
@@ -43,6 +44,7 @@ public class GroovySurroundDescriptor implements SurroundDescriptor {
     new ShouldFailWithTypeStatementsSurrounder(),
     //expressions: like in java
     new ParenthesisExprSurrounder(),
+    new NotAndParenthesesSurrounder(),
     new TypeCastSurrounder(),
 
     //groovy-specific

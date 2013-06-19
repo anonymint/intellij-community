@@ -70,8 +70,8 @@ public class ImageDuplicateResultsDialog extends DialogWrapper {
   private final Project myProject;
   private final List<VirtualFile> myImages;
   private final Map<String, Set<VirtualFile>> myDuplicates;
-  private Tree myTree;
-  private ResourceModules myResourceModules = new ResourceModules();
+  private final Tree myTree;
+  private final ResourceModules myResourceModules = new ResourceModules();
 
 
   public ImageDuplicateResultsDialog(Project project, List<VirtualFile> images, Map<String, Set<VirtualFile>> duplicates) {
@@ -90,6 +90,7 @@ public class ImageDuplicateResultsDialog extends DialogWrapper {
     TreeUtil.selectFirstNode(myTree);
   }
 
+  @NotNull
   @Override
   protected Action[] createActions() {
     final Action[] actions = new Action[4];

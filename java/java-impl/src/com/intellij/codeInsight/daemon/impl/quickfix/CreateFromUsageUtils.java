@@ -85,6 +85,7 @@ public class CreateFromUsageUtils {
     if (!unresolvedOnly) {
       for (JavaResolveResult result : results) {
         if (!result.isValidResult()) return false;
+        if (result.getElement() instanceof PsiPackage) return false;
       }
     }
     return true;
@@ -254,9 +255,9 @@ public class CreateFromUsageUtils {
         names = new String[]{"p" + i};
       }
 
-      if (argType == null || PsiType.NULL.equals(argType) || 
-          argType instanceof PsiLambdaExpressionType || 
-          argType instanceof PsiLambdaParameterType || 
+      if (argType == null || PsiType.NULL.equals(argType) ||
+          argType instanceof PsiLambdaExpressionType ||
+          argType instanceof PsiLambdaParameterType ||
           argType instanceof PsiMethodReferenceType) {
         argType = PsiType.getJavaLangObject(psiManager, resolveScope);
       } else if (argType instanceof PsiDisjunctionType) {
@@ -364,7 +365,7 @@ public class CreateFromUsageUtils {
                                                 String name,
                                                 PsiJavaCodeReferenceElement referenceElement) {
     try {
-      if (!CodeInsightUtilBase.preparePsiElementForWrite(psiClass)) return null;
+      if (!FileModificationService.getInstance().preparePsiElementForWrite(psiClass)) return null;
 
       PsiManager manager = psiClass.getManager();
       PsiElementFactory elementFactory = JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
@@ -446,7 +447,7 @@ public class CreateFromUsageUtils {
               targetClass = (PsiClass) sourceFile.add(aClass);
             }
 
-            if (superClassName != null) {
+            if (superClassName != null && (classKind != CreateClassKind.ENUM || !superClassName.equals(CommonClassNames.JAVA_LANG_ENUM))) {
               final PsiClass superClass =
                 facade.findClass(superClassName, targetClass.getResolveScope());
               final PsiJavaCodeReferenceElement superClassReference = factory.createReferenceElementByFQClassName(superClassName, targetClass.getResolveScope());
@@ -664,7 +665,7 @@ public class CreateFromUsageUtils {
       expectedTypes = union.toArray(new ExpectedTypeInfo[union.size()]);
     }
 
-    if (expectedTypes == null || expectedTypes.length == 0) {
+    if (expectedTypes.length == 0) {
       PsiType t = allowVoidType ? PsiType.VOID : PsiType.getJavaLangObject(manager, resolveScope);
       expectedTypes = new ExpectedTypeInfo[] {ExpectedTypesProvider.createInfo(t, ExpectedTypeInfo.TYPE_OR_SUBTYPE, t, TailType.NONE)};
     }
@@ -716,7 +717,7 @@ public class CreateFromUsageUtils {
       expectedTypes = union.toArray(new ExpectedTypeInfo[union.size()]);
     }
 
-    if (expectedTypes == null || expectedTypes.length == 0) {
+    if (expectedTypes.length == 0) {
       return allowVoidType ? new PsiType[]{PsiType.VOID} : new PsiType[]{PsiType.getJavaLangObject(manager, resolveScope)};
     }
     else {
@@ -792,10 +793,13 @@ public class CreateFromUsageUtils {
         WeighingComparable<PsiElement,ProximityLocation> proximity1 = PsiProximityComparator.getProximity(m1, expression);
         WeighingComparable<PsiElement,ProximityLocation> proximity2 = PsiProximityComparator.getProximity(m2, expression);
         if (proximity1 != null && proximity2 != null) {
-          return proximity2.compareTo(proximity1);
+          result = proximity2.compareTo(proximity1);
+          if (result != 0) return result;
         }
 
-        return 0;
+        String name1 = StaticImportMethodFix.getMemberQualifiedName(m1);
+        String name2 = StaticImportMethodFix.getMemberQualifiedName(m2);
+        return name1 == null || name2 == null ? 0 : name1.compareTo(name2);
       }
     });
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,6 +71,9 @@ public class GrAccessorMethodImpl extends LightMethodBuilder implements GrAccess
     addModifier(PsiModifier.PUBLIC);
     if (myProperty.hasModifierProperty(PsiModifier.STATIC)) {
       addModifier(PsiModifier.STATIC);
+    }
+    else if (myProperty.hasModifierProperty(PsiModifier.FINAL)) { //don't add final modifier to static method
+      addModifier(PsiModifier.FINAL);
     }
 
     setNavigationElement(property);
@@ -167,11 +170,13 @@ public class GrAccessorMethodImpl extends LightMethodBuilder implements GrAccess
   private static boolean hasContradictingMethods(GrAccessorMethod proto, String fieldName, PsiClass clazz) {
     if (clazz == null) return false;
     PsiMethod[] methods = clazz instanceof GrTypeDefinition
-                          ? ((GrTypeDefinition)clazz).findCodeMethodsBySignature(proto, true)
-                          : clazz.findMethodsBySignature(proto, true);
+                          ? ((GrTypeDefinition)clazz).findCodeMethodsByName(proto.getName(), true)
+                          : clazz.findMethodsByName(proto.getName(), true);
+    final int paramCount = proto.getParameterList().getParametersCount();
     for (PsiMethod method : methods) {
-      if (clazz.equals(method.getContainingClass())) return true;
+      if (paramCount != method.getParameterList().getParametersCount()) continue;
 
+      if (clazz.equals(method.getContainingClass())) return true;
       if (PsiUtil.isAccessible(clazz, method) && method.hasModifierProperty(PsiModifier.FINAL)) return true;
     }
 

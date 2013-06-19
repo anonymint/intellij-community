@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package git4idea.commands;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -26,7 +27,6 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.util.ui.UIUtil;
 import git4idea.GitVcs;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -132,11 +132,12 @@ public class GitTask {
           completed.set(true);
         }
       };
-      UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-        @Override public void run() {
+      ApplicationManager.getApplication().invokeAndWait(new Runnable() {
+        @Override
+        public void run() {
           ProgressManager.getInstance().run(task);
         }
-      });
+      }, ModalityState.defaultModalityState());
     } else {
       final BackgroundableTask task = new BackgroundableTask(myProject, myHandler, myTitle) {
         @Override public void onSuccess() {
@@ -323,6 +324,7 @@ public class GitTask {
 
     @Override
     public final void run(@NotNull ProgressIndicator indicator) {
+      myHandler.setModalityState(indicator.getModalityState());
       myDelegate.run(indicator);
     }
 

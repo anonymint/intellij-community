@@ -20,8 +20,10 @@ import com.intellij.codeInsight.lookup.Lookup
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementPresentation
 import com.intellij.codeInsight.lookup.LookupManager
+import com.intellij.codeInsight.lookup.impl.LookupImpl
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiMethod
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager
@@ -84,6 +86,20 @@ public class NormalCompletionTest extends LightFixtureCompletionTestCase {
   }
 
   public void testSimpleVariable() throws Exception { doTest('\n') }
+
+  public void testTypeParameterItemPresentation() {
+    configure()
+    LookupElementPresentation presentation = renderElement(myItems[0])
+    assert "Param" == presentation.itemText
+    assert presentation.tailText == " (type parameter of Foo)"
+    assert !presentation.typeText
+    assert !presentation.icon
+    assert !presentation.itemTextBold
+
+    presentation = renderElement(myItems[1])
+    assert "Param2" == presentation.itemText
+    assert presentation.tailText == " (type parameter of goo)"
+  }
 
   public void testMethodItemPresentation() {
     configure()
@@ -521,7 +537,11 @@ public class ListUtils {
   }
 
   public void testNoThisInComment() throws Throwable { doAntiTest() }
-  public void testIncNull() throws Throwable { doAntiTest() }
+  public void testIncNull() throws Throwable {
+    configure()
+    checkResultByFile(getTestName(false) + ".java")
+    assert !('null' in myFixture.lookupElementStrings)
+  }
 
   public void testLastExpressionInFor() throws Throwable { doTest(); }
 
@@ -568,7 +588,7 @@ public class ListUtils {
     checkResult()
   }
 
-  public void testDefaultAnnoParam() throws Throwable { doTest('\n'); }
+  public void testDefaultAnnoParam() throws Throwable { doTest(); }
 
   public void testSpaceAfterLookupString() throws Throwable {
     configureByFile(getTestName(false) + ".java");
@@ -839,7 +859,7 @@ public class ListUtils {
     final String path = getTestName(false) + ".java";
     configureByFile(path);
     checkResultByFile(path);
-    assertStringItems("fai1", "fai2");
+    assertStringItems("fai1", "fai2", "FunctionalInterface");
   }
 
   public void testProtectedInaccessibleOnSecondInvocation() throws Throwable {
@@ -892,6 +912,7 @@ public class ListUtils {
   public void testCastInstanceofedQualifier() throws Throwable { doTest(); }
   public void testCastInstanceofedQualifierInForeach() throws Throwable { doTest(); }
   public void testCastComplexInstanceofedQualifier() throws Throwable { doTest(); }
+  public void _testCastIncompleteInstanceofedQualifier() throws Throwable { doTest(); }
 
   public void testCastTooComplexInstanceofedQualifier() throws Throwable { doAntiTest(); }
   public void testDontCastInstanceofedQualifier() throws Throwable { doTest(); }
@@ -1110,10 +1131,25 @@ public class ListUtils {
   public void testMethodColon() throws Exception { doTest(':') }
   public void testVariableColon() throws Exception { doTest(':') }
 
+  public void testFinishByClosingParenthesis() throws Exception { doTest(')') }
+
   public void testNoMethodsInParameterType() {
     configure()
     assertFirstStringItems "final", "float"
   }
+
+  public void testNonImportedClassInAnnotation() {
+    myFixture.addClass("package foo; public class XInternalTimerServiceController {}")
+    myFixture.configureByText "a.java", """
+class XInternalError {}
+
+@Anno(XInternal<caret>)
+"""
+    myFixture.complete(CompletionType.BASIC, 2)
+    assertFirstStringItems "XInternalError", "XInternalTimerServiceController"
+  }
+
+  public void testAnnotationClassFromWithinAnnotation() { doTest() }
 
   public void testStaticallyImportedFieldsTwice() {
     myFixture.addClass("""
@@ -1289,5 +1325,85 @@ public class ListUtils {
     assert lookup.items.size() == 1
   }
 
+  public void testImplementViaCompletion() {
+    configure()
+    myFixture.assertPreferredCompletionItems 0, 'private', 'protected', 'public', 'public void run'
+    def item = lookup.items[3]
+
+    def p = LookupElementPresentation.renderElement(item)
+    assert p.itemText == 'public void run'
+    assert p.tailText == '(t, myInt) {...}'
+    assert p.typeText == 'Foo'
+
+    lookup.currentItem = item
+    myFixture.type('\n')
+    checkResult()
+  }
+
+  public void testBraceOnNextLine() {
+    codeStyleSettings.BRACE_STYLE = CommonCodeStyleSettings.NEXT_LINE
+    doTest()
+  }
+
+  public void testDoForceBraces() {
+    codeStyleSettings.DOWHILE_BRACE_FORCE = CommonCodeStyleSettings.FORCE_BRACES_ALWAYS
+    doTest('\n')
+  }
+
+  public void "test block selection from bottom to top with single-item insertion"() {
+    myFixture.configureByText "a.java", """
+class Foo {{
+  ret<caret>;
+  ret;
+}}"""
+    edt {
+      def caret = myFixture.editor.offsetToLogicalPosition(myFixture.editor.caretModel.offset)
+      myFixture.editor.selectionModel.setBlockSelection(new LogicalPosition(caret.line + 1, caret.column), caret)
+    }
+    myFixture.completeBasic()
+    myFixture.checkResult '''
+class Foo {{
+  return<caret>;
+  return;
+}}'''
+  }
+
+  public void "test complete lowercase class name"() {
+    myFixture.addClass("package foo; public class myClass {}")
+    myFixture.configureByText "a.java", """
+class Foo extends my<caret>
+"""
+    myFixture.completeBasic()
+    myFixture.type('\n')
+    myFixture.checkResult '''import foo.myClass;
+
+class Foo extends myClass
+'''
+  }
+
+  public void "test don't show static inner class after instance qualifier"() {
+    myFixture.configureByText "a.java", """
+class Foo {
+  static class Inner {}
+}
+class Bar {
+  void foo(Foo f) {
+    f.<caret>
+  }
+}  
+"""
+    myFixture.completeBasic()
+    assert !('Inner' in myFixture.lookupElementStrings)
+  }
+
+  public void "test show static member after instance qualifier when nothing matches"() {
+    myFixture.configureByText "a.java", "class Foo{{ \"\".<caret> }}"
+    myFixture.completeBasic()
+    assert !('valueOf' in myFixture.lookupElementStrings)
+    ((LookupImpl)myFixture.lookup).hide()
+    myFixture.type 'val'
+    myFixture.completeBasic()
+    assert ('valueOf' in myFixture.lookupElementStrings)
+  }
 
 }

@@ -15,12 +15,10 @@
  */
 package com.intellij.tasks;
 
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.changes.Change;
-import com.intellij.openapi.vcs.changes.ChangeListManager;
-import com.intellij.openapi.vcs.changes.ChangeListManagerImpl;
-import com.intellij.openapi.vcs.changes.LocalChangeList;
+import com.intellij.openapi.vcs.changes.*;
 import com.intellij.openapi.vcs.changes.committed.MockAbstractVcs;
 import com.intellij.openapi.vcs.changes.ui.CommitChangeListDialog;
 import com.intellij.openapi.vcs.impl.projectlevelman.AllVcses;
@@ -127,15 +125,18 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     Task task = myRepository.findTask("TEST-001");
     assertNotNull(task);
     myTaskManager.activateTask(task, false, true);
+    myChangeListManager.waitUntilRefreshed();
 
     LocalTask defaultTask = myTaskManager.findTask(LocalTaskImpl.DEFAULT_TASK_ID);
     assertNotNull(defaultTask);
     myTaskManager.activateTask(defaultTask, false, true);
+    myChangeListManager.waitUntilRefreshed();
     assertEquals(defaultTask, myTaskManager.getActiveTask());
 
     LocalTask anotherTask = myTaskManager.findTask("TEST-001");
     assertNotNull(anotherTask);
     myTaskManager.createChangeList(defaultTask, "Default (1)");
+    myChangeListManager.waitUntilRefreshed();
 
     assertEquals(1, anotherTask.getChangeLists().size());
     assertEquals(2, defaultTask.getChangeLists().size());
@@ -163,10 +164,12 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     Task task = myRepository.findTask("TEST-001");
     assertNotNull(task);
     myTaskManager.activateTask(task, false, true);
+    myChangeListManager.waitUntilRefreshed();
 
     LocalTask defaultTask = myTaskManager.findTask(LocalTaskImpl.DEFAULT_TASK_ID);
     assertNotNull(defaultTask);
     myTaskManager.activateTask(defaultTask, false, true);
+    myChangeListManager.waitUntilRefreshed();
     assertEquals(defaultTask, myTaskManager.getActiveTask());
 
     LocalTask anotherTask = myTaskManager.findTask("TEST-001");
@@ -178,7 +181,7 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     assertNotNull(anotherChangeList);
     removeChangeList(anotherChangeList);
 
-    assertEquals(0, anotherTask.getChangeLists().size());
+    assertEquals(1, anotherTask.getChangeLists().size());
     assertEquals(1, defaultTask.getChangeLists().size());
     assertEquals(1, myChangeListManager.getChangeListsCopy().size());
 
@@ -190,10 +193,12 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     Task task = myRepository.findTask("TEST-001");
     assertNotNull(task);
     myTaskManager.activateTask(task, false, true);
+    myChangeListManager.waitUntilRefreshed();
 
     LocalTask defaultTask = myTaskManager.findTask(LocalTaskImpl.DEFAULT_TASK_ID);
     assertNotNull(defaultTask);
     myTaskManager.activateTask(defaultTask, false, true);
+    myChangeListManager.waitUntilRefreshed();
     assertEquals(defaultTask, myTaskManager.getActiveTask());
 
     LocalTask anotherTask = myTaskManager.findTask("TEST-001");
@@ -243,9 +248,13 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     Task task = myRepository.findTask("TEST-001");
     assertNotNull(task);
     myTaskManager.activateTask(task, false, true);
+    myChangeListManager.waitUntilRefreshed();
     LocalTask localTask = myTaskManager.getActiveTask();
     assertNotNull(localTask);
-    assertEquals("TEST-001 Summary 001 TEST", localTask.getChangeLists().get(0).comment);
+    assertEquals("TEST-001", localTask.getId());
+    List<ChangeListInfo> lists = localTask.getChangeLists();
+    assertEquals(1, lists.size());
+    assertEquals("TEST-001 Summary 001 TEST", lists.get(0).comment);
   }
 
   public void testSaveContextOnCommitForExistingTask() throws Exception {
@@ -255,10 +264,13 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
 
     Task task = myRepository.findTask("TEST-001");
     assertNotNull(task);
+    assertEquals(1, myChangeListManager.getChangeListsCopy().size());  // default change list should be here
     myTaskManager.activateTask(task, false, true);
+    myChangeListManager.waitUntilRefreshed();
 
     assertEquals(2, myTaskManager.getLocalTasks().size());
-    assertEquals(2, myChangeListManager.getChangeListsCopy().size());
+    List<LocalChangeList> copy = myChangeListManager.getChangeListsCopy();
+    assertEquals(copy.toString(), 2, copy.size());
     LocalTask localTask = myTaskManager.getActiveTask();
     List<ChangeListInfo> changelists = localTask.getChangeLists();
     ChangeListInfo info = changelists.get(0);
@@ -349,6 +361,25 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
     assertEquals(null, task.getProject());
   }
 
+  public void testRestoreChangelist() throws Exception {
+    final LocalTaskImpl task = new LocalTaskImpl("foo", "bar");
+    myTaskManager.activateTask(task, true, true);
+    myTaskManager.activateTask(new LocalTaskImpl("next", ""), true, true);
+
+    final String changelistName = myTaskManager.getChangelistName(task);
+    myChangeListManager.removeChangeList(changelistName);
+
+    myChangeListManager.invokeAfterUpdate(new Runnable() {
+      @Override
+      public void run() {
+        assertTrue(myTaskManager.isLocallyClosed(task));
+        myTaskManager.activateTask(task, true, true);
+        assertNotNull(myChangeListManager.findChangeList(changelistName));
+      }
+    }, InvokeAfterUpdateMode.SYNCHRONOUS_NOT_CANCELLABLE, "foo", ModalityState.NON_MODAL);
+
+  }
+
   private TestRepository myRepository;
   private MockAbstractVcs myVcs;
 
@@ -363,8 +394,6 @@ public class TaskVcsTest extends CodeInsightFixtureTestCase {
 
     myTaskManager = (TaskManagerImpl)TaskManager.getManager(getProject());
     myTaskManager.projectOpened();
-
-    myChangeListManager.removeChangeListListener(myTaskManager.getChangeListListener());
 
     ProjectLevelVcsManager.getInstance(getProject()).setDirectoryMapping("", myVcs.getName());
     ProjectLevelVcsManager.getInstance(getProject()).hasActiveVcss();

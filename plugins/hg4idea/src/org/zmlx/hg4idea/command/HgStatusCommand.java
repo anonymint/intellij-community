@@ -39,56 +39,86 @@ public class HgStatusCommand {
   private static final int ITEM_COUNT = 3;
   private static final int STATUS_INDEX = 0;
 
-  private final Project project;
+  @NotNull private final Project myProject;
 
-  private boolean includeAdded = true;
-  private boolean includeModified = true;
-  private boolean includeRemoved = true;
-  private boolean includeDeleted = true;
-  private boolean includeUnknown = true;
-  private boolean includeIgnored = true;
-  private boolean includeCopySource = true;
-  @Nullable private HgRevisionNumber baseRevision;
-  @Nullable private HgRevisionNumber targetRevision;
+  private final boolean myIncludeAdded;
+  private final boolean myIncludeModified;
+  private final boolean myIncludeRemoved;
+  private final boolean myIncludeDeleted;
+  private final boolean myIncludeUnknown;
+  private final boolean myIncludeIgnored;
+  private final boolean myIncludeCopySource;
 
-  public HgStatusCommand(Project project) {
-    this.project = project;
+  @Nullable private final HgRevisionNumber myBaseRevision;
+  @Nullable private final HgRevisionNumber myTargetRevision;
+
+
+  public static class Builder {
+    private boolean includeAdded;
+    private boolean includeModified;
+    private boolean includeRemoved;
+    private boolean includeDeleted;
+    private boolean includeUnknown;
+    private boolean includeIgnored;
+    private boolean includeCopySource;
+
+    private HgRevisionNumber baseRevision;
+    private HgRevisionNumber targetRevision;
+
+    public Builder(boolean initValue) {
+      includeAdded = initValue;
+      includeModified = initValue;
+      includeRemoved = initValue;
+      includeDeleted = initValue;
+      includeUnknown = initValue;
+      includeIgnored = initValue;
+      includeCopySource = initValue;
+      baseRevision = null;
+      targetRevision = null;
+    }
+
+    public Builder unknown(boolean val) {
+      includeUnknown = val;
+      return this;
+    }
+
+    public Builder ignored(boolean val) {
+      includeIgnored = val;
+      return this;
+    }
+
+    public Builder copySource(boolean val) {
+      includeCopySource = val;
+      return this;
+    }
+
+    public Builder baseRevision(HgRevisionNumber val) {
+      baseRevision = val;
+      return this;
+    }
+
+    public Builder targetRevision(HgRevisionNumber val) {
+      targetRevision = val;
+      return this;
+    }
+
+    public HgStatusCommand build(@NotNull Project project) {
+      return new HgStatusCommand(project, this);
+    }
+
   }
 
-  public void setIncludeAdded(boolean includeAdded) {
-    this.includeAdded = includeAdded;
-  }
-
-  public void setIncludeModified(boolean includeModified) {
-    this.includeModified = includeModified;
-  }
-
-  public void setIncludeRemoved(boolean includeRemoved) {
-    this.includeRemoved = includeRemoved;
-  }
-
-  public void setIncludeDeleted(boolean includeDeleted) {
-    this.includeDeleted = includeDeleted;
-  }
-
-  public void setIncludeUnknown(boolean includeUnknown) {
-    this.includeUnknown = includeUnknown;
-  }
-
-  public void setIncludeIgnored(boolean includeIgnored) {
-    this.includeIgnored = includeIgnored;
-  }
-
-  public void setIncludeCopySource(boolean includeCopySource) {
-    this.includeCopySource = includeCopySource;
-  }
-
-  public void setBaseRevision(@Nullable HgRevisionNumber base) {
-    baseRevision = base;
-  }
-
-  public void setTargetRevision(HgRevisionNumber target) {
-    targetRevision = target;
+  private HgStatusCommand(@NotNull Project project, @NotNull Builder builder) {
+    myProject = project;
+    myIncludeAdded = builder.includeAdded;
+    myIncludeModified = builder.includeModified;
+    myIncludeRemoved = builder.includeRemoved;
+    myIncludeDeleted = builder.includeDeleted;
+    myIncludeUnknown = builder.includeUnknown;
+    myIncludeIgnored = builder.includeIgnored;
+    myIncludeCopySource = builder.includeCopySource;
+    myBaseRevision = builder.baseRevision;
+    myTargetRevision = builder.targetRevision;
   }
 
   public Set<HgChange> execute(VirtualFile repo) {
@@ -100,37 +130,37 @@ public class HgStatusCommand {
       return Collections.emptySet();
     }
 
-    HgCommandExecutor executor = new HgCommandExecutor(project);
+    HgCommandExecutor executor = new HgCommandExecutor(myProject, null);
     executor.setSilent(true);
 
     List<String> options = new LinkedList<String>();
-    if (includeAdded) {
+    if (myIncludeAdded) {
       options.add("--added");
     }
-    if (includeModified) {
+    if (myIncludeModified) {
       options.add("--modified");
     }
-    if (includeRemoved) {
+    if (myIncludeRemoved) {
       options.add("--removed");
     }
-    if (includeDeleted) {
+    if (myIncludeDeleted) {
       options.add("--deleted");
     }
-    if (includeUnknown) {
+    if (myIncludeUnknown) {
       options.add("--unknown");
     }
-    if (includeIgnored) {
+    if (myIncludeIgnored) {
       options.add("--ignored");
     }
-    if (includeCopySource) {
+    if (myIncludeCopySource) {
       options.add("--copies");
     }
-    if (baseRevision != null && !baseRevision.getRevision().isEmpty()) {
+    if (myBaseRevision != null && !myBaseRevision.getRevision().isEmpty()) {
       options.add("--rev");
-      options.add(baseRevision.getChangeset().isEmpty() ? baseRevision.getRevision() : baseRevision.getChangeset());
-      if (targetRevision != null) {
+      options.add(myBaseRevision.getChangeset().isEmpty() ? myBaseRevision.getRevision() : myBaseRevision.getChangeset());
+      if (myTargetRevision != null) {
         options.add("--rev");
-        options.add(targetRevision.getChangeset());
+        options.add(myTargetRevision.getChangeset());
       }
     }
 
@@ -183,20 +213,9 @@ public class HgStatusCommand {
     return changes;
   }
 
-  private void setOnlyUntrackedTrue() {
-    includeAdded = false;
-    includeModified = false;
-    includeRemoved = false;
-    includeDeleted = false;
-    includeCopySource = false;
-    includeIgnored = false;
-    includeUnknown = true;
-  }
-
   @NotNull
   public Collection<VirtualFile> getHgUntrackedFiles(@NotNull VirtualFile repo, @NotNull List<VirtualFile> files) throws VcsException {
     Collection<VirtualFile> untrackedFiles = new HashSet<VirtualFile>();
-    setOnlyUntrackedTrue();
     List<FilePath> filePaths = ObjectsConvertor.vf2fp(files);
     Set<HgChange> change = execute(repo, filePaths);
     for (HgChange hgChange : change) {

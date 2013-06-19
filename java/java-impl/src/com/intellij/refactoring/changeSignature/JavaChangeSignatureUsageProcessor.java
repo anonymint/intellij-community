@@ -16,6 +16,7 @@
 package com.intellij.refactoring.changeSignature;
 
 import com.intellij.codeInsight.ExceptionUtil;
+import com.intellij.codeInsight.daemon.impl.analysis.JavaHighlightUtil;
 import com.intellij.lang.StdLanguages;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -33,6 +34,7 @@ import com.intellij.psi.scope.util.PsiScopesUtil;
 import com.intellij.psi.util.*;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.rename.RenameUtil;
+import com.intellij.refactoring.rename.ResolveSnapshotProvider;
 import com.intellij.refactoring.util.*;
 import com.intellij.refactoring.util.usageInfo.DefaultConstructorImplicitUsageInfo;
 import com.intellij.refactoring.util.usageInfo.NoConstructorClassUsageInfo;
@@ -244,7 +246,7 @@ public class JavaChangeSignatureUsageProcessor implements ChangeSignatureUsagePr
 
     if (toCatchExceptions) {
       if (!(ref instanceof PsiReferenceExpression &&
-            RefactoringUtil.isSuperOrThisCall(PsiTreeUtil.getParentOfType(ref, PsiStatement.class), true, false))) {
+            JavaHighlightUtil.isSuperOrThisCall(PsiTreeUtil.getParentOfType(ref, PsiStatement.class), true, false))) {
         if (needToCatchExceptions(changeInfo, caller)) {
           PsiClassType[] newExceptions =
             callee != null ? getCalleeChangedExceptionInfo(callee) : getPrimaryChangedExceptionInfo(changeInfo);
@@ -537,8 +539,9 @@ public class JavaChangeSignatureUsageProcessor implements ChangeSignatureUsagePr
             containingClass = PsiTreeUtil.getParentOfType(containingClass, PsiClass.class);
           }
           if (containingClasses.size() == 1) {
-            return RefactoringUtil.createThisExpression(parentClass.getManager(), containingClasses.contains(parentClass) ? null
-                                                                                                                          : containingClasses.iterator().next());
+            return RefactoringChangeUtil.createThisExpression(parentClass.getManager(), containingClasses.contains(parentClass) ? null
+                                                                                                                                : containingClasses
+                                                                                          .iterator().next());
           }
         }
       }
@@ -602,6 +605,18 @@ public class JavaChangeSignatureUsageProcessor implements ChangeSignatureUsagePr
       }
     }
     return true;
+  }
+
+  @Override
+  public void registerConflictResolvers(List<ResolveSnapshotProvider.ResolveSnapshot> snapshots,
+                                        @NotNull ResolveSnapshotProvider resolveSnapshotProvider,
+                                        UsageInfo[] usages, ChangeInfo changeInfo) {
+    snapshots.add(resolveSnapshotProvider.createSnapshot(changeInfo.getMethod()));
+    for (UsageInfo usage : usages) {
+      if (usage instanceof OverriderUsageInfo) {
+        snapshots.add(resolveSnapshotProvider.createSnapshot(usage.getElement()));
+      }
+    }
   }
 
   private static boolean needDefaultValue(ChangeInfo changeInfo, PsiMethod method) {
@@ -748,8 +763,8 @@ public class JavaChangeSignatureUsageProcessor implements ChangeSignatureUsagePr
         baseMethod == null ? PsiSubstitutor.EMPTY : ChangeSignatureProcessor.calculateSubstitutor(caller, baseMethod);
       final PsiClass aClass = changeInfo.getMethod().getContainingClass();
       final PsiClass callerContainingClass = caller.getContainingClass();
-      final PsiSubstitutor psiSubstitutor = aClass != null && callerContainingClass != null && callerContainingClass.isInheritor(aClass, true) 
-                                            ? TypeConversionUtil.getSuperClassSubstitutor(aClass, callerContainingClass, substitutor) 
+      final PsiSubstitutor psiSubstitutor = aClass != null && callerContainingClass != null && callerContainingClass.isInheritor(aClass, true)
+                                            ? TypeConversionUtil.getSuperClassSubstitutor(aClass, callerContainingClass, substitutor)
                                             : PsiSubstitutor.EMPTY;
       for (JavaParameterInfo info : primaryNewParms) {
         if (info.getOldIndex() < 0) newParameters.add(createNewParameter(changeInfo, info, psiSubstitutor, substitutor));

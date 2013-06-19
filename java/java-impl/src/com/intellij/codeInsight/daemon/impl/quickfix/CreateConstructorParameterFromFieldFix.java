@@ -15,7 +15,7 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
@@ -97,7 +97,7 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) throws IncorrectOperationException {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
     PsiMethod[] constructors = myClass.getConstructors();
     if (constructors.length == 0) {
@@ -238,7 +238,7 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
     final List<PsiVariable> params = new ArrayList<PsiVariable>(Arrays.asList(parameters));
     Collections.addAll(params, fields);
     Collections.sort(params, new FieldParameterComparator(parameterList));
-    
+
     int i = 0;
     final HashMap<PsiField, String> usedFields = new HashMap<PsiField, String>();
     for (PsiVariable param : params) {
@@ -261,7 +261,7 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
     final int minUsagesNumber = containingClass.findMethodsBySignature(fromText, false).length > 0 ? 0 : 1;
     final List<ParameterInfoImpl> parameterInfos =
       ChangeMethodSignatureFromUsageFix.performChange(project, editor, file, constructor, minUsagesNumber, newParamInfos, true, true);
-    
+
     final ParameterInfoImpl[] resultParams = parameterInfos != null ? parameterInfos.toArray(new ParameterInfoImpl[parameterInfos.size()]) :
                                              newParamInfos;
     return ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>() {
@@ -284,7 +284,7 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
   private static String getUniqueParameterName(PsiParameter[] parameters, PsiVariable variable, HashMap<PsiField, String> usedNames) {
     final JavaCodeStyleManager styleManager = JavaCodeStyleManager.getInstance(variable.getProject());
     final SuggestedNameInfo nameInfo = styleManager
-      .suggestVariableName(VariableKind.PARAMETER, 
+      .suggestVariableName(VariableKind.PARAMETER,
                            styleManager.variableNameToPropertyName(variable.getName(), VariableKind.FIELD),
                            null, variable.getType());
     String newName = nameInfo.names[0];
@@ -317,11 +317,9 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
     boolean created = false;
     // do not introduce assignment in chanined constructor
     if (HighlightControlFlowUtil.getChainedConstructors(constructor) == null) {
-      final JavaCodeStyleManager styleManager = JavaCodeStyleManager.getInstance(project);
-
       for (PsiField field : fields.keySet()) {
         final String defaultParamName = fields.get(field);
-        PsiParameter parameter = findParamByName(defaultParamName, newParameters);
+        PsiParameter parameter = findParamByName(defaultParamName, field.getType(), newParameters, parameterInfos);
         if (parameter == null) {
           continue;
         }
@@ -342,15 +340,25 @@ public class CreateConstructorParameterFromFieldFix implements IntentionAction {
   }
 
   @Nullable
-  private static PsiParameter findParamByName(String newName, PsiParameter[] newParameters) {
-    PsiParameter parameter = null;
+  private static PsiParameter findParamByName(String newName,
+                                              PsiType type,
+                                              PsiParameter[] newParameters,
+                                              ParameterInfoImpl[] parameterInfos) {
     for (PsiParameter newParameter : newParameters) {
       if (Comparing.strEqual(newName, newParameter.getName())) {
-        parameter = newParameter;
-        break;
+        return newParameter;
       }
     }
-    return parameter;
+    for (int i = 0; i < newParameters.length; i++) {
+      if (parameterInfos[i].getOldIndex() == -1) {
+        final PsiParameter parameter = newParameters[i];
+        final PsiType paramType = parameterInfos[i].getTypeWrapper().getType(parameter, parameter.getManager());
+        if (type.isAssignableFrom(paramType)){
+          return parameter;
+        }
+      }
+    }
+    return null;
   }
 
   private PsiField getField() {

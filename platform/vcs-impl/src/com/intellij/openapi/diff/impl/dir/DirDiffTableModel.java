@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.ui.TableUtil;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLoadingPanel;
 import com.intellij.ui.table.JBTable;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.StatusText;
 import org.jetbrains.annotations.Nullable;
 
@@ -68,7 +69,7 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
   public String DECORATOR = "DIFF_TABLE_DECORATOR";
   public volatile AtomicReference<String> text = new AtomicReference<String>(prepareText(""));
   private Updater myUpdater;
-  private List<DirDiffModelListener> myListeners = new ArrayList<DirDiffModelListener>();
+  private List<DirDiffModelListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private TableSelectionConfig mySelectionConfig;
   private String myStatus = null;
   public static final String EMPTY_STRING = "                                                  ";
@@ -222,10 +223,12 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
           reportException(VcsBundle.message("refresh.failed.message", StringUtil.decapitalize(e.getLocalizedMessage())));
         }
         finally {
-          myTree.setSource(mySrc);
-          myTree.setTarget(myTrg);
-          myTree.update(mySettings);
-          applySettings();
+          if (myTree != null) {
+            myTree.setSource(mySrc);
+            myTree.setTarget(myTrg);
+            myTree.update(mySettings);
+            applySettings();
+          }
         }
       }
     });

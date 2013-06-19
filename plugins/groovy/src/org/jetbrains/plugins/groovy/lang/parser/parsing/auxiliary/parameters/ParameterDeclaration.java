@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ public class ParameterDeclaration implements GroovyElementTypes {
 
     final ReferenceElement.ReferenceElementResult result = TypeSpec.parseStrict(builder, true);
 
-    if (result == ReferenceElement.ReferenceElementResult.fail && !hasModifiers) {
+    if (result == ReferenceElement.ReferenceElementResult.FAIL && !hasModifiers) {
       rb.drop();
       pdMarker.rollbackTo();
       return false;
@@ -90,7 +90,7 @@ public class ParameterDeclaration implements GroovyElementTypes {
     if (mIDENT.equals(builder.getTokenType()) || (mTRIPLE_DOT.equals(builder.getTokenType()))) {
       rb.drop();
     }
-    else if (result == ReferenceElement.ReferenceElementResult.mustBeType) {
+    else if (result == ReferenceElement.ReferenceElementResult.REF_WITH_TYPE_PARAMS) {
       rb.drop();
       pdMarker.error(GroovyBundle.message("identifier.expected"));
       return true;
@@ -135,7 +135,7 @@ public class ParameterDeclaration implements GroovyElementTypes {
       rb.drop();
       rb = builder.mark();
       final ReferenceElement.ReferenceElementResult result = TypeSpec.parseStrict(builder, false);
-      if (result == ReferenceElement.ReferenceElementResult.fail && ParserUtils.lookAhead(builder, mBOR)) {
+      if (result == ReferenceElement.ReferenceElementResult.FAIL && ParserUtils.lookAhead(builder, mBOR)) {
         builder.error(GroovyBundle.message("type.expected"));
       }
       else {
@@ -214,7 +214,10 @@ public class ParameterDeclaration implements GroovyElementTypes {
         }
         ParserUtils.getToken(builder, mNLS);
       }
-      else if (Annotation.parse(builder, parser)) {
+      else { // @
+        if (!Annotation.parse(builder, parser)) {
+          ParserUtils.wrapError(builder, GroovyBundle.message("annotation.expected"));
+        }
         ParserUtils.getToken(builder, mNLS);
       }
     }

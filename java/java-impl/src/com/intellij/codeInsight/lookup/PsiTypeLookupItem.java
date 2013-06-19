@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.DebugUtil;
 import com.intellij.psi.impl.source.PostprocessReformattingAspect;
 import com.intellij.psi.impl.source.PsiClassReferenceType;
-import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -55,6 +55,7 @@ public class PsiTypeLookupItem extends LookupItem {
   private final int myBracketsCount;
   private boolean myIndicateAnonymous;
   private final InsertHandler<PsiTypeLookupItem> myImportFixer;
+  private boolean myAddArrayInitializer;
 
   private PsiTypeLookupItem(Object o, @NotNull @NonNls String lookupString, boolean diamond, int bracketsCount, InsertHandler<PsiTypeLookupItem> fixer) {
     super(o, lookupString);
@@ -84,7 +85,17 @@ public class PsiTypeLookupItem extends LookupItem {
 
   @Override
   public boolean equals(final Object o) {
-    return super.equals(o) && o instanceof PsiTypeLookupItem && getBracketsCount() == ((PsiTypeLookupItem) o).getBracketsCount();
+    return super.equals(o) && o instanceof PsiTypeLookupItem &&
+           getBracketsCount() == ((PsiTypeLookupItem) o).getBracketsCount() &&
+           myAddArrayInitializer == ((PsiTypeLookupItem) o).myAddArrayInitializer;
+  }
+
+  public boolean isAddArrayInitializer() {
+    return myAddArrayInitializer;
+  }
+
+  public void setAddArrayInitializer() {
+    myAddArrayInitializer = true;
   }
 
   @Override
@@ -93,7 +104,6 @@ public class PsiTypeLookupItem extends LookupItem {
 
     PsiElement position = context.getFile().findElementAt(context.getStartOffset());
     assert position != null;
-    boolean addBraces = shouldAddBraces(position);
     int genericsStart = context.getTailOffset();
     context.getDocument().insertString(genericsStart, JavaCompletionUtil.escapeXmlIfNeeded(context, calcGenerics(position, context)));
     JavaCompletionUtil.shortenReference(context.getFile(), genericsStart - 1);
@@ -102,7 +112,7 @@ public class PsiTypeLookupItem extends LookupItem {
     String braces = StringUtil.repeat("[]", getBracketsCount());
     Editor editor = context.getEditor();
     if (!braces.isEmpty()) {
-      if (LookupEvent.isSpecialCompletionChar(context.getCompletionChar()) && addBraces) {
+      if (myAddArrayInitializer) {
         context.getDocument().insertString(tail, braces + "{}");
         editor.getCaretModel().moveToOffset(tail + braces.length() + 1);
       } else {
@@ -123,14 +133,6 @@ public class PsiTypeLookupItem extends LookupItem {
       //noinspection unchecked
       handler.handleInsert(context, this);
     }
-  }
-
-  private static boolean shouldAddBraces(PsiElement position) {
-    if (!JavaCompletionContributor.isInJavaContext(position) || !JavaSmartCompletionContributor.AFTER_NEW.accepts(position)) {
-      return false;
-    }
-    PsiNewExpression newExpression = PsiTreeUtil.getParentOfType(position, PsiNewExpression.class);
-    return newExpression != null && newExpression.getParent() instanceof PsiExpressionList;
   }
 
   public String calcGenerics(@NotNull PsiElement context, InsertionContext insertionContext) {
@@ -212,27 +214,29 @@ public class PsiTypeLookupItem extends LookupItem {
       final PsiClass psiClass = classResolveResult.getElement();
 
       if (psiClass != null) {
-        final PsiSubstitutor substitutor = classResolveResult.getSubstitutor();
+        String name = psiClass.getName();
+        if (name != null) {
+          final PsiSubstitutor substitutor = classResolveResult.getSubstitutor();
 
-        PsiClass resolved = JavaPsiFacade.getInstance(psiClass.getProject()).getResolveHelper().resolveReferencedClass(psiClass.getName(), context);
+          PsiClass resolved = JavaPsiFacade.getInstance(psiClass.getProject()).getResolveHelper().resolveReferencedClass(name, context);
 
-        Set<String> allStrings = new HashSet<String>();
-        String lookupString = psiClass.getName();
-        allStrings.add(lookupString);
-        if (!psiClass.getManager().areElementsEquivalent(resolved, psiClass) && !PsiUtil.isInnerClass(psiClass)) {
-          // inner class name should be shown qualified if its not accessible by single name
-          PsiClass aClass = psiClass.getContainingClass();
-          while (aClass != null && !PsiUtil.isInnerClass(aClass)) {
-            lookupString = aClass.getName() + '.' + lookupString;
-            allStrings.add(lookupString);
-            aClass = aClass.getContainingClass();
+          Set<String> allStrings = new HashSet<String>();
+          allStrings.add(name);
+          if (!psiClass.getManager().areElementsEquivalent(resolved, psiClass) && !PsiUtil.isInnerClass(psiClass)) {
+            // inner class name should be shown qualified if its not accessible by single name
+            PsiClass aClass = psiClass.getContainingClass();
+            while (aClass != null && !PsiUtil.isInnerClass(aClass) && aClass.getName() != null) {
+              name = aClass.getName() + '.' + name;
+              allStrings.add(name);
+              aClass = aClass.getContainingClass();
+            }
           }
-        }
 
-        PsiTypeLookupItem item = new PsiTypeLookupItem(psiClass, lookupString, diamond, bracketsCount, importFixer);
-        item.addLookupStrings(allStrings.toArray(new String[allStrings.size()]));
-        item.setAttribute(SUBSTITUTOR, substitutor);
-        return item;
+          PsiTypeLookupItem item = new PsiTypeLookupItem(psiClass, name, diamond, bracketsCount, importFixer);
+          item.addLookupStrings(ArrayUtil.toStringArray(allStrings));
+          item.setAttribute(SUBSTITUTOR, substitutor);
+          return item;
+        }
       }
 
     }
@@ -271,6 +275,9 @@ public class PsiTypeLookupItem extends LookupItem {
 
       presentation.setItemText(((PsiType)object).getCanonicalText());
       presentation.setItemTextBold(getAttribute(LookupItem.HIGHLIGHTED_ATTR) != null || object instanceof PsiPrimitiveType);
+      if (isAddArrayInitializer()) {
+        presentation.setTailText("{...}");
+      }
 
     }
     if (myBracketsCount > 0) {

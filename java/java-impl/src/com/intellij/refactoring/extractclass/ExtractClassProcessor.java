@@ -53,6 +53,7 @@ import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.refactoring.util.classMembers.MemberInfo;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewDescriptor;
+import com.intellij.usageView.UsageViewUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.VisibilityUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -109,7 +110,9 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     myGenerateAccessors = generateAccessors;
     this.enumConstants = new ArrayList<PsiField>();
     for (MemberInfo constant : enumConstants) {
-      this.enumConstants.add((PsiField)constant.getMember());
+      if (constant.isChecked()) {
+        this.enumConstants.add((PsiField)constant.getMember());
+      }
     }
     this.fields = new ArrayList<PsiField>(fields);
     this.methods = new ArrayList<PsiMethod>(methods);
@@ -139,7 +142,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
         result.setResult(buildClass());
       }
     }.execute().getResultObject();
-    myExtractEnumProcessor = new ExtractEnumProcessor(myProject, this.enumConstants, fields, myClass);
+    myExtractEnumProcessor = new ExtractEnumProcessor(myProject, this.enumConstants, myClass);
   }
 
   public PsiClass getCreatedClass() {
@@ -149,7 +152,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
   @Override
   protected boolean preprocessUsages(final Ref<UsageInfo[]> refUsages) {
     final MultiMap<PsiElement, String> conflicts = new MultiMap<PsiElement, String>();
-    myExtractEnumProcessor.findEnumConstantConflicts(refUsages, conflicts);
+    myExtractEnumProcessor.findEnumConstantConflicts(refUsages);
     if (!DestinationFolderComboBox.isAccessible(myProject, sourceClass.getContainingFile().getVirtualFile(),
                                                 myClass.getContainingFile().getContainingDirectory().getVirtualFile())) {
       conflicts.putValue(sourceClass, "Extracted class won't be accessible in " + RefactoringUIUtil.getDescription(sourceClass, true));
@@ -210,8 +213,8 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
       public void visitReferenceExpression(final PsiReferenceExpression expression) {
         super.visitReferenceExpression(expression);
         final PsiElement resolved = expression.resolve();
-        if (resolved != null) {
-          dependsOnMoved[0] |= isInMovedElement(resolved);
+        if (resolved instanceof PsiMember) {
+          dependsOnMoved[0] |= !((PsiMember)resolved).hasModifierProperty(PsiModifier.STATIC) && isInMovedElement(resolved);
         }
       }
     });
@@ -318,7 +321,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     super.performRefactoring(usageInfos);
     if (myNewVisibility == null) return;
     for (PsiMember member : members) {
-      VisibilityUtil.fixVisibility(usageInfos, member, myNewVisibility);
+      VisibilityUtil.fixVisibility(UsageViewUtil.toElements(usageInfos), member, myNewVisibility);
     }
   }
 
@@ -548,6 +551,7 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
     final Project project = psiManager.getProject();
     final GlobalSearchScope scope = GlobalSearchScope.allScope(project);
     final Iterable<PsiReference> calls = ReferencesSearch.search(method, scope);
+    final String fullyQualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
     for (PsiReference reference : calls) {
       final PsiElement referenceElement = reference.getElement();
 
@@ -555,8 +559,15 @@ public class ExtractClassProcessor extends FixableUsagesRefactoringProcessor {
       if (parent instanceof PsiMethodCallExpression) {
         final PsiMethodCallExpression call = (PsiMethodCallExpression)parent;
         if (!isInMovedElement(call)) {
-          final String fullyQualifiedName = StringUtil.getQualifiedName(newPackageName, newClassName);
           usages.add(new RetargetStaticMethodCall(call, fullyQualifiedName));
+        }
+      } else if (parent instanceof PsiImportStaticStatement) {
+        final PsiJavaCodeReferenceElement importReference = ((PsiImportStaticStatement)parent).getImportReference();
+        if (importReference != null) {
+          final PsiElement qualifier = importReference.getQualifier();
+          if (qualifier instanceof PsiJavaCodeReferenceElement) {
+            usages.add(new ReplaceClassReference((PsiJavaCodeReferenceElement)qualifier, fullyQualifiedName));
+          }
         }
       }
     }

@@ -21,11 +21,13 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FilePathImpl;
+import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.annotate.ShowAllAffectedGenericAction;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.history.*;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.Processor;
 import com.intellij.util.ui.ColumnInfo;
@@ -63,7 +65,7 @@ public class GitHistoryProvider implements VcsHistoryProvider, VcsCacheableHisto
   }
 
   public AnAction[] getAdditionalActions(Runnable refresher) {
-    return new AnAction[]{ ShowAllAffectedGenericAction.getInstance(), new GitCopyHistoryRevisionNumberAction()};
+    return new AnAction[]{ ShowAllAffectedGenericAction.getInstance(), new CopyRevisionNumberAction()};
   }
 
   public boolean isDateOmittable() {
@@ -159,22 +161,24 @@ public class GitHistoryProvider implements VcsHistoryProvider, VcsCacheableHisto
   public void reportAppendableHistory(final FilePath path, final VcsAppendableHistorySessionPartner partner) throws VcsException {
     final VcsAbstractHistorySession emptySession = createSession(path, Collections.<VcsFileRevision>emptyList(), null);
     partner.reportCreatedEmptySession(emptySession);
+
+    VcsConfiguration vcsConfiguration = VcsConfiguration.getInstance(myProject);
+    String[] additionalArgs = vcsConfiguration.LIMIT_HISTORY ?
+                              new String[] { "--max-count=" + vcsConfiguration.MAXIMUM_HISTORY_ROWS } :
+                              ArrayUtil.EMPTY_STRING_ARRAY;
+
     final GitExecutableValidator validator = GitVcs.getInstance(myProject).getExecutableValidator();
-    try {
-      GitHistoryUtils.history(myProject, refreshPath(path), null, new Consumer<GitFileRevision>() {
-        public void consume(GitFileRevision gitFileRevision) {
-          partner.acceptRevision(gitFileRevision);
+    GitHistoryUtils.history(myProject, refreshPath(path), null, new Consumer<GitFileRevision>() {
+      public void consume(GitFileRevision gitFileRevision) {
+        partner.acceptRevision(gitFileRevision);
+      }
+    }, new Consumer<VcsException>() {
+      public void consume(VcsException e) {
+        if (validator.checkExecutableAndNotifyIfNeeded()) {
+          partner.reportException(e);
         }
-      }, new Consumer<VcsException>() {
-        public void consume(VcsException e) {
-          if (validator.checkExecutableAndNotifyIfNeeded()) {
-            partner.reportException(e);
-          }
-        }
-      });
-    } catch (VcsException e) {
-      validator.showNotificationOrThrow(e);
-    }
+      }
+    }, additionalArgs);
   }
 
   /**

@@ -30,7 +30,7 @@ public class MavenExecutionOptions {
     private final String myDisplayString;
     private final int myLevel;
 
-    private LoggingLevel(String displayString, int level) {
+    LoggingLevel(String displayString, int level) {
       myDisplayString = displayString;
       myLevel = level;
     }
@@ -45,12 +45,12 @@ public class MavenExecutionOptions {
   }
 
   public enum FailureMode {
-    FAST("Fail Fast", "--fail-fast"), AT_END("Fail At End", "--fail-at-end"), NEVER("Never Fail", "--fail-never");
+    NOT_SET("Default", ""), FAST("Fail Fast", "--fail-fast"), AT_END("Fail At End", "--fail-at-end"), NEVER("Never Fail", "--fail-never");
 
     private final String myDisplayString;
     private final String myCommandLineOption;
 
-    private FailureMode(String displayString, String commandLineOption) {
+    FailureMode(String displayString, String commandLineOption) {
       myDisplayString = displayString;
       myCommandLineOption = commandLineOption;
     }
@@ -72,7 +72,7 @@ public class MavenExecutionOptions {
     private final String myDisplayString;
     private final String myCommandLineOption;
 
-    private ChecksumPolicy(String displayString, String commandLineOption) {
+    ChecksumPolicy(String displayString, String commandLineOption) {
       myDisplayString = displayString;
       myCommandLineOption = commandLineOption;
     }
@@ -83,33 +83,6 @@ public class MavenExecutionOptions {
 
     public String getCommandLineOption() {
       return myCommandLineOption;
-    }
-  }
-
-  public enum SnapshotUpdatePolicy {
-    ALWAYS_UPDATE("Always Update", "--update-snapshots", MavenServerSettings.UpdatePolicy.ALWAYS_UPDATE),
-    DO_NOT_UPDATE("Do Not Update", "", MavenServerSettings.UpdatePolicy.DO_NOT_UPDATE);
-
-    private final String myDisplayString;
-    private final String myCommandLineOption;
-    private final MavenServerSettings.UpdatePolicy myServerPolicy;
-
-    private SnapshotUpdatePolicy(String displayString, String commandLineOption, MavenServerSettings.UpdatePolicy policy) {
-      myDisplayString = displayString;
-      myCommandLineOption = commandLineOption;
-      myServerPolicy = policy;
-    }
-
-    public String getDisplayString() {
-      return myDisplayString;
-    }
-
-    public String getCommandLineOption() {
-      return myCommandLineOption;
-    }
-
-    public MavenServerSettings.UpdatePolicy getServerPolicy() {
-      return myServerPolicy;
     }
   }
 
@@ -122,7 +95,7 @@ public class MavenExecutionOptions {
     private final String myCommandLineOption;
     private final MavenServerSettings.UpdatePolicy myServerPolicy;
 
-    private PluginUpdatePolicy(String displayString, String commandLineOption, MavenServerSettings.UpdatePolicy policy) {
+    PluginUpdatePolicy(String displayString, String commandLineOption, MavenServerSettings.UpdatePolicy policy) {
       myDisplayString = displayString;
       myCommandLineOption = commandLineOption;
       myServerPolicy = policy;

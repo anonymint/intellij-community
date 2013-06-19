@@ -43,13 +43,13 @@ import java.util.List;
  */
 public class VirtualFilePointerContainerImpl extends TraceableDisposable implements VirtualFilePointerContainer, Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vfs.pointers.VirtualFilePointerContainer");
-  @NotNull private final List<VirtualFilePointer> myList = ContainerUtil.createEmptyCOWList();
+  @NotNull private final List<VirtualFilePointer> myList = ContainerUtil.createLockFreeCopyOnWriteList();
   @NotNull private final VirtualFilePointerManager myVirtualFilePointerManager;
   @NotNull private final Disposable myParent;
   private final VirtualFilePointerListener myListener;
   private volatile Trinity<String[], VirtualFile[], VirtualFile[]> myCachedThings;
   private volatile long myTimeStampOfCachedThings = -1;
-  @NonNls private static final String URL_ATTR = "url";
+  @NonNls public static final String URL_ATTR = "url";
   private boolean myDisposed;
   private static final boolean TRACE_CREATION = LOG.isDebugEnabled() || ApplicationManager.getApplication().isUnitTestMode();
 

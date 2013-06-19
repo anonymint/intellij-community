@@ -58,7 +58,7 @@ import java.util.Map;
  */
 public final class InternalDecorator extends JPanel implements Queryable, TypeSafeDataProvider {
 
-  private static final int DIVIDER_WIDTH = 5;
+  private static final int DIVIDER_WIDTH = UIUtil.isUnderDarcula() ? 2 : 5;
 
   private Project myProject;
   private WindowInfoImpl myInfo;
@@ -81,10 +81,10 @@ public final class InternalDecorator extends JPanel implements Queryable, TypeSa
   private final ToolWindowHandler myToolWindowHandler;
   private final MyKeymapManagerListener myWeakKeymapManagerListener;
   @NonNls private static final String HIDE_ACTIVE_WINDOW_ACTION_ID = "HideActiveWindow";
-  @NonNls private static final String TOGGLE_PINNED_MODE_ACTION_ID = "TogglePinnedMode";
-  @NonNls private static final String TOGGLE_DOCK_MODE_ACTION_ID = "ToggleDockMode";
-  @NonNls private static final String TOGGLE_FLOATING_MODE_ACTION_ID = "ToggleFloatingMode";
-  @NonNls private static final String TOGGLE_SIDE_MODE_ACTION_ID = "ToggleSideMode";
+  @NonNls public static final String TOGGLE_PINNED_MODE_ACTION_ID = "TogglePinnedMode";
+  @NonNls public static final String TOGGLE_DOCK_MODE_ACTION_ID = "ToggleDockMode";
+  @NonNls public static final String TOGGLE_FLOATING_MODE_ACTION_ID = "ToggleFloatingMode";
+  @NonNls public static final String TOGGLE_SIDE_MODE_ACTION_ID = "ToggleSideMode";
   @NonNls private static final String TOGGLE_CONTENT_UI_TYPE_ACTION_ID = "ToggleContentUiTypeMode";
   
   private ToolWindowHeader myHeader;
@@ -319,7 +319,7 @@ public final class InternalDecorator extends JPanel implements Queryable, TypeSa
     add(contentPane, BorderLayout.CENTER);
     setBorder(new InnerPanelBorder(myToolWindow));
     if (SystemInfo.isMac) {
-      setBackground(Gray._200);
+      setBackground(new JBColor(Gray._200, Gray._90));
     }
 
     // Add listeners

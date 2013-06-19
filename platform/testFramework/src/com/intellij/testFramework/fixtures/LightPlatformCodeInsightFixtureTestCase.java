@@ -26,6 +26,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.PsiManager;
 import com.intellij.testFramework.LightProjectDescriptor;
+import com.intellij.testFramework.PlatformTestCase;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.fixtures.impl.LightTempDirTestFixtureImpl;
@@ -37,6 +38,12 @@ import java.io.File;
  * @author peter
  */
 public abstract class LightPlatformCodeInsightFixtureTestCase extends UsefulTestCase{
+
+  @SuppressWarnings("JUnitTestCaseWithNonTrivialConstructors")
+  public LightPlatformCodeInsightFixtureTestCase() {
+    PlatformTestCase.autodetectPlatformPrefix();
+  }
+
   protected CodeInsightTestFixture myFixture;
   protected Module myModule;
 
@@ -79,7 +86,8 @@ public abstract class LightPlatformCodeInsightFixtureTestCase extends UsefulTest
   }
 
    /**
-    * Return absolute path to the test data. Not intended to be overridden.
+    * Return absolute path to the test data. Not intended to be overridden in tests written as part of the IntelliJ IDEA codebase;
+    * must be overridden in plugins which use the test framework.
     *
     * @return absolute path to the test data.
     */

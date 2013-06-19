@@ -25,4 +25,6 @@ public interface GlobalOptions {
   String GENERATE_CLASSPATH_INDEX_OPTION = "generate.classpath.index";
   String COMPILE_PARALLEL_OPTION = "compile.parallel";
   String COMPILE_PARALLEL_MAX_THREADS_OPTION = "compile.parallel.max.threads";
+  String REBUILD_ON_DEPENDENCY_CHANGE_OPTION = "rebuild.on.dependency.change";
+  String LOG_DIR_OPTION = "log.dir";
 }

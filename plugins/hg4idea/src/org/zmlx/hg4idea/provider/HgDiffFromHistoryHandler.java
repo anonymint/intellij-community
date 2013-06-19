@@ -115,7 +115,9 @@ public class HgDiffFromHistoryHandler implements DiffFromHistoryHandler {
 
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        myChanges = HgUtil.getDiff(HgDiffFromHistoryHandler.this.myProject, root, path, rev1, rev2);
+        if (myProject != null) {
+          myChanges = HgUtil.getDiff(HgDiffFromHistoryHandler.this.myProject, root, path, rev1, rev2);
+        }
       }
 
       @Override

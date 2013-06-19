@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2000-2009 JetBrains s.r.o.
  *
@@ -52,7 +51,7 @@ public class GotoNextErrorHandler implements CodeInsightActionHandler {
   }
 
   private void gotoNextError(Project project, Editor editor, PsiFile file, int caretOffset) {
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     DaemonCodeAnalyzerSettings settings = DaemonCodeAnalyzerSettings.getInstance();
     int maxSeverity = settings.NEXT_ERROR_ACTION_GOES_TO_ERRORS_FIRST ? severityRegistrar.getSeveritiesCount() - 1 : 0;
 
@@ -150,7 +149,7 @@ public class GotoNextErrorHandler implements CodeInsightActionHandler {
     int start = info.getActualStartOffset();
     if (start >= document.getTextLength()) return document.getTextLength();
     char c = document.getCharsSequence().charAt(start);
-    int shift = info.isAfterEndOfLine && c != '\n' ? 1 : info.navigationShift;
+    int shift = info.isAfterEndOfLine() && c != '\n' ? 1 : info.navigationShift;
 
     int offset = info.getActualStartOffset() + shift;
     return Math.min(offset, document.getTextLength());

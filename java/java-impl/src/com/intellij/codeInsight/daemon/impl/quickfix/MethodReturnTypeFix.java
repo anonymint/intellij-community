@@ -15,7 +15,7 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
 import com.intellij.codeInsight.intention.HighPriorityAction;
@@ -107,7 +107,7 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
                      @NotNull PsiElement endElement) {
     final PsiMethod myMethod = (PsiMethod)startElement;
 
-    if (!CodeInsightUtilBase.prepareFileForWrite(myMethod.getContainingFile())) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(myMethod.getContainingFile())) return;
     PsiType myReturnType = myReturnTypePointer.getType();
     if (myReturnType == null) return;
     if (myFixWholeHierarchy) {
@@ -338,14 +338,16 @@ public class MethodReturnTypeFix extends LocalQuickFixAndIntentionActionOnPsiEle
     final PsiSubstitutor superClassSubstitutor =
       TypeConversionUtil.getSuperClassSubstitutor(superClass, baseClass, PsiSubstitutor.EMPTY);
     final PsiType superReturnTypeInBaseClassType = superClassSubstitutor.substitute(superReturnType);
-    PsiResolveHelper resolveHelper = JavaPsiFacade.getInstance(project).getResolveHelper();
+    final PsiResolveHelper resolveHelper = JavaPsiFacade.getInstance(project).getResolveHelper();
     final PsiSubstitutor psiSubstitutor = resolveHelper.inferTypeArguments(baseClass.getTypeParameters(),
                                                                            new PsiType[]{superReturnTypeInBaseClassType},
                                                                            new PsiType[]{returnType},
                                                                            PsiUtil.getLanguageLevel(superClass));
 
     final TypeMigrationRules rules = new TypeMigrationRules(TypeMigrationLabeler.getElementType(derivedClass));
-    rules.setMigrationRootType(JavaPsiFacade.getElementFactory(project).createType(baseClass, psiSubstitutor));
+    final PsiSubstitutor compoundSubstitutor =
+      TypeConversionUtil.getSuperClassSubstitutor(superClass, derivedClass, PsiSubstitutor.EMPTY).putAll(psiSubstitutor);
+    rules.setMigrationRootType(JavaPsiFacade.getElementFactory(project).createType(baseClass, compoundSubstitutor));
     rules.setBoundScope(new LocalSearchScope(derivedClass));
     TypeMigrationProcessor.runHighlightingTypeMigration(project, editor, rules, referenceParameterList);
 

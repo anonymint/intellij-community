@@ -82,8 +82,23 @@ public class BookmarksAction extends AnAction implements DumbAware, MasterDetail
       .setActionsGroup(actions)
       .setList(list)
       .setDetailView(new DetailViewImpl(project))
+      .setCloseOnEnter(false)
+      .setDoneRunnable(new Runnable() {
+        @Override
+        public void run() {
+          myPopup.cancel();
+        }
+      })
       .setDelegate(this).createMasterDetailPopup();
-
+    new AnAction() {
+      @Override
+      public void actionPerformed(AnActionEvent e) {
+        Object selectedValue = list.getSelectedValue();
+        if (selectedValue instanceof BookmarkItem) {
+          itemChosen((BookmarkItem)selectedValue, project, myPopup, true);
+        }
+      }
+    }.registerCustomShortcutSet(CommonShortcuts.getEditSource(), list);
     editDescriptionAction.setPopup(myPopup);
     myPopup.showCenteredInCurrentWindow(project);
     //todo[zaec] selection mode shouldn't be set in builder.setList() method
@@ -102,13 +117,15 @@ public class BookmarksAction extends AnAction implements DumbAware, MasterDetail
     if (bookmark != null) {
       popup.cancel();
       IdeFocusManager.getInstance(project).doWhenFocusSettlesDown(new Runnable() {
+        @Override
         public void run() {
-          bookmark.navigate();
+          bookmark.navigate(true);
         }
       });
     }
   }
 
+  @Override
   @Nullable
   public JComponent createAccessoryView(Project project) {
     if (!BookmarkManager.getInstance(project).hasBookmarksWithMnemonics()) {
@@ -129,11 +146,16 @@ public class BookmarksAction extends AnAction implements DumbAware, MasterDetail
 
   @Override
   public void itemChosen(ItemWrapper item, Project project, JBPopup popup, boolean withEnterOrDoubleClick) {
-    if (item instanceof BookmarkItem) {
+    if (item instanceof BookmarkItem && withEnterOrDoubleClick) {
       Bookmark bookmark = ((BookmarkItem)item).getBookmark();
       popup.cancel();
-      bookmark.navigate();
+      bookmark.navigate(true);
     }
+  }
+
+  @Override
+  public void removeSelectedItemsInTree() {
+
   }
 
   private static DefaultListModel buildModel(Project project) {

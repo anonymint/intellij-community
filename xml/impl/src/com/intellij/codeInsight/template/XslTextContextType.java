@@ -14,25 +14,31 @@ package com.intellij.codeInsight.template;
 
 import com.intellij.codeInsight.CodeInsightBundle;
 import com.intellij.openapi.fileTypes.StdFileTypes;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * @author Eugene.Kudelevsky
  */
 public class XslTextContextType extends TemplateContextType {
-  protected XslTextContextType() {
+  public XslTextContextType() {
     super("XSL_TEXT", CodeInsightBundle.message("dialog.edit.template.checkbox.xsl.text"), XmlContextType.class);
   }
 
   @Override
   public boolean isInContext(@NotNull PsiFile file, int offset) {
-    if (file.getFileType() == StdFileTypes.XML && FileUtil.getExtension(file.getName()).equals("xsl")) {
+    if (isXslOrXsltFile(file)) {
       PsiElement element = file.findElementAt(offset);
       return element == null || HtmlTextContextType.isInContext(element);
     }
     return false;
+  }
+
+  public static boolean isXslOrXsltFile(@Nullable PsiFile file) {
+    return file != null && file.getFileType() == StdFileTypes.XML
+        && (FileUtilRt.extensionEquals(file.getName(), "xsl") || FileUtilRt.extensionEquals(file.getName(), "xslt"));
   }
 }

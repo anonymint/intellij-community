@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.font.FontRenderContext;
 import java.awt.image.BufferedImage;
+import java.awt.image.ImageObserver;
 import java.awt.image.PixelGrabber;
 import java.beans.PropertyChangeListener;
 import java.lang.ref.WeakReference;
@@ -93,7 +94,7 @@ public class UIUtil {
 
     JComponent c = (JComponent)comp;
 
-    if (isUnderAquaLookAndFeel()) {
+    if (isUnderAquaBasedLookAndFeel()) {
       c.putClientProperty("JComponent.sizeVariant",
                           componentStyle == ComponentStyle.REGULAR ? "regular" : componentStyle == ComponentStyle.SMALL ? "small" : "mini");
     }
@@ -219,13 +220,31 @@ public class UIUtil {
       if (ourRetina.isNull()) {
         ourRetina.set(false); // in case HiDPIScaledImage.drawIntoImage is not called for some reason
 
-        String vendor = SystemProperties.getJavaVmVendor();
-        if (SystemInfo.isJavaVersionAtLeast("1.6.0_33") && vendor != null && StringUtil.containsIgnoreCase(vendor, "Apple")) {
+        if (SystemInfo.isJavaVersionAtLeast("1.6.0_33") && SystemInfo.isAppleJvm) {
           if (!"false".equals(System.getProperty("ide.mac.retina"))) {
             ourRetina.set(IsRetina.isRetina());
+            return ourRetina.get();
           }
+        } else if (SystemInfo.isJavaVersionAtLeast("1.7.0_40") && SystemInfo.isOracleJvm) {
+            GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
+            final GraphicsDevice device = env.getDefaultScreenDevice();
+            try {
+              Field field = device.getClass().getDeclaredField("scale");
+              if (field != null) {
+                field.setAccessible(true);
+                Object scale = field.get(device);
+                if (scale instanceof Integer && ((Integer)scale).intValue() == 2) {
+                  ourRetina.set(true);
+                  return true;
+                }
+              }
+            }
+            catch (Exception ignore) {
+            }
         }
+        ourRetina.set(false);
       }
+
       return ourRetina.get();
     }
   }
@@ -740,7 +759,7 @@ public class UIUtil {
 
   public static Color getTreeUnfocusedSelectionBackground() {
     Color background = getTreeTextBackground();
-    return ColorUtil.isDark(background) ? Gray._30 : UNFOCUSED_SELECTION_COLOR;
+    return ColorUtil.isDark(background) ? new JBColor(Gray._30, new Color(13, 41, 62)) : UNFOCUSED_SELECTION_COLOR;
   }
 
   public static Color getTextFieldForeground() {
@@ -1250,7 +1269,7 @@ public class UIUtil {
 
     final Composite oldComposite = g.getComposite();
     g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.7f));
-    g.setPaint(new GradientPaint(startX, 2, c1, startX, height - 5, c2));
+    g.setPaint(getGradientPaint(startX, 2, c1, startX, height - 5, c2));
     g.fillRect(startX, 3, endX - startX, height - 5);
 
     if (drawRound) {
@@ -1315,13 +1334,12 @@ public class UIUtil {
 
   public static void drawGradientHToolbarBackground(final Graphics g, final int width, final int height) {
     final Graphics2D g2d = (Graphics2D)g;
-    final GradientPaint gradientPaint = new GradientPaint(0, 0, Gray._215, 0, height, Gray._200);
-    g2d.setPaint(gradientPaint);
+    g2d.setPaint(getGradientPaint(0, 0, Gray._215, 0, height, Gray._200));
     g2d.fillRect(0, 0, width, height);
   }
 
   public static void drawHeader(Graphics g, int x, int width, int height, boolean active, boolean drawTopLine) {
-    drawHeader(g, x, width, height, active, false, drawTopLine);
+    drawHeader(g, x, width, height, active, false, drawTopLine, true);
   }
 
   public static void drawHeader(Graphics g,
@@ -1330,16 +1348,17 @@ public class UIUtil {
                                 int height,
                                 boolean active,
                                 boolean toolWindow,
-                                boolean drawTopLine) {
+                                boolean drawTopLine,
+                                boolean drawBottomLine) {
     g.setColor(getPanelBackground());
     g.fillRect(x, 0, width, height);
 
-    ((Graphics2D)g).setPaint(new GradientPaint(0, 0, new Color(0, 0, 0, 5), 0, height, new Color(0, 0, 0, 20)));
+    ((Graphics2D)g).setPaint(getGradientPaint(0, 0, new Color(0, 0, 0, 5), 0, height, new Color(0, 0, 0, 20)));
     g.fillRect(x, 0, width, height);
 
     g.setColor(new Color(0, 0, 0, toolWindow ? 90 : 50));
     if (drawTopLine) g.drawLine(x, 0, width, 0);
-    g.drawLine(x, height - 1, width, height - 1);
+    if (drawBottomLine) g.drawLine(x, height - 1, width, height - 1);
 
     g.setColor(isUnderDarcula() ? Gray._255.withAlpha(30) : new Color(255, 255, 255, 100));
     g.drawLine(x, drawTopLine ? 1 : 0, width, drawTopLine ? 1 : 0);
@@ -1482,14 +1501,29 @@ public class UIUtil {
     return new BufferedImage(width, height, type);
   }
 
-  public static void paintWithRetina(@NotNull Dimension size, @NotNull Graphics g, Consumer<Graphics2D> paintRoutine) {
-    paintWithRetina(size, g, true, paintRoutine);
+  public static void drawImage(Graphics g, Image image, int x, int y, ImageObserver observer) {
+    if (image instanceof JBHiDPIScaledImage) {
+      final Graphics2D newG = (Graphics2D)g.create(x, y, image.getWidth(observer), image.getHeight(observer));
+      newG.scale(0.5, 0.5);
+      newG.drawImage(((JBHiDPIScaledImage)image).getDelegate(), 0, 0, observer);
+      newG.scale(1, 1);
+      newG.dispose();
+    } else {
+      g.drawImage(image, x, y, observer);
+    }
   }
 
-  public static void paintWithRetina(@NotNull Dimension size,
-                                     @NotNull Graphics g,
-                                     boolean useRetinaCondition,
-                                     Consumer<Graphics2D> paintRoutine) {
+  public static void paintWithXorOnRetina(@NotNull Dimension size, @NotNull Graphics g, Consumer<Graphics2D> paintRoutine) {
+    paintWithXorOnRetina(size, g, true, paintRoutine);
+  }
+
+  /**
+   * Direct painting into component's graphics with XORMode is broken on retina-mode so we need to paint into an intermediate buffer first.
+   */
+  public static void paintWithXorOnRetina(@NotNull Dimension size,
+                                          @NotNull Graphics g,
+                                          boolean useRetinaCondition,
+                                          Consumer<Graphics2D> paintRoutine) {
     if (!useRetinaCondition || !isRetina() || Registry.is("ide.mac.retina.disableDrawingFix", false)) {
       paintRoutine.consume((Graphics2D)g);
     }
@@ -1498,7 +1532,7 @@ public class UIUtil {
       if (rect == null) rect = new Rectangle(size);
 
       //noinspection UndesirableClassUsage
-      Image image = new BufferedImage(rect.width * 2, rect.height * 2, BufferedImage.TYPE_INT_ARGB);
+      Image image = new BufferedImage(rect.width * 2, rect.height * 2, BufferedImage.TYPE_INT_RGB);
       Graphics2D imageGraphics = (Graphics2D)image.getGraphics();
 
       imageGraphics.scale(2, 2);
@@ -1606,6 +1640,17 @@ public class UIUtil {
     else {
       throw new IllegalArgumentException("Only vertical or horizontal lines are supported");
     }
+  }
+
+  public static void drawStringWithHighlighting(Graphics g, String s, int x, int y, Color foreground, Color highlighting) {
+    g.setColor(highlighting);
+    for (int i = x - 1; i <= x + 1; i++) {
+      for (int j = y - 1; j <= y + 1; j++) {
+        g.drawString(s, i, j);
+      }
+    }
+    g.setColor(foreground);
+    g.drawString(s, x, y);
   }
 
   public static boolean isFocusAncestor(@NotNull final JComponent component) {
@@ -1783,37 +1828,21 @@ public class UIUtil {
     }
   }
 
+  /** @deprecated use {@linkplain Dialog#setModalityType(Dialog.ModalityType)} (to remove in IDEA 13) */
+  @SuppressWarnings("UnusedDeclaration")
   public static void setToolkitModal(final JDialog dialog) {
-    try {
-      final Class<?> modalityType = dialog.getClass().getClassLoader().loadClass("java.awt.Dialog$ModalityType");
-      final Field field = modalityType.getField("TOOLKIT_MODAL");
-      final Object value = field.get(null);
-
-      final Method method = dialog.getClass().getMethod("setModalityType", modalityType);
-      method.invoke(dialog, value);
-    }
-    catch (Exception e) {
-      // ignore - no JDK 6
-    }
+    dialog.setModalityType(Dialog.ModalityType.TOOLKIT_MODAL);
   }
 
+  /** @deprecated use {@linkplain Window#setIconImages(List)} (to remove in IDEA 13) */
+  @SuppressWarnings("UnusedDeclaration")
   public static void updateDialogIcon(final JDialog dialog, final List<Image> images) {
-    try {
-      final Method method = dialog.getClass().getMethod("setIconImages", List.class);
-      method.invoke(dialog, images);
-    }
-    catch (Exception e) {
-      // ignore - no JDK 6
-    }
+    dialog.setIconImages(images);
   }
 
+  /** @deprecated outdated (to remove in IDEA 13) */
+  @SuppressWarnings("UnusedDeclaration")
   public static boolean hasJdk6Dialogs() {
-    try {
-      UIUtil.class.getClassLoader().loadClass("java.awt.Dialog$ModalityType");
-    }
-    catch (Throwable e) {
-      return false;
-    }
     return true;
   }
 
@@ -1826,7 +1855,7 @@ public class UIUtil {
   }
 
   public static Color getBorderColor() {
-    return isUnderDarcula() ? Gray._0.withAlpha(80) : BORDER_COLOR;
+    return isUnderDarcula() ? Gray._50 : BORDER_COLOR;
   }
 
   public static Font getTitledBorderFont() {
@@ -2602,4 +2631,29 @@ public class UIUtil {
   public static Color getDecoratedRowColor() {
     return isUnderDarcula() ? DECORATED_ROW_BG_COLOR_DARK : DECORATED_ROW_BG_COLOR;
   }
+
+  @NotNull
+  public static Paint getGradientPaint(float x1, float y1, @NotNull Color c1, float x2, float y2, @NotNull Color c2) {
+    return (Registry.is("ui.no.bangs.and.whistles", false)) ? ColorUtil.mix(c1, c2, .5) : new GradientPaint(x1, y1, c1, x2, y2, c2);
+  }
+
+  @Nullable
+  public static Point getLocationOnScreen(@NotNull JComponent component) {
+    int dx = 0;
+    int dy = 0;
+    for (Container c = component; c != null; c = c.getParent()) {
+      if (c.isShowing()) {
+        Point locationOnScreen = c.getLocationOnScreen();
+        locationOnScreen.translate(dx, dy);
+        return locationOnScreen;
+      }
+      else {
+        Point location = c.getLocation();
+        dx += location.x;
+        dy += location.y;
+      }
+    }
+    return null;
+  }
+
 }

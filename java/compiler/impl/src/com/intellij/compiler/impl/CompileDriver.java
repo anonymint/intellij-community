@@ -39,6 +39,7 @@ import com.intellij.openapi.compiler.Compiler;
 import com.intellij.openapi.compiler.ex.CompileContextEx;
 import com.intellij.openapi.compiler.ex.CompilerPathsEx;
 import com.intellij.openapi.compiler.generic.GenericCompiler;
+import com.intellij.openapi.deployment.DeploymentUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.extensions.PluginId;
@@ -63,6 +64,7 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.newvfs.ManagingFS;
 import com.intellij.openapi.vfs.newvfs.RefreshQueue;
@@ -76,6 +78,7 @@ import com.intellij.packaging.impl.artifacts.ArtifactImpl;
 import com.intellij.packaging.impl.artifacts.ArtifactUtil;
 import com.intellij.packaging.impl.compiler.ArtifactCompileScope;
 import com.intellij.packaging.impl.compiler.ArtifactCompilerUtil;
+import com.intellij.packaging.impl.compiler.ArtifactsCompiler;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.util.Chunk;
@@ -88,6 +91,7 @@ import com.intellij.util.containers.HashMap;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.containers.OrderedSet;
 import com.intellij.util.messages.MessageBus;
+import gnu.trove.THashSet;
 import gnu.trove.TIntHashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -96,7 +100,6 @@ import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.jps.api.CmdlineProtoUtil;
 import org.jetbrains.jps.api.CmdlineRemoteProto;
 import org.jetbrains.jps.api.RequestFuture;
-import org.jetbrains.jps.incremental.Utils;
 
 import javax.swing.*;
 import java.io.*;
@@ -125,6 +128,7 @@ public class CompileDriver {
   private static final boolean GENERATE_CLASSPATH_INDEX = "true".equals(System.getProperty("generate.classpath.index"));
   private static final String PROP_PERFORM_INITIAL_REFRESH = "compiler.perform.outputs.refresh.on.start";
   private static final Key<Boolean> REFRESH_DONE_KEY = Key.create("_compiler.initial.refresh.done_");
+  private static final Key<Boolean> COMPILATION_STARTED_AUTOMATICALLY = Key.create("compilation_started_automatically");
 
   private static final FileProcessingCompilerAdapterFactory FILE_PROCESSING_COMPILER_ADAPTER_FACTORY = new FileProcessingCompilerAdapterFactory() {
     public FileProcessingCompilerAdapter create(CompileContext context, FileProcessingCompiler compiler) {
@@ -218,7 +222,7 @@ public class CompileDriver {
       scope = addAdditionalRoots(scope, ALL_EXCEPT_SOURCE_PROCESSING);
     }
 
-    final CompilerTask task = new CompilerTask(myProject, "Classes up-to-date check", true, false);
+    final CompilerTask task = new CompilerTask(myProject, "Classes up-to-date check", true, false, false, isCompilationStartedAutomatically(scope));
     final DependencyCache cache = useOutOfProcessBuild()? null : createDependencyCache();
     final CompileContextImpl compileContext = new CompileContextImpl(myProject, task, scope, cache, true, false);
 
@@ -251,20 +255,7 @@ public class CompileDriver {
             return;
           }
           try {
-            final Collection<String> paths = CompileScopeUtil.fetchFiles(compileContext);
-            List<TargetTypeBuildScope> scopes = new ArrayList<TargetTypeBuildScope>();
-            if (paths.isEmpty()) {
-              if (!compileContext.isRebuild() && !CompileScopeUtil.allProjectModulesAffected(compileContext)) {
-                CompileScopeUtil.addScopesForModules(Arrays.asList(compileContext.getCompileScope().getAffectedModules()), scopes);
-              }
-              else {
-                scopes.addAll(CmdlineProtoUtil.createAllModulesScopes());
-              }
-              for (BuildTargetScopeProvider provider : BuildTargetScopeProvider.EP_NAME.getExtensions()) {
-                scopes = CompileScopeUtil.mergeScopes(scopes, provider.getBuildTargetScopes(compileContext.getCompileScope(), myCompilerFilter, myProject));
-              }
-            }
-            final RequestFuture future = compileInExternalProcess(compileContext, scopes, paths, true);
+            final RequestFuture future = compileInExternalProcess(compileContext, true);
             if (future != null) {
               while (!future.waitFor(200L , TimeUnit.MILLISECONDS)) {
                 if (indicator.isCanceled()) {
@@ -445,6 +436,15 @@ public class CompileDriver {
     return scope;
   }
 
+  public static void setCompilationStartedAutomatically(CompileScope scope) {
+    //todo[nik] pass this option as a parameter to compile/make methods instead
+    scope.putUserData(COMPILATION_STARTED_AUTOMATICALLY, Boolean.TRUE);
+  }
+
+  private static boolean isCompilationStartedAutomatically(CompileScope scope) {
+    return Boolean.TRUE.equals(scope.getUserData(COMPILATION_STARTED_AUTOMATICALLY));
+  }
+
   private void attachAnnotationProcessorsOutputDirectories(CompileContextEx context) {
     final LocalFileSystem lfs = LocalFileSystem.getInstance();
     final CompilerConfiguration config = CompilerConfiguration.getInstance(myProject);
@@ -471,12 +471,24 @@ public class CompileDriver {
   }
 
   @Nullable
-  private RequestFuture compileInExternalProcess(final @NotNull CompileContextImpl compileContext,
-                                                 @NotNull List<TargetTypeBuildScope> scopes,
-                                                 final @NotNull Collection<String> paths,
-                                                 final boolean onlyCheckUpToDate)
+  private RequestFuture compileInExternalProcess(final @NotNull CompileContextImpl compileContext, final boolean onlyCheckUpToDate)
     throws Exception {
     final CompileScope scope = compileContext.getCompileScope();
+    final Collection<String> paths = CompileScopeUtil.fetchFiles(compileContext);
+    List<TargetTypeBuildScope> scopes = new ArrayList<TargetTypeBuildScope>();
+    final boolean forceBuild = !compileContext.isMake();
+    if (!compileContext.isRebuild() && !CompileScopeUtil.allProjectModulesAffected(compileContext)) {
+      CompileScopeUtil.addScopesForModules(Arrays.asList(scope.getAffectedModules()), scopes, forceBuild);
+    }
+    else {
+      scopes.addAll(CmdlineProtoUtil.createAllModulesScopes(forceBuild));
+    }
+    if (paths.isEmpty()) {
+      for (BuildTargetScopeProvider provider : BuildTargetScopeProvider.EP_NAME.getExtensions()) {
+        scopes = CompileScopeUtil.mergeScopes(scopes, provider.getBuildTargetScopes(scope, myCompilerFilter, myProject, forceBuild));
+      }
+    }
+
     // need to pass scope's user data to server
     final Map<String, String> builderParams;
     if (onlyCheckUpToDate) {
@@ -498,7 +510,7 @@ public class CompileDriver {
     }
 
     final MessageBus messageBus = myProject.getMessageBus();
-
+    final MultiMap<String, Artifact> outputToArtifact = ArtifactCompilerUtil.containsArtifacts(scopes) ? ArtifactCompilerUtil.createOutputToArtifactMap(myProject) : null;
     final BuildManager buildManager = BuildManager.getInstance();
     buildManager.cancelAutoMakeTasks(myProject);
     return buildManager.scheduleBuild(myProject, compileContext.isRebuild(), compileContext.isMake(), onlyCheckUpToDate, scopes, paths, builderParams, new DefaultMessageHandler(myProject) {
@@ -518,11 +530,10 @@ public class CompileDriver {
 
       @Override
       public void handleFailure(UUID sessionId, CmdlineRemoteProto.Message.Failure failure) {
-        compileContext.addMessage(CompilerMessageCategory.ERROR, failure.getDescription(), null, -1, -1);
-        final String trace = failure.getStacktrace();
+        compileContext.addMessage(CompilerMessageCategory.ERROR, failure.hasDescription()? failure.getDescription() : "", null, -1, -1);
+        final String trace = failure.hasStacktrace()? failure.getStacktrace() : null;
         if (trace != null) {
           LOG.info(trace);
-          System.out.println(trace);
         }
         compileContext.putUserData(COMPILE_SERVER_BUILD_STATUS, ExitStatus.ERRORS);
       }
@@ -561,10 +572,23 @@ public class CompileDriver {
           case FILES_GENERATED:
             final List<CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.GeneratedFile> generated = event.getGeneratedFilesList();
             final CompilationStatusListener publisher = messageBus.syncPublisher(CompilerTopics.COMPILATION_STATUS);
+            Set<String> writtenArtifactOutputPaths = outputToArtifact != null ? new THashSet<String>(FileUtil.PATH_HASHING_STRATEGY) : null;
             for (CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.GeneratedFile generatedFile : generated) {
               final String root = FileUtil.toSystemIndependentName(generatedFile.getOutputRoot());
               final String relativePath = FileUtil.toSystemIndependentName(generatedFile.getRelativePath());
               publisher.fileGenerated(root, relativePath);
+              if (outputToArtifact != null) {
+                Collection<Artifact> artifacts = outputToArtifact.get(root);
+                if (!artifacts.isEmpty()) {
+                  for (Artifact artifact : artifacts) {
+                    ArtifactsCompiler.addChangedArtifact(compileContext, artifact);
+                  }
+                  writtenArtifactOutputPaths.add(FileUtil.toSystemDependentName(DeploymentUtil.appendToPath(root, relativePath)));
+                }
+              }
+            }
+            if (writtenArtifactOutputPaths != null && !writtenArtifactOutputPaths.isEmpty()) {
+              ArtifactsCompiler.addWrittenPaths(compileContext, writtenArtifactOutputPaths);
             }
             break;
           case BUILD_COMPLETED:
@@ -615,12 +639,16 @@ public class CompileDriver {
 
     final String contentName =
       forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make");
-    final CompilerTask compileTask = new CompilerTask(myProject, contentName, ApplicationManager.getApplication().isUnitTestMode(), true);
+    final CompilerTask compileTask = new CompilerTask(myProject, contentName, ApplicationManager.getApplication().isUnitTestMode(), true, true,
+                                                      isCompilationStartedAutomatically(scope));
 
     StatusBar.Info.set("", myProject, "Compiler");
     if (useExtProcessBuild) {
       // ensure the project model seen by build process is up-to-date
       myProject.save();
+      if (!ApplicationManager.getApplication().isUnitTestMode()) {
+        ApplicationManager.getApplication().saveSettings();
+      }
     }
     PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     FileDocumentManager.getInstance().saveAllDocuments();
@@ -656,25 +684,16 @@ public class CompileDriver {
             if (message != null) {
               compileContext.addMessage(message);
             }
-            if (!executeCompileTasks(compileContext, true)) {
-              COMPILE_SERVER_BUILD_STATUS.set(compileContext, ExitStatus.CANCELLED);
+
+            final boolean beforeTasksOk = executeCompileTasks(compileContext, true);
+
+            final int errorCount = compileContext.getMessageCount(CompilerMessageCategory.ERROR);
+            if (!beforeTasksOk || errorCount > 0) {
+              COMPILE_SERVER_BUILD_STATUS.set(compileContext, errorCount > 0? ExitStatus.ERRORS : ExitStatus.CANCELLED);
               return;
             }
 
-            final Collection<String> paths = CompileScopeUtil.fetchFiles(compileContext);
-            List<TargetTypeBuildScope> scopes = new ArrayList<TargetTypeBuildScope>();
-            if (paths.isEmpty()) {
-              if (!isRebuild && !CompileScopeUtil.allProjectModulesAffected(compileContext)) {
-                CompileScopeUtil.addScopesForModules(Arrays.asList(compileContext.getCompileScope().getAffectedModules()), scopes);
-              }
-              else {
-                scopes.addAll(CmdlineProtoUtil.createAllModulesScopes());
-              }
-              for (BuildTargetScopeProvider provider : BuildTargetScopeProvider.EP_NAME.getExtensions()) {
-                scopes = CompileScopeUtil.mergeScopes(scopes, provider.getBuildTargetScopes(scope, myCompilerFilter, myProject));
-              }
-            }
-            final RequestFuture future = compileInExternalProcess(compileContext, scopes, paths, false);
+            final RequestFuture future = compileInExternalProcess(compileContext, false);
             if (future != null) {
               while (!future.waitFor(200L , TimeUnit.MILLISECONDS)) {
                 if (indicator.isCanceled()) {
@@ -683,7 +702,9 @@ public class CompileDriver {
               }
               if (!executeCompileTasks(compileContext, false)) {
                 COMPILE_SERVER_BUILD_STATUS.set(compileContext, ExitStatus.CANCELLED);
-                return;
+              }
+              if (compileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+                COMPILE_SERVER_BUILD_STATUS.set(compileContext, ExitStatus.ERRORS);
               }
             }
           }
@@ -693,7 +714,7 @@ public class CompileDriver {
           finally {
             CompilerCacheManager.getInstance(myProject).flushCaches();
 
-            final long duration = notifyCompilationCompleted(compileContext, callback, COMPILE_SERVER_BUILD_STATUS.get(compileContext));
+            final long duration = notifyCompilationCompleted(compileContext, callback, COMPILE_SERVER_BUILD_STATUS.get(compileContext), true);
             CompilerUtil.logDuration(
               "\tCOMPILATION FINISHED (BUILD PROCESS); Errors: " +
               compileContext.getMessageCount(CompilerMessageCategory.ERROR) +
@@ -701,15 +722,6 @@ public class CompileDriver {
               compileContext.getMessageCount(CompilerMessageCategory.WARNING),
               duration
             );
-
-            // refresh on output roots is required in order for the order enumerator to see all roots via VFS
-            final Set<File> outputs = new HashSet<File>();
-            for (final String path : CompilerPathsEx.getOutputPaths(ModuleManager.getInstance(myProject).getModules())) {
-              outputs.add(new File(path));
-            }
-            if (!outputs.isEmpty()) {
-              LocalFileSystem.getInstance().refreshIoFiles(outputs, true, false, null);
-            }
           }
         }
       };
@@ -821,7 +833,7 @@ public class CompileDriver {
         if (!myProject.isDisposed()) {
           writeStatus(new CompileStatus(CompilerConfigurationImpl.DEPENDENCY_FORMAT_VERSION, wereExceptions, vfsTimestamp), compileContext);
         }
-        final long duration = notifyCompilationCompleted(compileContext, callback, status);
+        final long duration = notifyCompilationCompleted(compileContext, callback, status, false);
         CompilerUtil.logDuration(
           "\tCOMPILATION FINISHED; Errors: " +
           compileContext.getMessageCount(CompilerMessageCategory.ERROR) +
@@ -834,9 +846,43 @@ public class CompileDriver {
   }
 
   /** @noinspection SSBasedInspection*/
-  private long notifyCompilationCompleted(final CompileContextImpl compileContext, final CompileStatusNotification callback, final ExitStatus _status) {
+  private long notifyCompilationCompleted(final CompileContextImpl compileContext,
+                                          final CompileStatusNotification callback,
+                                          final ExitStatus _status,
+                                          final boolean refreshOutputRoots) {
     final long duration = System.currentTimeMillis() - compileContext.getStartCompilationStamp();
-    SwingUtilities.invokeLater(new Runnable() {
+    if (refreshOutputRoots) {
+      // refresh on output roots is required in order for the order enumerator to see all roots via VFS
+      final Set<File> outputs = new HashSet<File>();
+      final Module[] affectedModules = compileContext.getCompileScope().getAffectedModules();
+      for (final String path : CompilerPathsEx.getOutputPaths(affectedModules)) {
+        outputs.add(new File(path));
+      }
+      final LocalFileSystem lfs = LocalFileSystem.getInstance();
+      if (!outputs.isEmpty()) {
+        final ProgressIndicator indicator = compileContext.getProgressIndicator();
+        indicator.setText("Synchronizing output directories...");
+        lfs.refreshIoFiles(outputs, false, false, null);
+        indicator.setText("");
+      }
+      if (compileContext.isAnnotationProcessorsEnabled()) {
+        final Set<File> genSourceRoots = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
+        final CompilerConfiguration config = CompilerConfiguration.getInstance(myProject);
+        for (Module module : affectedModules) {
+          if (config.getAnnotationProcessingConfiguration(module).isEnabled()) {
+            final String path = CompilerPaths.getAnnotationProcessorsGenerationPath(module);
+            if (path != null) {
+              genSourceRoots.add(new File(path));
+            }
+          }
+        }
+        if (!genSourceRoots.isEmpty()) {
+          // refresh generates source roots asynchronously; needed for error highlighting update
+          lfs.refreshIoFiles(genSourceRoots, true, true, null);
+        }
+      }
+    }
+    SwingUtilities.invokeLater(new Runnable() {                                                                 
       public void run() {
         int errorCount = 0;
         int warningCount = 0;
@@ -905,7 +951,7 @@ public class CompileDriver {
       else {
         message = CompilerBundle.message("status.compilation.completed.successfully.with.warnings.and.errors", errorCount, warningCount);
       }
-      message = message + " in " + Utils.formatDuration(duration);
+      message = message + " in " + StringUtil.formatDuration(duration);
     }
     return message;
   }
@@ -1913,8 +1959,7 @@ public class CompileDriver {
     finally {
       CompilerUtil.refreshIOFiles(filesToRefresh);
       if (!generatedFiles.isEmpty()) {
-        DumbService.getInstance(myProject).waitForSmartMode();
-        List<VirtualFile> vFiles = ApplicationManager.getApplication().runReadAction(new Computable<List<VirtualFile>>() {
+        List<VirtualFile> vFiles = DumbService.getInstance(myProject).runReadActionInSmartMode(new Computable<List<VirtualFile>>() {
           public List<VirtualFile> compute() {
             final ArrayList<VirtualFile> vFiles = new ArrayList<VirtualFile>(generatedFiles.size());
             for (File generatedFile : generatedFiles) {
@@ -2116,8 +2161,7 @@ public class CompileDriver {
     final List<FileProcessingCompiler.ProcessingItem> toProcess = new ArrayList<FileProcessingCompiler.ProcessingItem>();
     final Set<String> allUrls = new HashSet<String>();
     final IOException[] ex = {null};
-    DumbService.getInstance(myProject).waitForSmartMode();
-    ApplicationManager.getApplication().runReadAction(new Runnable() {
+    DumbService.getInstance(myProject).runReadActionInSmartMode(new Runnable() {
       public void run() {
         try {
           for (FileProcessingCompiler.ProcessingItem item : items) {
@@ -2244,8 +2288,7 @@ public class CompileDriver {
   }
 
   public void executeCompileTask(final CompileTask task, final CompileScope scope, final String contentName, final Runnable onTaskFinished) {
-    final CompilerTask progressManagerTask =
-      new CompilerTask(myProject, contentName, false, false);
+    final CompilerTask progressManagerTask = new CompilerTask(myProject, contentName, false, false, true, isCompilationStartedAutomatically(scope));
     final CompileContextImpl compileContext = new CompileContextImpl(myProject, progressManagerTask, scope, null, false, false);
 
     FileDocumentManager.getInstance().saveAllDocuments();
@@ -2307,6 +2350,7 @@ public class CompileDriver {
       final Set<File> nonExistingOutputPaths = new HashSet<File>();
       final CompilerConfiguration config = CompilerConfiguration.getInstance(myProject);
       final CompilerManager compilerManager = CompilerManager.getInstance(myProject);
+      final boolean useOutOfProcessBuild = useOutOfProcessBuild();
       for (final Module module : scopeModules) {
         if (!compilerManager.isValidationEnabled(module)) {
           continue;
@@ -2329,9 +2373,11 @@ public class CompileDriver {
         }
         else {
           if (outputPath != null) {
-            final File file = new File(outputPath.replace('/', File.separatorChar));
-            if (!file.exists()) {
-              nonExistingOutputPaths.add(file);
+            if (!useOutOfProcessBuild) {
+              final File file = new File(outputPath.replace('/', File.separatorChar));
+              if (!file.exists()) {
+                nonExistingOutputPaths.add(file);
+              }
             }
           }
           else {
@@ -2340,9 +2386,11 @@ public class CompileDriver {
             }
           }
           if (testsOutputPath != null) {
-            final File f = new File(testsOutputPath.replace('/', File.separatorChar));
-            if (!f.exists()) {
-              nonExistingOutputPaths.add(f);
+            if (!useOutOfProcessBuild) {
+              final File f = new File(testsOutputPath.replace('/', File.separatorChar));
+              if (!f.exists()) {
+                nonExistingOutputPaths.add(f);
+              }
             }
           }
           else {
@@ -2350,7 +2398,7 @@ public class CompileDriver {
               modulesWithoutOutputPathSpecified.add(module.getName());
             }
           }
-          if (!useOutOfProcessBuild()) {
+          if (!useOutOfProcessBuild) {
             if (config.getAnnotationProcessingConfiguration(module).isEnabled()) {
               final String path = CompilerPaths.getAnnotationProcessorsGenerationPath(module);
               if (path == null) {
@@ -2476,7 +2524,7 @@ public class CompileDriver {
           }
         }
       }
-      if (!useOutOfProcessBuild()) {
+      if (!useOutOfProcessBuild) {
         final Compiler[] allCompilers = compilerManager.getCompilers(Compiler.class);
         for (Compiler compiler : allCompilers) {
           if (!compiler.validateConfiguration(scope)) {

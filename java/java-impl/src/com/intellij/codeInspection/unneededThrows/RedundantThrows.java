@@ -16,11 +16,10 @@
 package com.intellij.codeInspection.unneededThrows;
 
 import com.intellij.analysis.AnalysisScope;
-import com.intellij.codeInsight.CodeInsightUtilBase;
 import com.intellij.codeInsight.ExceptionUtil;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInspection.*;
-import com.intellij.codeInspection.ex.ProblemDescriptorImpl;
 import com.intellij.codeInspection.reference.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -50,12 +49,13 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
   private final BidirectionalMap<String, QuickFix> myQuickFixes = new BidirectionalMap<String, QuickFix>();
   @NonNls private static final String SHORT_NAME = "RedundantThrows";
 
+  @Override
   @Nullable
-  public CommonProblemDescriptor[] checkElement(RefEntity refEntity,
-                                                AnalysisScope scope,
-                                                InspectionManager manager,
-                                                GlobalInspectionContext globalContext,
-                                                ProblemDescriptionsProcessor processor) {
+  public CommonProblemDescriptor[] checkElement(@NotNull RefEntity refEntity,
+                                                @NotNull AnalysisScope scope,
+                                                @NotNull InspectionManager manager,
+                                                @NotNull GlobalInspectionContext globalContext,
+                                                @NotNull ProblemDescriptionsProcessor processor) {
     if (refEntity instanceof RefMethod) {
       final RefMethod refMethod = (RefMethod)refEntity;
       if (refMethod.isSyntheticJSP()) return null;
@@ -70,7 +70,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
       PsiMethod psiMethod = (PsiMethod)refMethod.getElement();
       PsiClassType[] throwsList = psiMethod.getThrowsList().getReferencedTypes();
       PsiJavaCodeReferenceElement[] throwsRefs = psiMethod.getThrowsList().getReferenceElements();
-      ArrayList<ProblemDescriptor> problems = null;
+      List<ProblemDescriptor> problems = null;
 
       final PsiManager psiManager = psiMethod.getManager();
       for (int i = 0; i < throwsList.length; i++) {
@@ -105,7 +105,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
       }
 
       if (problems != null) {
-        return problems.toArray(new ProblemDescriptorImpl[problems.size()]);
+        return problems.toArray(new CommonProblemDescriptor[problems.size()]);
       }
     }
 
@@ -122,14 +122,16 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
   }
 
 
-  protected boolean queryExternalUsagesRequests(final RefManager manager, final GlobalJavaInspectionContext globalContext,
-                                                final ProblemDescriptionsProcessor processor) {
+  @Override
+  protected boolean queryExternalUsagesRequests(@NotNull final RefManager manager, @NotNull final GlobalJavaInspectionContext globalContext,
+                                                @NotNull final ProblemDescriptionsProcessor processor) {
     manager.iterate(new RefJavaVisitor() {
-      @Override public void visitElement(RefEntity refEntity) {
+      @Override public void visitElement(@NotNull RefEntity refEntity) {
         if (processor.getDescriptions(refEntity) != null) {
           refEntity.accept(new RefJavaVisitor() {
-            @Override public void visitMethod(final RefMethod refMethod) {
+            @Override public void visitMethod(@NotNull final RefMethod refMethod) {
               globalContext.enqueueDerivedMethodsProcessor(refMethod, new GlobalJavaInspectionContext.DerivedMethodsProcessor() {
+                @Override
                 public boolean process(PsiMethod derivedMethod) {
                   processor.ignoreElement(refMethod);
                   return true;
@@ -144,16 +146,19 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
     return false;
   }
 
+  @Override
   @NotNull
   public String getDisplayName() {
     return DISPLAY_NAME;
   }
 
+  @Override
   @NotNull
   public String getGroupDisplayName() {
     return GroupNames.DECLARATION_REDUNDANCY;
   }
 
+  @Override
   @NotNull
   public String getShortName() {
     return SHORT_NAME;
@@ -163,7 +168,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
     QuickFix fix = myQuickFixes.get(hint);
     if (fix == null) {
       fix = new MyQuickFix(processor, hint);
-      if (hint != null) { 
+      if (hint != null) {
         myQuickFixes.put(hint, fix);
       }
     }
@@ -171,13 +176,15 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
   }
 
 
+  @Override
   @Nullable
   public QuickFix getQuickFix(String hint) {
     return getFix(null, hint);
   }
 
+  @Override
   @Nullable
-  public String getHint(final QuickFix fix) {
+  public String getHint(@NotNull final QuickFix fix) {
     final List<String> hints = myQuickFixes.getKeysByValue(fix);
     LOG.assertTrue(hints != null && hints.size() == 1);
     return hints.get(0);
@@ -192,11 +199,13 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
       myHint = hint;
     }
 
+    @Override
     @NotNull
     public String getName() {
       return InspectionsBundle.message("inspection.redundant.throws.remove.quickfix");
     }
 
+    @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       if (myProcessor != null) {
         RefElement refElement = (RefElement)myProcessor.getElement(descriptor);
@@ -216,6 +225,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
       }
     }
 
+    @Override
     @NotNull
     public String getFamilyName() {
       return getName();
@@ -255,7 +265,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
         }
 
         //check read-only status for derived methods
-        if (!CodeInsightUtilBase.preparePsiElementsForWrite(refsToDelete)) return;
+        if (!FileModificationService.getInstance().preparePsiElementsForWrite(refsToDelete)) return;
 
         for (final PsiJavaCodeReferenceElement aRefsToDelete : refsToDelete) {
           aRefsToDelete.delete();
@@ -287,6 +297,7 @@ public class RedundantThrows extends GlobalJavaInspectionTool {
       } else {
         final Query<Pair<PsiMethod,PsiMethod>> query = AllOverridingMethodsSearch.search(psiMethod.getContainingClass());
         query.forEach(new Processor<Pair<PsiMethod, PsiMethod>>(){
+          @Override
           public boolean process(final Pair<PsiMethod, PsiMethod> pair) {
             if (pair.first == psiMethod) {
               removeException(null, exceptionType, refsToDelete, pair.second);

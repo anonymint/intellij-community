@@ -21,7 +21,6 @@ import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.Consumer;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,9 +32,9 @@ import org.zmlx.hg4idea.command.HgTagBranchCommand;
 import org.zmlx.hg4idea.execution.HgCommandResult;
 import org.zmlx.hg4idea.execution.HgCommandResultHandler;
 import org.zmlx.hg4idea.ui.HgPushDialog;
-import org.zmlx.hg4idea.util.HgErrorUtil;
 import org.zmlx.hg4idea.util.HgUtil;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -48,6 +47,10 @@ public class HgPusher {
 
   private static final Logger LOG = Logger.getInstance(HgPusher.class);
   private static Pattern PUSH_COMMITS_PATTERN = Pattern.compile(".*added (\\d+) changesets.*");
+  // hg push command has definite exit values for some cases:
+  // mercurial returns 0 if push was successful, 1 if nothing to push. see hg push --help
+  private static int PUSH_SUCCEEDED_EXIT_VALUE = 0;
+  private static int NOTHING_TO_PUSH_EXIT_VALUE = 1;
 
   private final Project myProject;
 
@@ -55,21 +58,24 @@ public class HgPusher {
     myProject = project;
   }
 
-  public void showDialogAndPush() {
+  public void showDialogAndPush(@Nullable final VirtualFile selectedRepo) {
     HgUtil.executeOnPooledThreadIfNeeded(new Runnable() {
       public void run() {
         final List<VirtualFile> repositories = HgUtil.getHgRepositories(myProject);
         if (repositories.isEmpty()) {
           VcsBalloonProblemNotifier.showOverChangesView(myProject, "No Mercurial repositories in the project", MessageType.ERROR);
+          return;
         }
         VirtualFile firstRepo = repositories.get(0);
         final List<HgTagBranch> branches = getBranches(myProject, firstRepo);
-
+        if (branches.isEmpty()) {
+          return;
+        }
         final AtomicReference<HgPushCommand> pushCommand = new AtomicReference<HgPushCommand>();
         UIUtil.invokeAndWaitIfNeeded(new Runnable() {
           @Override
           public void run() {
-            final HgPushDialog dialog = new HgPushDialog(myProject, repositories, branches);
+            final HgPushDialog dialog = new HgPushDialog(myProject, repositories, branches, selectedRepo);
             dialog.show();
             if (dialog.isOK()) {
               dialog.rememberSettings();
@@ -90,15 +96,15 @@ public class HgPusher {
     return configCommand.getDefaultPushPath(repo);
   }
 
+  @NotNull
   public static List<HgTagBranch> getBranches(@NotNull Project project, @NotNull VirtualFile root) {
-    final AtomicReference<List<HgTagBranch>> branchesRef = new AtomicReference<List<HgTagBranch>>();
-    new HgTagBranchCommand(project, root).listBranches(new Consumer<List<HgTagBranch>>() {
-      @Override
-      public void consume(final List<HgTagBranch> branches) {
-        branchesRef.set(branches);
-      }
-    });
-    return branchesRef.get();
+    HgCommandResult branchesResult = new HgTagBranchCommand(project, root).collectBranches();
+    if (branchesResult == null) {
+      new HgCommandResultNotifier(project)
+        .notifyError(branchesResult, "Mercurial command failed", HgVcsMessages.message("hg4idea.branches.error.description"));
+      return Collections.emptyList();
+    }
+    return HgTagBranchCommand.parseResult(branchesResult);
   }
 
   private static void push(final Project project, HgPushCommand command) {
@@ -110,13 +116,13 @@ public class HgPusher {
           return;
         }
 
-        int commitsNum = getNumberOfPushedCommits(result);
-        if (commitsNum > 0 && result.getExitValue() == 0) {
+        if (result.getExitValue() == PUSH_SUCCEEDED_EXIT_VALUE) {
+          int commitsNum = getNumberOfPushedCommits(result);
           String successTitle = "Pushed successfully";
           String successDescription = String.format("Pushed %d %s [%s]", commitsNum, StringUtil.pluralize("commit", commitsNum),
                                                     repo.getPresentableName());
           new HgCommandResultNotifier(project).notifySuccess(successTitle, successDescription);
-        } else if (commitsNum == 0) {
+        } else if (result.getExitValue() == NOTHING_TO_PUSH_EXIT_VALUE) {
           new HgCommandResultNotifier(project).notifySuccess("", "Nothing to push");
         } else {
           new HgCommandResultNotifier(project).notifyError(result, "Push failed",
@@ -131,29 +137,27 @@ public class HgPusher {
     command.setRevision(dialog.getRevision());
     command.setForce(dialog.isForce());
     command.setBranch(dialog.getBranch());
+    command.setIsNewBranch(dialog.isNewBranch());
     return command;
   }
 
   private static int getNumberOfPushedCommits(HgCommandResult result) {
     int numberOfCommitsInAllSubrepos = 0;
-    if (!HgErrorUtil.isAbort(result)) {
-      final List<String> outputLines = result.getOutputLines();
-      for (String outputLine : outputLines) {
-        outputLine = outputLine.trim();
-        final Matcher matcher = PUSH_COMMITS_PATTERN.matcher(outputLine);
-        if (matcher.matches()) {
-          try {
-            numberOfCommitsInAllSubrepos += Integer.parseInt(matcher.group(1));
-          }
-          catch (NumberFormatException e) {
-            LOG.info("getNumberOfPushedCommits ", e);
-            return -1;
-          }
+    final List<String> outputLines = result.getOutputLines();
+    for (String outputLine : outputLines) {
+      outputLine = outputLine.trim();
+      final Matcher matcher = PUSH_COMMITS_PATTERN.matcher(outputLine);
+      if (matcher.matches()) {
+        try {
+          numberOfCommitsInAllSubrepos += Integer.parseInt(matcher.group(1));
+        }
+        catch (NumberFormatException e) {
+          LOG.error("getNumberOfPushedCommits ", e);
+          return -1;
         }
       }
-      return numberOfCommitsInAllSubrepos;
     }
-    return -1;
+    return numberOfCommitsInAllSubrepos;
   }
 
 }

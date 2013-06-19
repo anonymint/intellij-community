@@ -228,7 +228,7 @@ public class ByteArrayList implements  Cloneable {
      */
     public byte get(int offset) {
         if (offset >= _pos) {
-            throw new ArrayIndexOutOfBoundsException(offset);
+            throw new ArrayIndexOutOfBoundsException("Index out of range: "+offset+"; size: "+_pos);
         }
         return _data[offset];
     }
@@ -300,6 +300,16 @@ public class ByteArrayList implements  Cloneable {
             throw new ArrayIndexOutOfBoundsException(offset);
         }
         System.arraycopy(_data, offset, values, valOffset, length);
+    }
+
+    public void copy(int source, int destination, int length) {
+        if (source < 0 || source + length > _pos) {
+            throw new ArrayIndexOutOfBoundsException(source);
+        }
+        if (destination < 0 || destination + length > _pos) {
+            throw new ArrayIndexOutOfBoundsException(destination);
+        }
+        System.arraycopy(_data, source, _data, destination, length);
     }
 
     /**

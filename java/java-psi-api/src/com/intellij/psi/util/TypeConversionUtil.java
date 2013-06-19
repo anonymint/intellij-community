@@ -325,7 +325,7 @@ public class TypeConversionUtil {
     PsiClass[] supers = derived.getSupers();
     if (manager.areElementsEquivalent(base, derived)) {
       derivedSubstitutor = getSuperClassSubstitutor(derived, derived, derivedSubstitutor);
-      return areSameArgumentTypes(derived, baseResult.getSubstitutor(), derivedSubstitutor);
+      return areSameArgumentTypes(derived, baseResult.getSubstitutor(), derivedSubstitutor, 1);
     }
     else if (base.isInheritor(derived, true)) {
       derivedSubstitutor = getSuperClassSubstitutor(derived, derived, derivedSubstitutor);
@@ -355,11 +355,18 @@ public class TypeConversionUtil {
   }
 
   private static boolean areSameArgumentTypes(PsiClass aClass, PsiSubstitutor substitutor1, PsiSubstitutor substitutor2) {
+    return areSameArgumentTypes(aClass, substitutor1, substitutor2, 0);
+  }
+
+  private static boolean areSameArgumentTypes(PsiClass aClass,
+                                              PsiSubstitutor substitutor1,
+                                              PsiSubstitutor substitutor2,
+                                              int level) {
     for (PsiTypeParameter typeParameter : PsiUtil.typeParametersIterable(aClass)) {
       PsiType typeArg1 = substitutor1.substitute(typeParameter);
       PsiType typeArg2 = substitutor2.substitute(typeParameter);
       if (typeArg1 == null || typeArg2 == null) return true;
-      if (TypesDistinctProver.provablyDistinct(typeArg1, typeArg2)) return false;
+      if (TypesDistinctProver.provablyDistinct(typeArg1, typeArg2, level)) return false;
 
       final PsiClass class1 = PsiUtil.resolveClassInType(typeArg1);
       if (class1 instanceof PsiTypeParameter) {
@@ -667,9 +674,7 @@ public class TypeConversionUtil {
 
     if (right instanceof PsiMethodReferenceType) {
       final PsiMethodReferenceExpression methodReferenceExpression = ((PsiMethodReferenceType)right).getExpression();
-      if (left instanceof PsiClassType) {
-        return PsiMethodReferenceUtil.isAcceptable(methodReferenceExpression, (PsiClassType)left);
-      } else if (left instanceof PsiLambdaExpressionType) {
+      if (left instanceof PsiLambdaExpressionType) {
         final PsiType rType = methodReferenceExpression.getFunctionalInterfaceType();
         final PsiType lType = ((PsiLambdaExpressionType)left).getExpression().getFunctionalInterfaceType();
         return Comparing.equal(rType, lType);
@@ -678,18 +683,20 @@ public class TypeConversionUtil {
         final PsiType lType = ((PsiMethodReferenceType)left).getExpression().getFunctionalInterfaceType();
         return Comparing.equal(rType, lType);
       }
+      return PsiMethodReferenceUtil.isAcceptable(methodReferenceExpression, left);
     }
     if (right instanceof PsiLambdaExpressionType) {
       final PsiLambdaExpression rLambdaExpression = ((PsiLambdaExpressionType)right).getExpression();
-      if (left instanceof PsiClassType) {
-        return LambdaUtil.isAcceptable(rLambdaExpression, left, false);
-      }
       if (left instanceof PsiLambdaExpressionType) {
         final PsiLambdaExpression lLambdaExpression = ((PsiLambdaExpressionType)left).getExpression();
         final PsiType rType = rLambdaExpression.getFunctionalInterfaceType();
         final PsiType lType = lLambdaExpression.getFunctionalInterfaceType();
         return Comparing.equal(rType, lType);
       }
+      if (left instanceof PsiArrayType) {
+        return false;
+      }
+      return LambdaUtil.isAcceptable(rLambdaExpression, left, false);
     }
 
     if (left instanceof PsiIntersectionType) {
@@ -708,7 +715,7 @@ public class TypeConversionUtil {
     }
 
     if (left instanceof PsiCapturedWildcardType) {
-      return left.equals(right) || isAssignable(((PsiCapturedWildcardType)left).getLowerBound(), right, false);
+      return left.equals(right) || isAssignable(((PsiCapturedWildcardType)left).getLowerBound(), right, allowUncheckedConversion);
     }
     if (right instanceof PsiCapturedWildcardType) {
       return isAssignable(left, ((PsiCapturedWildcardType)right).getUpperBound(), allowUncheckedConversion);
@@ -818,21 +825,6 @@ public class TypeConversionUtil {
   }
 
   public static boolean boxingConversionApplicable(final PsiType left, final PsiType right) {
-    if (right instanceof PsiMethodReferenceType) {
-      final JavaResolveResult result = ((PsiMethodReferenceType)right).getExpression().advancedResolve(false);
-      PsiElement element = result.getElement();
-      final PsiClassType.ClassResolveResult functionalInterfaceResult = PsiUtil.resolveGenericsClassInType(left);
-      final PsiMethod interfaceMethod = LambdaUtil.getFunctionalInterfaceMethod(functionalInterfaceResult);
-      if (element instanceof PsiMethod && interfaceMethod != null) {
-        final PsiType[] parameterTypes = ((PsiMethod)element).getSignature(result.getSubstitutor()).getParameterTypes();
-        final PsiType[] argTypes = interfaceMethod.getSignature(functionalInterfaceResult.getSubstitutor()).getParameterTypes();
-        if (parameterTypes.length != argTypes.length) return false;
-        for (int i = 0; i < parameterTypes.length; i++) {
-          if (boxingConversionApplicable(parameterTypes[i], argTypes[i])) return true;
-        }
-      }
-    }
-
     if (left instanceof PsiPrimitiveType && !PsiType.NULL.equals(left)) {
       return right instanceof PsiClassType && isAssignable(left, right);
     }
@@ -911,7 +903,9 @@ public class TypeConversionUtil {
     PsiSubstitutor leftSubstitutor = leftResult.getSubstitutor();
 
     if (!leftClass.getManager().areElementsEquivalent(leftClass, rightClass)) {
-      if (!allowUncheckedConversion && PsiUtil.isRawSubstitutor(leftClass, leftSubstitutor) && !rightClass.hasTypeParameters() && !(rightClass instanceof PsiTypeParameter)) return false;
+      if (!allowUncheckedConversion && PsiUtil.isRawSubstitutor(leftClass, leftSubstitutor) && !rightClass.hasTypeParameters() && !(rightClass instanceof PsiTypeParameter)) {
+        return false;
+      }
       rightSubstitutor = getSuperClassSubstitutor(leftClass, rightClass, rightSubstitutor);
       rightClass = leftClass;
     }
@@ -1245,7 +1239,7 @@ public class TypeConversionUtil {
         if (beforeSubstitutor.getSubstitutionMap().containsKey(boundTypeParameter)) {
           return erasure(beforeSubstitutor.substitute(boundTypeParameter));
         }
-        return typeParameterErasureInner(boundTypeParameter, visited);
+        return typeParameterErasureInner(boundTypeParameter, visited, beforeSubstitutor);
       }
       else if (psiClass != null) {
         return JavaPsiFacade.getInstance(typeParameter.getProject()).getElementFactory().createType(psiClass);
@@ -1254,14 +1248,19 @@ public class TypeConversionUtil {
     return PsiType.getJavaLangObject(typeParameter.getManager(), typeParameter.getResolveScope());
   }
 
-  private static PsiClassType typeParameterErasureInner(PsiTypeParameter typeParameter, Set<PsiClass> visited) {
+  private static PsiClassType typeParameterErasureInner(PsiTypeParameter typeParameter,
+                                                        Set<PsiClass> visited,
+                                                        PsiSubstitutor beforeSubstitutor) {
     final PsiClassType[] extendsList = typeParameter.getExtendsList().getReferencedTypes();
     if (extendsList.length > 0) {
       final PsiClass psiClass = extendsList[0].resolve();
       if (psiClass instanceof PsiTypeParameter) {
         if (!visited.contains(psiClass)) {
           visited.add(psiClass);
-          return typeParameterErasureInner((PsiTypeParameter)psiClass, visited);
+          if (beforeSubstitutor.getSubstitutionMap().containsKey(psiClass)) {
+            return (PsiClassType)erasure(beforeSubstitutor.substitute((PsiTypeParameter)psiClass));
+          }
+          return typeParameterErasureInner((PsiTypeParameter)psiClass, visited, beforeSubstitutor);
         }
       }
       else if (psiClass != null) {

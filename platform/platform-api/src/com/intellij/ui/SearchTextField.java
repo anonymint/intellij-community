@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.CommonShortcuts;
 import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.ui.JBMenuItem;
+import com.intellij.openapi.ui.JBPopupMenu;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.SystemInfo;
@@ -98,17 +101,21 @@ public class SearchTextField extends JPanel {
       @Override
       public void keyPressed(KeyEvent e) {
         if (e.getKeyCode() == KeyEvent.VK_DOWN) {
-          if (myPopup == null || !myPopup.isVisible()) {
+          if (hasNativeLeopardSearchControl()) {
+            myNativeSearchPopup.show(myTextField, 5, myTextField.getHeight());
+          } else if (myPopup == null || !myPopup.isVisible()) {
             showPopup();
           }
         }
       }
     });
 
-    if (hasNativeLeopardSearchControl()) {
+    if (hasNativeLeopardSearchControl() || UIUtil.isUnderDarcula()) {
       myTextField.putClientProperty("JTextField.variant", "search");
-      myNativeSearchPopup = new JPopupMenu();
-      myNoItems = new JMenuItem("No recent searches");
+    }
+    if (hasNativeLeopardSearchControl()) {
+      myNativeSearchPopup = new JBPopupMenu();
+      myNoItems = new JBMenuItem("No recent searches");
       myNoItems.setEnabled(false);
 
       updateMenu();
@@ -128,7 +135,7 @@ public class SearchTextField extends JPanel {
         add(myToggleHistoryLabel, BorderLayout.WEST);
       }
 
-      myClearFieldLabel = new JLabel(AllIcons.Actions.CleanLight);
+      myClearFieldLabel = new JLabel(UIUtil.isUnderDarcula() ? AllIcons.Actions.Clean : AllIcons.Actions.CleanLight);
       myClearFieldLabel.setOpaque(true);
       add(myClearFieldLabel, BorderLayout.EAST);
       myClearFieldLabel.addMouseListener(new MouseAdapter() {
@@ -160,11 +167,13 @@ public class SearchTextField extends JPanel {
       }
     }
 
-    final ActionManager actionManager = ActionManager.getInstance();
-    if (actionManager != null) {
-      final AnAction clearTextAction = actionManager.getAction(IdeActions.ACTION_CLEAR_TEXT);
-      if (clearTextAction.getShortcutSet().getShortcuts().length == 0) {
-        clearTextAction.registerCustomShortcutSet(CommonShortcuts.ESCAPE, this);
+    if (ApplicationManager.getApplication() != null) { //tests
+      final ActionManager actionManager = ActionManager.getInstance();
+      if (actionManager != null) {
+        final AnAction clearTextAction = actionManager.getAction(IdeActions.ACTION_CLEAR_TEXT);
+        if (clearTextAction.getShortcutSet().getShortcuts().length == 0) {
+          clearTextAction.registerCustomShortcutSet(CommonShortcuts.ESCAPE, this);
+        }
       }
     }
   }
@@ -197,14 +206,14 @@ public class SearchTextField extends JPanel {
   @Override
   protected void paintComponent(Graphics g) {
     super.paintComponent(g);
-    if (UIUtil.isUnderDarcula()) {//todo[kb] fix DarculaTextBorder
+    if (UIUtil.isUnderDarcula() && false) {//todo[kb] fix DarculaTextBorder
       g.setColor(myTextField.getBackground());
       g.fillRect(2,3,getWidth(), getHeight()-5);
     }
   }
 
   private static boolean hasNativeLeopardSearchControl() {
-    return SystemInfo.isMacOSLeopard && UIUtil.isUnderAquaLookAndFeel();
+    return (SystemInfo.isMacOSLeopard && UIUtil.isUnderAquaLookAndFeel()) || UIUtil.isUnderDarcula();
   }
 
   private static boolean hasIconsOutsideOfTextField() {
@@ -270,7 +279,7 @@ public class SearchTextField extends JPanel {
   private void addMenuItem(final String item) {
     if (myNativeSearchPopup != null) {
       myNativeSearchPopup.remove(myNoItems);
-      final JMenuItem menuItem = new JMenuItem(item);
+      final JMenuItem menuItem = new JBMenuItem(item);
       myNativeSearchPopup.add(menuItem);
       menuItem.addActionListener(new ActionListener() {
         public void actionPerformed(final ActionEvent e) {
@@ -370,7 +379,7 @@ public class SearchTextField extends JPanel {
   }
 
   protected void showPopup() {
-    if (myPopup == null) {
+    if (myPopup == null || !myPopup.isVisible()) {
       final JList list = new JBList(myModel);
       final Runnable chooseRunnable = createItemChosenCallback(list);
       myPopup = JBPopupFactory.getInstance().createListPopupBuilder(list)

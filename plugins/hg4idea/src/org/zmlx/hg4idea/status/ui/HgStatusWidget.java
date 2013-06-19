@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
  */
 package org.zmlx.hg4idea.status.ui;
 
+import com.intellij.dvcs.DvcsUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.StatusBar;
 import com.intellij.openapi.wm.StatusBarWidget;
-import com.intellij.openapi.wm.WindowManager;
 import com.intellij.openapi.wm.impl.status.EditorBasedWidget;
 import com.intellij.util.Consumer;
 import com.intellij.util.messages.MessageBusConnection;
@@ -32,22 +32,25 @@ import org.jetbrains.annotations.Nullable;
 import org.zmlx.hg4idea.HgProjectSettings;
 import org.zmlx.hg4idea.HgUpdater;
 import org.zmlx.hg4idea.HgVcs;
+import org.zmlx.hg4idea.action.HgBranchPopup;
+import org.zmlx.hg4idea.repo.HgRepositoryImpl;
 import org.zmlx.hg4idea.status.HgCurrentBranchStatus;
+import org.zmlx.hg4idea.util.HgUtil;
 
-import java.awt.*;
 import java.awt.event.MouseEvent;
 
 /**
  * Widget to display basic hg status in the IJ status bar.
  */
-public class HgStatusWidget extends EditorBasedWidget implements StatusBarWidget.TextPresentation, StatusBarWidget.Multiframe, HgUpdater {
+public class HgStatusWidget extends EditorBasedWidget
+  implements StatusBarWidget.MultipleTextValuesPresentation,
+             StatusBarWidget.Multiframe, HgUpdater {
 
   private static final String MAX_STRING = "hg: default branch (128)";
 
   @NotNull private final HgVcs myVcs;
   @NotNull private final HgProjectSettings myProjectSettings;
   @NotNull private final HgCurrentBranchStatus myCurrentBranchStatus;
-  private MessageBusConnection myBusConnection;
 
   private volatile String myText = "";
   private volatile String myTooltip = "";
@@ -77,42 +80,52 @@ public class HgStatusWidget extends EditorBasedWidget implements StatusBarWidget
   }
 
   @Override
-  public void selectionChanged(FileEditorManagerEvent event) {
+  public void selectionChanged(@NotNull FileEditorManagerEvent event) {
     update();
   }
 
   @Override
-  public void fileOpened(FileEditorManager source, VirtualFile file) {
+  public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
     update();
   }
 
   @Override
-  public void fileClosed(FileEditorManager source, VirtualFile file) {
+  public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
     update();
   }
 
   @Override
-  public String getTooltipText() {
-    return myTooltip;
+  public ListPopup getPopupStep() {
+    Project project = getProject();
+    if (project == null) {
+      return null;
+    }
+    VirtualFile root = HgUtil.getRootForSelectedFile(project);
+    if (root != null) {
+      return HgBranchPopup.getInstance(project, HgRepositoryImpl.getFullInstance(root, project, project)).asListPopup();
+    }
+    return null;
   }
 
-  @NotNull
   @Override
-  public String getText() {
+  public String getSelectedValue() {
     final String text = myText;
     return StringUtil.isEmpty(text) ? "" : "hg: " + text;
   }
 
   @NotNull
   @Override
-  public String getMaxPossibleText() {
+  @Deprecated
+  public String getMaxValue() {
     return MAX_STRING;
   }
 
+
   @Override
-  public float getAlignment() {
-    return Component.LEFT_ALIGNMENT;
+  public String getTooltipText() {
+    return myTooltip;
   }
+
 
   @Override
   // Updates branch information on click
@@ -147,8 +160,9 @@ public class HgStatusWidget extends EditorBasedWidget implements StatusBarWidget
 
         int maxLength = MAX_STRING.length();
         myText = StringUtil.shortenTextWithEllipsis(myText, maxLength, 5);
-
-        myStatusBar.updateWidget(ID());
+        if (!isDisposed() && myStatusBar != null) {
+          myStatusBar.updateWidget(ID());
+        }
       }
     });
   }
@@ -160,24 +174,24 @@ public class HgStatusWidget extends EditorBasedWidget implements StatusBarWidget
       return;
     }
 
-    myBusConnection = project.getMessageBus().connect();
-    myBusConnection.subscribe(HgVcs.STATUS_TOPIC, this);
+    MessageBusConnection busConnection = project.getMessageBus().connect();
+    busConnection.subscribe(HgVcs.STATUS_TOPIC, this);
 
-    StatusBar statusBar = WindowManager.getInstance().getStatusBar(project);
-    if (null != statusBar) {
-      statusBar.addWidget(this, project);
-    }
+    DvcsUtil.installStatusBarWidget(myProject, this);
   }
 
   public void deactivate() {
-    StatusBar statusBar = WindowManager.getInstance().getStatusBar(getProject());
-    if (null != statusBar) {
-      statusBar.removeWidget(ID());
-    }
+    if (isDisposed()) return;
+    DvcsUtil.removeStatusBarWidget(myProject, this);
   }
 
   private void update() {
     update(getProject());
+  }
+
+  public void dispose() {
+    deactivate();
+    super.dispose();
   }
 
   private void emptyTextAndTooltip() {

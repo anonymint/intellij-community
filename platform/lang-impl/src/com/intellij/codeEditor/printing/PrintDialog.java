@@ -22,6 +22,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.TabbedPaneWrapper;
 import com.intellij.ui.MappingListCellRenderer;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
@@ -98,6 +99,7 @@ class PrintDialog extends DialogWrapper {
   }
 
 
+  @Override
   protected JComponent createNorthPanel() {
     JPanel panel = new JPanel(new GridBagLayout());
     panel.setBorder(BorderFactory.createEmptyBorder(4,8,8,4));
@@ -136,6 +138,7 @@ class PrintDialog extends DialogWrapper {
     buttonGroup.add(myRbCurrentPackage);
 
     ActionListener actionListener = new ActionListener() {
+      @Override
       public void actionPerformed(ActionEvent e) {
         myCbIncludeSubpackages.setEnabled(myRbCurrentPackage.isSelected());
       }
@@ -148,6 +151,7 @@ class PrintDialog extends DialogWrapper {
     return panel;
   }
 
+  @Override
   protected JComponent createCenterPanel() {
     TabbedPaneWrapper tabbedPaneWrapper = new TabbedPaneWrapper(myDisposable);
     tabbedPaneWrapper.addTab(CodeEditorBundle.message("print.settings.tab"), createPrintSettingsPanel());
@@ -493,9 +497,11 @@ class PrintDialog extends DialogWrapper {
       setFocusable(false);
     }
 
+    @Override
     public Dimension getMinimumSize() {
       return new Dimension(0,0);
     }
+    @Override
     public Dimension getPreferredSize() {
       return new Dimension(0,0);
     }
@@ -632,19 +638,23 @@ class PrintDialog extends DialogWrapper {
 
   }
 
+  @Override
+  @NotNull
   protected Action[] createActions() {
     return new Action[]{getOKAction(),getCancelAction(), new ApplyAction(), getHelpAction()};
   }
 
+  @Override
   public void doHelpAction() {
     HelpManager.getInstance().invokeHelp(HelpID.PRINT);
   }
-  
+
   class ApplyAction extends AbstractAction{
     public ApplyAction(){
       putValue(Action.NAME, CodeEditorBundle.message("print.apply.button"));
     }
 
+    @Override
     public void actionPerformed(ActionEvent e){
       apply();
     }
@@ -655,6 +665,7 @@ class PrintDialog extends DialogWrapper {
     public MyTextField(int size) {
      super(size);
     }
+    @Override
     public Dimension getMinimumSize() {
       return super.getPreferredSize();
     }
@@ -664,6 +675,7 @@ class PrintDialog extends DialogWrapper {
     public MyLabel(String text) {
      super(text);
     }
+    @Override
     public Dimension getMinimumSize() {
       return super.getPreferredSize();
     }

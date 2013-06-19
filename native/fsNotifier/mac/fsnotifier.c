@@ -20,6 +20,30 @@
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
+static void reportEvent(char *event, char *path) {
+    int len = 0;
+    if (path != NULL) {
+        len = strlen(path);
+        for (char* p = path; *p != '\0'; p++) {
+            if (*p == '\n') {
+                *p = '\0';
+            }
+        }
+    }
+
+    pthread_mutex_lock(&lock);
+
+    fputs(event, stdout);
+    fputc('\n', stdout);
+    if (path != NULL) {
+        fwrite(path, len, 1, stdout);
+        fputc('\n', stdout);
+    }
+
+    fflush(stdout);
+    pthread_mutex_unlock(&lock);
+}
+
 static void callback(ConstFSEventStreamRef streamRef,
                      void *clientCallBackInfo,
                      size_t numEvents,
@@ -32,45 +56,21 @@ static void callback(ConstFSEventStreamRef streamRef,
         // TODO[max] Lion has much more detailed flags we need accurately process. For now just reduce to SL events range.
         FSEventStreamEventFlags flags = eventFlags[i] & 0xFF;
         if ((flags & kFSEventStreamEventFlagMustScanSubDirs) != 0) {
-            pthread_mutex_lock(&lock);
-            printf("RECDIRTY\n%s\n", paths[i]);
-            fflush(stdout);
-            pthread_mutex_unlock(&lock);
+            reportEvent("RECDIRTY", paths[i]);
         }
         else if (flags != kFSEventStreamEventFlagNone) {
-            pthread_mutex_lock(&lock);
-            printf("RESET\n");
-            fflush(stdout);
-            pthread_mutex_unlock(&lock);
+            reportEvent("RESET", NULL);
         }
         else {
-            pthread_mutex_lock(&lock);
-            printf("DIRTY\n%s\n", paths[i]);
-            fflush(stdout);
-            pthread_mutex_unlock(&lock);
+            reportEvent("DIRTY", paths[i]);
         }
     }
 }
 
 static void * EventProcessingThread(void *data) {
-    CFStringRef path = CFSTR("/");
-    CFArrayRef pathsToWatch = CFArrayCreate(NULL, (const void **)&path, 1, NULL);
-    void *callbackInfo = NULL;
-    CFAbsoluteTime latency = 0.3;  // Latency in seconds
-
-    FSEventStreamRef stream = FSEventStreamCreate(
-        NULL,
-        &callback,
-        callbackInfo,
-        pathsToWatch,
-        kFSEventStreamEventIdSinceNow,
-        latency,
-        kFSEventStreamCreateFlagNoDefer
-    );
-
+    FSEventStreamRef stream = (FSEventStreamRef) data;
     FSEventStreamScheduleWithRunLoop(stream, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     FSEventStreamStart(stream);
-
     CFRunLoopRun();
     return NULL;
 }
@@ -154,11 +154,27 @@ int main(const int argc, const char* argv[]) {
         return 1;
     }
 
-    pthread_t threadId;
-    if (pthread_create(&threadId, NULL, EventProcessingThread, NULL) != 0) {
-        // Give up if cannot create a thread.
+    CFStringRef path = CFSTR("/");
+    CFArrayRef pathsToWatch = CFArrayCreate(NULL, (const void **)&path, 1, NULL);
+    CFAbsoluteTime latency = 0.3;  // Latency in seconds
+    FSEventStreamRef stream = FSEventStreamCreate(
+        NULL,
+        &callback,
+        NULL,
+        pathsToWatch,
+        kFSEventStreamEventIdSinceNow,
+        latency,
+        kFSEventStreamCreateFlagNoDefer
+    );
+    if (stream == NULL) {
         printf("GIVEUP\n");
         return 2;
+    }
+
+    pthread_t threadId;
+    if (pthread_create(&threadId, NULL, EventProcessingThread, stream) != 0) {
+        printf("GIVEUP\n");
+        return 3;
     }
 
     while (TRUE) {

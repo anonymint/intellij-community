@@ -21,12 +21,13 @@ import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
-import com.intellij.openapi.roots.impl.ModifiableModelCommitter;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.impl.ModifiableModelCommitter;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.util.ArrayUtil;
-import gnu.trove.THashMap;
+import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.maven.model.MavenResource;
 import org.jetbrains.idea.maven.project.MavenImportingSettings;
@@ -38,7 +39,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
 public class MavenFoldersImporter {
   private final MavenProject myMavenProject;
@@ -120,6 +120,8 @@ public class MavenFoldersImporter {
       testFolders.add(each.getDirectory());
     }
 
+    addBuilderHelperPaths("add-source", sourceFolders);
+    addBuilderHelperPaths("add-test-source", testFolders);
 
     List<Pair<Path, Boolean>> allFolders = new ArrayList<Pair<Path, Boolean>>(sourceFolders.size() + testFolders.size());
     for (String each : sourceFolders) {
@@ -131,6 +133,19 @@ public class MavenFoldersImporter {
 
     for (Pair<Path, Boolean> each : normalize(allFolders)) {
       myModel.addSourceFolder(each.first.getPath(), each.second);
+    }
+  }
+
+  private void addBuilderHelperPaths(String goal, List<String> folders) {
+    final Element configurationElement = myMavenProject.getPluginGoalConfiguration("org.codehaus.mojo", "build-helper-maven-plugin", goal);
+    if (configurationElement != null) {
+      final Element sourcesElement = configurationElement.getChild("sources");
+      if (sourcesElement != null) {
+        //noinspection unchecked
+        for (Element element : (List<Element>)sourcesElement.getChildren()) {
+          folders.add(element.getTextTrim());
+        }
+      }
     }
   }
 
@@ -164,24 +179,28 @@ public class MavenFoldersImporter {
 
   private void configGeneratedAndExcludedFolders() {
     File targetDir = new File(myMavenProject.getBuildDirectory());
-    Map<File, Boolean> generatedDirs = new THashMap<File, Boolean>();
-    generatedDirs.put(new File(myMavenProject.getGeneratedSourcesDirectory(true)), true);
-    generatedDirs.put(new File(myMavenProject.getGeneratedSourcesDirectory(false)), false);
+
+    String generatedDir = myMavenProject.getGeneratedSourcesDirectory(false);
+    String generatedDirTest = myMavenProject.getGeneratedSourcesDirectory(true);
 
     myModel.unregisterAll(targetDir.getPath(), true, false);
 
-    myModel.addSourceFolder(myMavenProject.getAnnotationProcessorDirectory(true), true, true);
-    myModel.addSourceFolder(myMavenProject.getAnnotationProcessorDirectory(false), false, true);
+    if (myImportingSettings.getGeneratedSourcesFolder() != MavenImportingSettings.GeneratedSourcesFolder.IGNORE) {
+      myModel.addSourceFolder(myMavenProject.getAnnotationProcessorDirectory(true), true, true);
+      myModel.addSourceFolder(myMavenProject.getAnnotationProcessorDirectory(false), false, true);
+    }
 
     File[] targetChildren = targetDir.listFiles();
 
     if (targetChildren != null) {
-      for (File f : getChildren(targetDir)) {
+      for (File f : targetChildren) {
         if (!f.isDirectory()) continue;
 
-        Boolean isGeneratedTestSources = generatedDirs.get(f);
-        if (isGeneratedTestSources != null) {
-          configGeneratedSourceFolder(f, isGeneratedTestSources);
+        if (FileUtil.pathsEqual(generatedDir, f.getPath())) {
+          configGeneratedSourceFolder(f, false);
+        }
+        else if (FileUtil.pathsEqual(generatedDirTest, f.getPath())) {
+          configGeneratedSourceFolder(f, true);
         }
         else {
           if (myImportingSettings.isExcludeTargetFolder()) {
@@ -237,6 +256,9 @@ public class MavenFoldersImporter {
 
         addAllSubDirsAsSources(targetDir, isTestSources);
         break;
+
+      case IGNORE:
+        break; // Ignore.
     }
   }
 

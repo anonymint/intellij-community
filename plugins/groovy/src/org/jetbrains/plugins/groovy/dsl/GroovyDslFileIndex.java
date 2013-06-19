@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -28,6 +29,7 @@ import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Trinity;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileAdapter;
@@ -43,10 +45,12 @@ import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.psi.util.PsiModificationTracker;
+import com.intellij.reference.SoftReference;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.PathUtil;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.containers.ConcurrentMultiMap;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.indexing.*;
 import com.intellij.util.io.EnumeratorStringDescriptor;
@@ -54,18 +58,26 @@ import com.intellij.util.io.KeyDescriptor;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.groovy.GroovyFileType;
 import org.jetbrains.plugins.groovy.annotator.GroovyFrameworkConfigNotification;
+import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrClosableBlock;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
+import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 
 import javax.swing.event.HyperlinkEvent;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * @author peter
@@ -73,7 +85,7 @@ import java.util.concurrent.TimeUnit;
 public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
   private static final Key<Pair<GroovyDslExecutor, Long>> CACHED_EXECUTOR = Key.create("CachedGdslExecutor");
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.plugins.groovy.dsl.GroovyDslFileIndex");
-  private static final FileAttribute ENABLED = new FileAttribute("ENABLED", 0);
+  private static final FileAttribute ENABLED = new FileAttribute("ENABLED", 0, false);
 
   @NonNls public static final ID<String, Void> NAME = ID.create("GroovyDslFileIndex");
   @NonNls private static final String OUR_KEY = "ourKey";
@@ -81,14 +93,14 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
   public static final NotificationGroup NOTIFICATION_GROUP =
     new NotificationGroup("Groovy DSL errors", NotificationDisplayType.BALLOON, true);
   private final MyDataIndexer myDataIndexer = new MyDataIndexer();
-  private final MyInputFilter myInputFilter = new MyInputFilter();
 
   private static final MultiMap<String, LinkedBlockingQueue<Pair<VirtualFile, GroovyDslExecutor>>> filesInProcessing =
     new ConcurrentMultiMap<String, LinkedBlockingQueue<Pair<VirtualFile, GroovyDslExecutor>>>();
 
   private static final ThreadPoolExecutor ourPool = new ThreadPoolExecutor(0, 1, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
+    @NotNull
     @Override
-    public Thread newThread(Runnable r) {
+    public Thread newThread(@NotNull Runnable r) {
       return new Thread(r, "Groovy DSL File Index Executor");
     }
   });
@@ -132,7 +144,7 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
 
   @Override
   public FileBasedIndex.InputFilter getInputFilter() {
-    return myInputFilter;
+    return new MyInputFilter();
   }
 
   @Override
@@ -199,7 +211,7 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
     try {
       ByteArrayOutputStream stream = new ByteArrayOutputStream(error.length() * 2 + 1);
       stream.write(42);
-      stream.write(error.getBytes());
+      stream.write(error.getBytes(Charset.defaultCharset()));
       ENABLED.writeAttributeBytes(vfile, stream.toByteArray());
     }
     catch (IOException e1) {
@@ -217,6 +229,72 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
       return null;
     }
     return pair.first;
+  }
+
+  @Nullable
+  public static PsiClassType pocessScriptSuperClasses(@NotNull GroovyFile scriptFile) {
+    if (!scriptFile.isScript()) return null;
+
+    final VirtualFile virtualFile = scriptFile.getVirtualFile();
+    if (virtualFile == null) return null;
+    final String filePath = virtualFile.getPath();
+
+
+    List<Trinity<String, String, GroovyDslScript>> supers = ContainerUtil.newArrayList();
+    final Project project = scriptFile.getProject();
+    for (GroovyDslScript script : getDslScripts(project)) {
+      final MultiMap staticInfo = script.getStaticInfo();
+      final Collection infos = staticInfo != null ? staticInfo.get("scriptSuperClass") : Collections.emptyList();
+
+      for (Object info : infos) {
+        if (info instanceof Map) {
+          final Map map = (Map)info;
+
+          final Object _pattern = map.get("pattern");
+          final Object _superClass = map.get("superClass");
+
+          if (_pattern instanceof String && _superClass instanceof String) {
+            final String pattern = (String)_pattern;
+            final String superClass = (String)_superClass;
+
+            try {
+              if (Pattern.matches(".*" + pattern, filePath)) {
+                supers.add(Trinity.create(superClass, pattern, script));
+              }
+            }
+            catch (RuntimeException e) {
+              script.handleDslError(e);
+            }
+          }
+        }
+      }
+    }
+
+    if (!supers.isEmpty()) {
+      final String className = supers.get(0).first;
+      final GroovyDslScript script = supers.get(0).third;
+      try {
+        return TypesUtil.createTypeByFQClassName(className, scriptFile);
+      }
+      catch (ProcessCanceledException e) {
+        throw e;
+      }
+      catch (RuntimeException e) {
+        script.handleDslError(e);
+        return null;
+      }
+    }
+    /*else if (supers.size() > 1) {
+      StringBuilder buffer = new StringBuilder("Several script super class patterns match file ").append(filePath).append(". <p> ");
+      for (Trinity<String, String, GroovyDslScript> aSuper : supers) {
+        buffer.append(aSuper.third.getFilePath()).append(" ").append(aSuper.second).append('\n');
+      }
+      NOTIFICATION_GROUP.createNotification("DSL script execution error", buffer.toString(), NotificationType.ERROR, null).notify(project);
+      return null;
+    }*/
+    else {
+      return null;
+    }
   }
 
   public static boolean processExecutors(PsiType psiType, PsiElement place, final PsiScopeProcessor processor, ResolveState state) {
@@ -256,37 +334,50 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
     return true;
   }
 
-  private static boolean insideAnnotation(PsiElement place) {
+  private static boolean insideAnnotation(@Nullable PsiElement place) {
     while (place != null) {
       if (place instanceof PsiAnnotation) return true;
-      if (place instanceof PsiFile) return false;
+      if (place instanceof GrClosableBlock ||
+          place instanceof GrTypeDefinition ||
+          place instanceof PsiFile) return false;
       place = place.getParent();
     }
     return false;
   }
 
-  private static volatile List<Pair<File, GroovyDslExecutor>> ourStandardScripts;
+  private static volatile SoftReference<List<Pair<File, GroovyDslExecutor>>> ourStandardScripts;
+
+  @Nullable
+  private static List<Pair<File, GroovyDslExecutor>> derefStandardScripts() {
+    SoftReference<List<Pair<File, GroovyDslExecutor>>> ref = ourStandardScripts;
+    return ref == null ? null : ref.get();
+  }
 
   private static List<Pair<File, GroovyDslExecutor>> getStandardScripts() {
-    List<Pair<File, GroovyDslExecutor>> result = ourStandardScripts;
+    List<Pair<File, GroovyDslExecutor>> result = derefStandardScripts();
     if (result != null) {
       return result;
     }
 
+    final GroovyFrameworkConfigNotification[] extensions = GroovyFrameworkConfigNotification.EP_NAME.getExtensions();
+
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
+    final AtomicReference<List<Pair<File, GroovyDslExecutor>>> ref = new AtomicReference<List<Pair<File, GroovyDslExecutor>>>();
     ourPool.execute(new Runnable() {
       @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod")
       @Override
       public void run() {
-        if (ourStandardScripts != null) {
-          return;
-        }
-
         try {
+          List<Pair<File, GroovyDslExecutor>> pairs = derefStandardScripts();
+          if (pairs != null) {
+            ref.set(pairs);
+            return;
+          }
+
           Set<File> scriptFolders = new LinkedHashSet<File>();
           // perhaps a separate extension for that?
-          for (GroovyFrameworkConfigNotification extension : GroovyFrameworkConfigNotification.EP_NAME.getExtensions()) {
+          for (GroovyFrameworkConfigNotification extension : extensions) {
             File jarPath = new File(PathUtil.getJarPathForClass(extension.getClass()));
             if (jarPath.isFile()) {
               jarPath = jarPath.getParentFile();
@@ -297,29 +388,33 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
           List<Pair<File, GroovyDslExecutor>> executors = new ArrayList<Pair<File, GroovyDslExecutor>>();
           for (File file : scriptFolders) {
             if (file.exists()) {
-              for (File child : file.listFiles()) {
-                final String fileName = child.getName();
-                if (fileName.endsWith(".gdsl")) {
-                  try {
-                    final String text = new String(FileUtil.loadFileText(child));
-                    executors.add(Pair.create(child, new GroovyDslExecutor(text, fileName)));
-                  }
-                  catch (IOException e) {
-                    LOG.error(e);
+              File[] children = file.listFiles();
+              if (children != null) {
+                for (File child : children) {
+                  final String fileName = child.getName();
+                  if (fileName.endsWith(".gdsl")) {
+                    try {
+                      final String text = new String(FileUtil.loadFileText(child));
+                      executors.add(Pair.create(child, new GroovyDslExecutor(text, fileName)));
+                    }
+                    catch (IOException e) {
+                      LOG.error(e);
+                    }
                   }
                 }
               }
             }
           }
-          ourStandardScripts = executors;
+          ourStandardScripts = new SoftReference<List<Pair<File, GroovyDslExecutor>>>(executors);
+          ref.set(executors);
         }
-        catch (OutOfMemoryError e) {
-          stopGdsl = true;
-          throw e;
-        }
-        catch (NoClassDefFoundError e) {
-          stopGdsl = true;
-          throw e;
+        catch (Throwable e) {
+          ref.set(new ArrayList<Pair<File, GroovyDslExecutor>>());
+          //noinspection InstanceofCatchParameter
+          if (e instanceof Error) {
+            stopGdsl = true;
+          }
+          LOG.error(e);
         }
         finally {
           semaphore.up();
@@ -327,13 +422,16 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
       }
     });
 
-    while (ourStandardScripts == null && !stopGdsl && !semaphore.waitFor(20)) {
+    while (true) {
       ProgressManager.checkCanceled();
+
+      if (stopGdsl) {
+        return Collections.emptyList();
+      }
+      if (ref.get() != null || semaphore.waitFor(20)) {
+        return ref.get();
+      }
     }
-    if (stopGdsl) {
-      return Collections.emptyList();
-    }
-    return ourStandardScripts;
   }
 
   private static final Key<CachedValue<List<GroovyDslScript>>> SCRIPTS_CACHE = Key.create("GdslScriptCache");
@@ -413,7 +511,11 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
     }
   }
 
-  private static class MyInputFilter implements FileBasedIndex.InputFilter {
+  private static class MyInputFilter extends DefaultFileTypeSpecificInputFilter {
+    MyInputFilter() {
+      super(GroovyFileType.GROOVY_FILE_TYPE);
+    }
+
     @Override
     public boolean acceptInput(final VirtualFile file) {
       return "gdsl".equals(file.getExtension());
@@ -460,7 +562,7 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
       final boolean isNewRequest = !filesInProcessing.containsKey(fileUrl);
       filesInProcessing.putValue(fileUrl, queue);
       if (isNewRequest) {
-        ourPool.execute(parseScript); //todo bring back multithreading when Groovy team fixes http://jira.codehaus.org/browse/GROOVY-4292
+        ourPool.execute(parseScript); //todo bring back multi-threading when Groovy team fixes http://jira.codehaus.org/browse/GROOVY-4292
         //ApplicationManager.getApplication().executeOnPooledThread(parseScript);
       }
     }
@@ -489,10 +591,12 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
       }
       invokeDslErrorPopup(e, project, vfile);
 
+      //noinspection InstanceofCatchParameter
       if (e instanceof OutOfMemoryError) {
         stopGdsl = true;
         throw (Error)e;
       }
+      //noinspection InstanceofCatchParameter
       if (e instanceof NoClassDefFoundError) {
         stopGdsl = true;
         throw (NoClassDefFoundError) e;
@@ -526,4 +630,5 @@ public class GroovyDslFileIndex extends ScalarIndexExtension<String> {
                                             }
                                           }).notify(project);
   }
+
 }

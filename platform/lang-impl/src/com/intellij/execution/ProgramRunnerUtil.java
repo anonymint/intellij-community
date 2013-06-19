@@ -20,7 +20,7 @@ import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.impl.RunDialog;
 import com.intellij.execution.impl.RunManagerImpl;
-import com.intellij.execution.runners.ExecutionEnvironment;
+import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
@@ -48,8 +48,8 @@ public class ProgramRunnerUtil {
   }
 
   @Nullable
-  public static ProgramRunner getRunner(final String executorId, final RunnerAndConfigurationSettings configuration) {
-    return RunnerRegistry.getInstance().getRunner(executorId, configuration.getConfiguration());
+  public static ProgramRunner getRunner(@NotNull final String executorId, final RunnerAndConfigurationSettings configuration) {
+    return configuration == null ? null : RunnerRegistry.getInstance().getRunner(executorId, configuration.getConfiguration());
   }
 
   public static void executeConfiguration(@NotNull final Project project,
@@ -97,7 +97,8 @@ public class ProgramRunnerUtil {
     }
 
     try {
-      runner.execute(executor, new ExecutionEnvironment(runner, target, configuration, contentToReuse, project));
+      runner.execute(executor, new ExecutionEnvironmentBuilder().setRunnerAndSettings(runner, configuration).setTarget(target)
+        .setContentToReuse(contentToReuse).setProject(project).assignNewId().build());
     }
     catch (ExecutionException e) {
       ExecutionUtil.handleExecutionError(project, executor.getToolWindowId(), configuration.getConfiguration(), e);

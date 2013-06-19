@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.lang.*;
 import com.intellij.lang.impl.PsiBuilderAdapter;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.lang.java.JavaParserDefinition;
-import com.intellij.lexer.JavaDocLexer;
 import com.intellij.lexer.Lexer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
@@ -202,8 +201,7 @@ public class JavaParserUtil {
 
     final PsiBuilderFactory factory = PsiBuilderFactory.getInstance();
     final Lexer lexer = chameleon.getElementType() == JavaDocElementType.DOC_COMMENT
-                        ? new JavaDocLexer(level.isAtLeast(LanguageLevel.JDK_1_5))
-                        : JavaParserDefinition.createLexer(level);
+                        ? JavaParserDefinition.createDocLexer(level) : JavaParserDefinition.createLexer(level);
     final PsiBuilder builder = factory.createBuilder(project, chameleon, lexer, chameleon.getElementType().getLanguage(), chameleon.getChars());
     setLanguageLevel(builder, level);
 
@@ -246,10 +244,17 @@ public class JavaParserUtil {
     }
   }
 
-  public static boolean expectOrError(final PsiBuilder builder, final IElementType expectedType,
-                                      @PropertyKey(resourceBundle = JavaErrorMessages.BUNDLE) String errorMessageKey) {
-    if (!PsiBuilderUtil.expect(builder, expectedType)) {
-      error(builder, JavaErrorMessages.message(errorMessageKey));
+  public static boolean expectOrError(PsiBuilder builder, TokenSet expected, @PropertyKey(resourceBundle = JavaErrorMessages.BUNDLE) String key) {
+    if (!PsiBuilderUtil.expect(builder, expected)) {
+      error(builder, JavaErrorMessages.message(key));
+      return false;
+    }
+    return true;
+  }
+
+  public static boolean expectOrError(PsiBuilder builder, IElementType expected, @PropertyKey(resourceBundle = JavaErrorMessages.BUNDLE) String key) {
+    if (!PsiBuilderUtil.expect(builder, expected)) {
+      error(builder, JavaErrorMessages.message(key));
       return false;
     }
     return true;

@@ -39,7 +39,7 @@ public class ReflectionUtil {
   @Nullable
   public static Type resolveVariable(TypeVariable variable, final Class classType, boolean resolveInInterfacesOnly) {
     final Class aClass = getRawType(classType);
-    int index = ArrayUtil.find(ReflectionCache.getTypeParameters(aClass), variable);
+    int index = ArrayUtilRt.find(ReflectionCache.getTypeParameters(aClass), variable);
     if (index >= 0) {
       return variable;
     }
@@ -63,7 +63,7 @@ public class ReflectionUtil {
       }
       if (resolved instanceof TypeVariable) {
         final TypeVariable typeVariable = (TypeVariable)resolved;
-        index = ArrayUtil.find(ReflectionCache.getTypeParameters(anInterface), typeVariable);
+        index = ArrayUtilRt.find(ReflectionCache.getTypeParameters(anInterface), typeVariable);
         if (index < 0) {
           LOG.error("Cannot resolve type variable:\n" + "typeVariable = " + typeVariable + "\n" + "genericDeclaration = " +
                     declarationToString(typeVariable.getGenericDeclaration()) + "\n" + "searching in " + declarationToString(anInterface));
@@ -73,7 +73,7 @@ public class ReflectionUtil {
           return Object.class;
         }
         if (type instanceof ParameterizedType) {
-          return getActualTypeArguments(((ParameterizedType)type))[index];
+          return getActualTypeArguments((ParameterizedType)type)[index];
         }
         throw new AssertionError("Invalid type: " + type);
       }
@@ -81,7 +81,7 @@ public class ReflectionUtil {
     return null;
   }
 
-  public static String declarationToString(final GenericDeclaration anInterface) {
+  public static String declarationToString(@NotNull GenericDeclaration anInterface) {
     return anInterface.toString()
            + Arrays.asList(anInterface.getTypeParameters())
            + " loaded by " + ((Class)anInterface).getClassLoader();
@@ -118,9 +118,9 @@ public class ReflectionUtil {
         return (Class<?>)((ParameterizedType)type).getRawType();
       }
       if (type instanceof TypeVariable && classType instanceof ParameterizedType) {
-        final int index = ArrayUtil.find(ReflectionCache.getTypeParameters(aClass), type);
+        final int index = ArrayUtilRt.find(ReflectionCache.getTypeParameters(aClass), type);
         if (index >= 0) {
-          return getRawType(getActualTypeArguments(((ParameterizedType)classType))[index]);
+          return getRawType(getActualTypeArguments((ParameterizedType)classType)[index]);
         }
       }
     } else {
@@ -304,6 +304,35 @@ public class ReflectionUtil {
     }
     catch (Throwable e) {
       LOG.info(e);
+    }
+  }
+
+
+  private static class MySecurityManager extends SecurityManager {
+    private static final MySecurityManager INSTANCE = new MySecurityManager();
+    public Class[] getStack() {
+      return getClassContext();
+    }
+  }
+
+  /**
+   * Returns the class this method was called 'framesToSkip' frames up the caller hierarchy.
+   *
+   * NOTE:
+   * <b>Extremely expensive!
+   * Please consider not using it.
+   * These aren't the droids you're looking for!</b>
+   */
+  @Nullable
+  public static Class findCallerClass(int framesToSkip) {
+    try {
+      Class[] stack = MySecurityManager.INSTANCE.getStack();
+      int indexFromTop = 1 + framesToSkip;
+      return stack.length > indexFromTop ? stack[indexFromTop] : null;
+    }
+    catch (Exception e) {
+      LOG.warn(e);
+      return null;
     }
   }
 }

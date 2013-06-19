@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,15 @@
  */
 package com.intellij.codeInsight.daemon.quickFix;
 
+import com.intellij.pom.java.LanguageLevel;
+
 /**
  * @author ven
  */
 public abstract class LightQuickFix15TestCase extends LightQuickFixTestCase {
+  @Override
+  protected void doAllTests() {
+    setLanguageLevel(LanguageLevel.JDK_1_5);
+    super.doAllTests();
+  }
 }

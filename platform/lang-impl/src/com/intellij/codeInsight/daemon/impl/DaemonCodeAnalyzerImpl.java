@@ -20,10 +20,7 @@ import com.intellij.codeHighlighting.BackgroundEditorHighlighter;
 import com.intellij.codeHighlighting.HighlightingPass;
 import com.intellij.codeHighlighting.Pass;
 import com.intellij.codeHighlighting.TextEditorHighlightingPass;
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzerSettings;
-import com.intellij.codeInsight.daemon.LineMarkerInfo;
-import com.intellij.codeInsight.daemon.ReferenceImporter;
+import com.intellij.codeInsight.daemon.*;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.intention.impl.IntentionHintComponent;
 import com.intellij.concurrency.Job;
@@ -122,7 +119,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
 
     mySettings = daemonCodeAnalyzerSettings;
     myEditorTracker = editorTracker;
-    myLastSettings = (DaemonCodeAnalyzerSettings)daemonCodeAnalyzerSettings.clone();
+    myLastSettings = ((DaemonCodeAnalyzerSettingsImpl)daemonCodeAnalyzerSettings).clone();
 
     myFileStatusMap = new FileStatusMap(myProject);
     myPassExecutorService = new PassExecutorService(myProject) {
@@ -175,7 +172,8 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
   }
 
   static boolean hasErrors(@NotNull Project project, @NotNull Document document) {
-    return !processHighlights(document, project, HighlightSeverity.ERROR, 0, document.getTextLength(), CommonProcessors.<HighlightInfo>alwaysFalse());
+    return !processHighlights(document, project, HighlightSeverity.ERROR, 0, document.getTextLength(),
+                              CommonProcessors.<HighlightInfo>alwaysFalse());
   }
 
   @NotNull
@@ -194,7 +192,8 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
     final List<HighlightInfo> result = new ArrayList<HighlightInfo>();
     final VirtualFile virtualFile = psiFile.getVirtualFile();
     if (virtualFile != null && !virtualFile.getFileType().isBinary()) {
-      List<TextEditorHighlightingPass> passes = TextEditorHighlightingPassRegistrarEx.getInstanceEx(myProject).instantiateMainPasses(psiFile, document);
+      List<TextEditorHighlightingPass> passes =
+        TextEditorHighlightingPassRegistrarEx.getInstanceEx(myProject).instantiateMainPasses(psiFile, document);
 
       Collections.sort(passes, new Comparator<TextEditorHighlightingPass>() {
         @Override
@@ -226,7 +225,9 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
     assert !myDisposed;
     Application application = ApplicationManager.getApplication();
     application.assertIsDispatchThread();
-    assert !application.isWriteAccessAllowed() : "Must not start highlighting from within write action to avoid deadlock";
+    if (application.isWriteAccessAllowed()) {
+      throw new AssertionError("Must not start highlighting from within write action, or deadlock is imminent");
+    }
 
     // pump first so that queued event do not interfere
     UIUtil.dispatchAllInvocationEvents();
@@ -333,7 +334,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
     TrafficLightRenderer.setOrRefreshErrorStripeRenderer(markup, myProject, document, psiFile);
   }
 
-  private final List<Pair<NamedScope, NamedScopesHolder>> myScopes = ContainerUtil.createEmptyCOWList();
+  private final List<Pair<NamedScope, NamedScopesHolder>> myScopes = ContainerUtil.createLockFreeCopyOnWriteList();
 
   void reloadScopes(@NotNull DependencyValidationManager dependencyValidationManager, @NotNull NamedScopeManager namedScopeManager) {
     ApplicationManager.getApplication().assertIsDispatchThread();
@@ -364,7 +365,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
     if (settings.isCodeHighlightingChanged(myLastSettings)) {
       restart();
     }
-    myLastSettings = (DaemonCodeAnalyzerSettings)settings.clone();
+    myLastSettings = ((DaemonCodeAnalyzerSettingsImpl)settings).clone();
   }
 
   @Override
@@ -380,6 +381,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
   }
 
   private int myDisableCount = 0;
+
   @Override
   public void disableUpdateByTimer(@NotNull Disposable parentDisposable) {
     setUpdateByTimerEnabled(false);
@@ -537,7 +539,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
                                           @NotNull final Processor<HighlightInfo> processor) {
     LOG.assertTrue(ApplicationManager.getApplication().isReadAccessAllowed());
 
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     MarkupModelEx model = (MarkupModelEx)DocumentMarkupModel.forDocument(document, project, true);
     return model.processRangeHighlightersOverlappingWith(startOffset, endOffset, new Processor<RangeHighlighterEx>() {
       @Override
@@ -560,7 +562,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
                                                      @NotNull final Processor<HighlightInfo> processor) {
     LOG.assertTrue(ApplicationManager.getApplication().isReadAccessAllowed());
 
-    final SeverityRegistrar severityRegistrar = SeverityRegistrar.getInstance(project);
+    final SeverityRegistrar severityRegistrar = SeverityUtil.getSeverityRegistrar(project);
     MarkupModelEx model = (MarkupModelEx)DocumentMarkupModel.forDocument(document, project, true);
     return model.processRangeHighlightersOutside(startOffset, endOffset, new Processor<RangeHighlighterEx>() {
       @Override
@@ -595,24 +597,33 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
 
   @Nullable
   public HighlightInfo findHighlightByOffset(@NotNull Document document, final int offset, final boolean includeFixRange) {
+    return findHighlightByOffset(document, offset, includeFixRange, HighlightSeverity.INFORMATION);
+  }
+
+  @Nullable
+  public HighlightInfo findHighlightByOffset(@NotNull Document document,
+                                             final int offset,
+                                             final boolean includeFixRange,
+                                             @NotNull HighlightSeverity minSeverity) {
     final List<HighlightInfo> foundInfoList = new SmartList<HighlightInfo>();
-    processHighlightsNearOffset(document, myProject, HighlightSeverity.INFORMATION, offset, includeFixRange, new Processor<HighlightInfo>() {
+    processHighlightsNearOffset(document, myProject, minSeverity, offset, includeFixRange,
+                                new Processor<HighlightInfo>() {
                                   @Override
                                   public boolean process(@NotNull HighlightInfo info) {
-      if (!foundInfoList.isEmpty()) {
-        HighlightInfo foundInfo = foundInfoList.get(0);
-        int compare = foundInfo.getSeverity().compareTo(info.getSeverity());
-        if (compare < 0) {
-          foundInfoList.clear();
-        }
-        else if (compare > 0) {
-          return true;
-        }
-      }
-      foundInfoList.add(info);
-      return true;
-    }
-    });
+                                    if (!foundInfoList.isEmpty()) {
+                                      HighlightInfo foundInfo = foundInfoList.get(0);
+                                      int compare = foundInfo.getSeverity().compareTo(info.getSeverity());
+                                      if (compare < 0) {
+                                        foundInfoList.clear();
+                                      }
+                                      else if (compare > 0) {
+                                        return true;
+                                      }
+                                    }
+                                    foundInfoList.add(info);
+                                    return true;
+                                  }
+                                });
 
     if (foundInfoList.isEmpty()) return null;
     if (foundInfoList.size() == 1) return foundInfoList.get(0);
@@ -656,6 +667,9 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
                             @NotNull Editor editor,
                             @NotNull ShowIntentionsPass.IntentionsInfo intentions,
                             boolean hasToRecreate) {
+    if (!editor.getSettings().isShowIntentionBulb()) {
+      return;
+    }
     ApplicationManager.getApplication().assertIsDispatchThread();
     hideLastIntentionHint();
     IntentionHintComponent hintComponent = IntentionHintComponent.showIntentionHint(project, file, editor, intentions, false);
@@ -733,9 +747,9 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzer implements JDOMEx
           @Override
           public void run() {
             PassExecutorService.log(getUpdateProgress(), null, "Update Runnable. myUpdateByTimerEnabled:",
-                                     myUpdateByTimerEnabled, " something disposed:",
-                                     PowerSaveMode.isEnabled() || myDisposed || !myProject.isInitialized(), " activeEditors:",
-                                     myProject.isDisposed() ? null : getSelectedEditors());
+                                    myUpdateByTimerEnabled, " something disposed:",
+                                    PowerSaveMode.isEnabled() || myDisposed || !myProject.isInitialized(), " activeEditors:",
+                                    myProject.isDisposed() ? null : getSelectedEditors());
             if (!myUpdateByTimerEnabled) return;
             if (myDisposed) return;
             ApplicationManager.getApplication().assertIsDispatchThread();

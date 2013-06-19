@@ -17,8 +17,10 @@ package com.intellij.openapi.projectRoots.impl;
 
 import com.intellij.execution.util.ExecUtil;
 import com.intellij.icons.AllIcons;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.projectRoots.*;
 import com.intellij.openapi.roots.AnnotationOrderRootType;
@@ -27,6 +29,7 @@ import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.*;
+import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import org.jdom.Element;
@@ -37,6 +40,7 @@ import org.jetbrains.jps.model.java.impl.JavaSdkUtil;
 
 import javax.swing.*;
 import java.io.File;
+import java.io.FileFilter;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -52,19 +56,7 @@ public class JavaSdkImpl extends JavaSdk {
   @NonNls private final Pattern myVersionStringPattern = Pattern.compile("^(.*)java version \"([1234567890_.]*)\"(.*)$");
   @NonNls private static final String JAVA_VERSION_PREFIX = "java version ";
   @NonNls private static final String OPENJDK_VERSION_PREFIX = "openjdk version ";
-  private static final Map<JavaSdkVersion, String[]> VERSION_STRINGS = new EnumMap<JavaSdkVersion, String[]>(JavaSdkVersion.class);
-
-  static {
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_0, new String[]{"1.0"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_1, new String[]{"1.1"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_2, new String[]{"1.2"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_3, new String[]{"1.3"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_4, new String[]{"1.4"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_5, new String[]{"1.5", "5.0"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_6, new String[]{"1.6", "6.0"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_7, new String[]{"1.7", "7.0"});
-    VERSION_STRINGS.put(JavaSdkVersion.JDK_1_8, new String[]{"1.8", "8.0"});
-  }
+  public static final DataKey<Boolean> KEY = DataKey.create("JavaSdk");
 
   public JavaSdkImpl() {
     super("JavaSDK");
@@ -180,7 +172,76 @@ public class JavaSdkImpl extends JavaSdk {
       return "/usr/jdk";
     }
 
+    if (SystemInfo.isWindows) {
+      String property = System.getProperty("java.home");
+      if (property == null) return null;
+      File javaHome = new File(property).getParentFile();//actually java.home points to to jre home
+      if (javaHome != null && JdkUtil.checkForJdk(javaHome)) {
+        return javaHome.getAbsolutePath();
+      }
+    }
     return null;
+  }
+
+  @NotNull
+  @Override
+  public Collection<String> suggestHomePaths() {
+    if (!SystemInfo.isWindows)
+      return Collections.singletonList(suggestHomePath());
+
+    String property = System.getProperty("java.home");
+    if (property == null)
+      return Collections.emptyList();
+
+    File javaHome = new File(property).getParentFile();//actually java.home points to to jre home
+    if (javaHome == null || !javaHome.isDirectory() || javaHome.getParentFile() == null) {
+      return Collections.emptyList();
+    }
+    ArrayList<String> result = new ArrayList<String>();
+    File javasFolder = javaHome.getParentFile();
+    scanFolder(javasFolder, result);
+    File parentFile = javasFolder.getParentFile();
+    File root = parentFile != null ? parentFile.getParentFile() : null;
+    String name = parentFile != null ? parentFile.getName() : "";
+    if (name.contains("Program Files") && root != null) {
+      String x86Suffix = " (x86)";
+      boolean x86 = name.endsWith(x86Suffix) && name.length() > x86Suffix.length();
+      File anotherJavasFolder;
+      if (x86) {
+        anotherJavasFolder = new File(root, name.substring(0, name.length() - x86Suffix.length()));
+      }
+      else {
+        anotherJavasFolder = new File(root, name + x86Suffix);
+      }
+      if (anotherJavasFolder.isDirectory()) {
+        scanFolder(new File(anotherJavasFolder, javasFolder.getName()), result);
+      }
+    }
+    return result;
+  }
+
+  private static void scanFolder(File javasFolder, ArrayList<String> result) {
+    File[] candidates = javasFolder.listFiles(new FileFilter() {
+      @Override
+      public boolean accept(File pathname) {
+        return JdkUtil.checkForJdk(pathname);
+      }
+    });
+    if (candidates != null) {
+      result.addAll(ContainerUtil.map2List(candidates, new Function<File, String>() {
+        @Override
+        public String fun(File file) {
+          return file.getAbsolutePath();
+        }
+      }));
+    }
+  }
+
+  @Override
+  public FileChooserDescriptor getHomeChooserDescriptor() {
+    FileChooserDescriptor descriptor = super.getHomeChooserDescriptor();
+    descriptor.putUserData(KEY, Boolean.TRUE);
+    return descriptor;
   }
 
   @NonNls public static final String MAC_HOME_PATH = "/Home";
@@ -190,11 +251,11 @@ public class JavaSdkImpl extends JavaSdk {
     if (SystemInfo.isMac) {
       File home = new File(homePath, MAC_HOME_PATH);
       if (home.exists()) return home.getPath();
-      
+
       home = new File(new File(homePath, "Contents"), "Home");
       if (home.exists()) return home.getPath();
     }
-    
+
     return homePath;
   }
 
@@ -228,7 +289,7 @@ public class JavaSdkImpl extends JavaSdk {
   @NotNull
   private static String getVersionNumber(@NotNull String versionString) {
     if (versionString.startsWith(JAVA_VERSION_PREFIX) || versionString.startsWith(OPENJDK_VERSION_PREFIX)) {
-      boolean openJdk = versionString.startsWith(OPENJDK_VERSION_PREFIX); 
+      boolean openJdk = versionString.startsWith(OPENJDK_VERSION_PREFIX);
       versionString = versionString.substring(openJdk ? OPENJDK_VERSION_PREFIX.length() : JAVA_VERSION_PREFIX.length());
       if (versionString.startsWith("\"") && versionString.endsWith("\"")) {
         versionString = versionString.substring(1, versionString.length() - 1);
@@ -293,6 +354,13 @@ public class JavaSdkImpl extends JavaSdk {
       }
       if (appleDocs != null) {
         sdkModificator.addRoot(appleDocs, JavadocOrderRootType.getInstance());
+      }
+
+      if (commonDocs == null && appleDocs == null && sources == null) {
+        String url = getDefaultDocumentationUrl(sdk);
+        if (url != null) {
+          sdkModificator.addRoot(VirtualFileManager.getInstance().findFileByUrl(url), JavadocOrderRootType.getInstance());
+        }
       }
     }
     attachJdkAnnotations(sdkModificator);
@@ -359,22 +427,19 @@ public class JavaSdkImpl extends JavaSdk {
 
   @Override
   public JavaSdkVersion getVersion(@NotNull Sdk sdk) {
+    return getVersion1(sdk);
+  }
+
+  private static JavaSdkVersion getVersion1(Sdk sdk) {
     String version = sdk.getVersionString();
     if (version == null) return null;
-    return getVersion(version);
+    return JdkVersionUtil.getVersion(version);
   }
 
   @Override
   @Nullable
   public JavaSdkVersion getVersion(@NotNull String versionString) {
-    for (Map.Entry<JavaSdkVersion, String[]> entry : VERSION_STRINGS.entrySet()) {
-      for (String s : entry.getValue()) {
-        if (versionString.contains(s)) {
-          return entry.getKey();
-        }
-      }
-    }
-    return null;
+    return JdkVersionUtil.getVersion(versionString);
   }
 
   @Override

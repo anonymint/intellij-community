@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,13 +24,13 @@ import com.intellij.patterns.ElementPattern;
 import com.intellij.patterns.PsiJavaPatterns;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
-import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.SuggestedNameInfo;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.util.PropertyUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.refactoring.introduceField.InplaceIntroduceFieldPopup;
 import com.intellij.refactoring.introduceVariable.IntroduceVariableBase;
 import com.intellij.util.ArrayUtil;
@@ -53,8 +53,11 @@ import static com.intellij.patterns.StandardPatterns.or;
  * @author peter
  */
 public class JavaMemberNameCompletionContributor extends CompletionContributor {
-  public static final ElementPattern<PsiElement> INSIDE_TYPE_PARAMS_PATTERN =
-    psiElement().afterLeaf(psiElement().withText("?").afterLeaf("<", ","));
+  public static final ElementPattern<PsiElement> INSIDE_TYPE_PARAMS_PATTERN = psiElement().
+    afterLeaf(psiElement().withText("?").andOr(
+      psiElement().afterLeaf("<", ","),
+      psiElement().afterSiblingSkipping(psiElement().whitespaceCommentEmptyOrError(), psiElement(PsiAnnotation.class))));
+
   static final int MAX_SCOPE_SIZE_TO_SEARCH_UNRESOLVED = 50000;
 
   @Override
@@ -366,46 +369,36 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
                                                     final boolean staticContext,
                                                     final PsiType varType,
                                                     final PsiElement element) {
-    class Change implements Runnable {
-      private String[] result;
+    final List<String> propertyHandlers = new ArrayList<String>();
 
-      @Override
-      public void run() {
-        final List<String> propertyHandlers = new ArrayList<String>();
-        final PsiField[] fields = psiClass.getFields();
+    for (final PsiField field : psiClass.getFields()) {
+      if (field == element) continue;
 
-        for (final PsiField field : fields) {
-          if (field == element) continue;
+      PsiUtilCore.ensureValid(field);
+      PsiType fieldType = field.getType();
+      PsiUtil.ensureValidType(fieldType);
 
-          assert field.isValid() : "invalid field: " + field;
-          PsiType fieldType = field.getType();
-          assert fieldType.isValid() : "invalid field type: " + field + "; " + fieldType + " of " + fieldType.getClass();
+      final PsiModifierList modifierList = field.getModifierList();
+      if (staticContext && (modifierList != null && !modifierList.hasModifierProperty(PsiModifier.STATIC))) continue;
 
-          final PsiModifierList modifierList = field.getModifierList();
-          if (staticContext && (modifierList != null && !modifierList.hasModifierProperty(PsiModifier.STATIC))) continue;
-
-          if (fieldType.equals(varType)) {
-            final String getterName = PropertyUtil.suggestGetterName(field.getProject(), field);
-            if ((psiClass.findMethodsByName(getterName, true).length == 0 ||
-                 psiClass.findMethodBySignature(PropertyUtil.generateGetterPrototype(field), true) == null)) {
-              propertyHandlers.add(getterName);
-            }
-          }
-
-          if (PsiType.VOID.equals(varType)) {
-            final String setterName = PropertyUtil.suggestSetterName(field.getProject(), field);
-            if ((psiClass.findMethodsByName(setterName, true).length == 0 ||
-                 psiClass.findMethodBySignature(PropertyUtil.generateSetterPrototype(field), true) == null)) {
-              propertyHandlers.add(setterName);
-            }
-          }
+      if (fieldType.equals(varType)) {
+        final String getterName = PropertyUtil.suggestGetterName(field.getProject(), field);
+        if ((psiClass.findMethodsByName(getterName, true).length == 0 ||
+             psiClass.findMethodBySignature(PropertyUtil.generateGetterPrototype(field), true) == null)) {
+          propertyHandlers.add(getterName);
         }
-        result = ArrayUtil.toStringArray(propertyHandlers);
+      }
+
+      if (PsiType.VOID.equals(varType)) {
+        final String setterName = PropertyUtil.suggestSetterName(field.getProject(), field);
+        if ((psiClass.findMethodsByName(setterName, true).length == 0 ||
+             psiClass.findMethodBySignature(PropertyUtil.generateSetterPrototype(field), true) == null)) {
+          propertyHandlers.add(setterName);
+        }
       }
     }
-    final Change result = new Change();
-    CodeStyleManager.getInstance(element.getProject()).performActionWithFormatterDisabled(result);
-    return result.result;
+
+    return ArrayUtil.toStringArray(propertyHandlers);
   }
 
   private static void addLookupItems(Set<LookupElement> lookupElements, @Nullable final SuggestedNameInfo callback, PrefixMatcher matcher, Project project, String... strings) {
@@ -421,7 +414,7 @@ public class JavaMemberNameCompletionContributor extends CompletionContributor {
           continue outer;
         }
       }
-      
+
       LookupElement element = PrioritizedLookupElement.withPriority(LookupElementBuilder.create(name).withAutoCompletionPolicy(AutoCompletionPolicy.GIVE_CHANCE_TO_OVERWRITE), -i);
       if (callback != null) {
         element = LookupElementDecorator.withInsertHandler(element, new InsertHandler<LookupElementDecorator<LookupElement>>() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -125,7 +125,7 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
     }
 
     @Override
-    public void indexStub(GrMethodStub stub, IndexSink sink) {
+    public void indexStub(@NotNull GrMethodStub stub, @NotNull IndexSink sink) {
       super.indexStub(stub, sink);
       String name = stub.getName();
       sink.occurrence(GrAnnotationMethodNameIndex.KEY, name);
@@ -226,8 +226,6 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
 
   GroovyElementType PATH_INDEX_PROPERTY = new GroovyElementType("Index property");
   GroovyElementType PARENTHESIZED_EXPRESSION = new GroovyElementType("Parenthesized expression");
-  // Plain label
-  GroovyElementType LABEL = new GroovyElementType("Label");
 
   // Arguments
   GroovyElementType ARGUMENTS = new GroovyElementType("Arguments");
@@ -246,7 +244,7 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
   GroovyElementType ARRAY_TYPE = new GroovyElementType("Array type");
 
   GroovyElementType BUILT_IN_TYPE = new GroovyElementType("Built in type");
-  
+
   GroovyElementType DISJUNCTION_TYPE_ELEMENT = new GroovyElementType("Disjunction type element");
 
   // GStrings
@@ -279,12 +277,13 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
     }
 
     @Override
-    public void serialize(GrTypeParameterStub stub, StubOutputStream dataStream) throws IOException {
+    public void serialize(@NotNull GrTypeParameterStub stub, @NotNull StubOutputStream dataStream) throws IOException {
       dataStream.writeName(stub.getName());
     }
 
+    @NotNull
     @Override
-    public GrTypeParameterStub deserialize(StubInputStream dataStream, StubElement parentStub) throws IOException {
+    public GrTypeParameterStub deserialize(@NotNull StubInputStream dataStream, StubElement parentStub) throws IOException {
       return new GrTypeParameterStub(parentStub, dataStream.readName());
     }
   };
@@ -321,12 +320,13 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
     }
 
     @Override
-    public void serialize(GrAnnotationStub stub, StubOutputStream dataStream) throws IOException {
+    public void serialize(@NotNull GrAnnotationStub stub, @NotNull StubOutputStream dataStream) throws IOException {
       dataStream.writeName(stub.getAnnotationName());
     }
 
+    @NotNull
     @Override
-    public GrAnnotationStub deserialize(StubInputStream dataStream, StubElement parentStub) throws IOException {
+    public GrAnnotationStub deserialize(@NotNull StubInputStream dataStream, StubElement parentStub) throws IOException {
       return new GrAnnotationStub(parentStub, dataStream.readName());
     }
   };
@@ -351,14 +351,15 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
     }
 
     @Override
-    public void serialize(GrParameterStub stub, StubOutputStream dataStream) throws IOException {
+    public void serialize(@NotNull GrParameterStub stub, @NotNull StubOutputStream dataStream) throws IOException {
       dataStream.writeName(stub.getName());
       GrStubUtils.writeStringArray(dataStream, stub.getAnnotations());
       GrStubUtils.writeNullableString(dataStream, stub.getTypeText());
     }
 
+    @NotNull
     @Override
-    public GrParameterStub deserialize(StubInputStream dataStream, StubElement parentStub) throws IOException {
+    public GrParameterStub deserialize(@NotNull StubInputStream dataStream, StubElement parentStub) throws IOException {
       final StringRef name = dataStream.readName();
       final String[] annotations = GrStubUtils.readStringArray(dataStream);
       final String typeText = GrStubUtils.readNullableString(dataStream);
@@ -430,13 +431,6 @@ public interface GroovyElementTypes extends GroovyTokenTypes, GroovyDocElementTy
 
   //types
   GroovyElementType CLASS_TYPE_ELEMENT = new GroovyElementType("class type element"); //node
-
-  TokenSet BLOCK_SET = TokenSet.create(CLOSABLE_BLOCK,
-          BLOCK_STATEMENT,
-          CONSTRUCTOR_BODY,
-          OPEN_BLOCK,
-          ENUM_BODY,
-          CLASS_BODY);
 
   TokenSet METHOD_DEFS = TokenSet.create(METHOD_DEFINITION, CONSTRUCTOR_DEFINITION, ANNOTATION_METHOD);
   TokenSet VARIABLES = TokenSet.create(VARIABLE, FIELD);

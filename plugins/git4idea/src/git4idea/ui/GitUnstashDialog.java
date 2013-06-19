@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package git4idea.ui;
 
 import com.intellij.CommonBundle;
+import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
@@ -162,7 +163,6 @@ public class GitUnstashDialog extends DialogWrapper {
                                                      GitBundle.message("git.unstash.clear.confirmation.message"),
                                                      GitBundle.message("git.unstash.clear.confirmation.title"), Messages.getWarningIcon())) {
           GitLineHandler h = new GitLineHandler(myProject, getGitRoot(), GitCommand.STASH);
-          h.setNoSSH(true);
           h.addParameters("clear");
           GitHandlerUtil.doSynchronously(h, GitBundle.getString("unstash.clearing.stashes"), h.printableCommandLine());
           refreshStashList();
@@ -202,7 +202,6 @@ public class GitUnstashDialog extends DialogWrapper {
 
       private GitSimpleHandler dropHandler(String stash) {
         GitSimpleHandler h = new GitSimpleHandler(myProject, getGitRoot(), GitCommand.STASH);
-        h.setNoSSH(true);
         h.addParameters("drop");
         addStashParameter(h, stash);
         return h;
@@ -215,7 +214,6 @@ public class GitUnstashDialog extends DialogWrapper {
         String selectedStash = getSelectedStash().getStash();
         try {
           GitSimpleHandler h = new GitSimpleHandler(project, root, GitCommand.REV_LIST);
-          h.setNoSSH(true);
           h.setSilent(true);
           h.addParameters("--timestamp", "--max-count=1");
           addStashParameter(h, selectedStash);
@@ -239,8 +237,7 @@ public class GitUnstashDialog extends DialogWrapper {
    */
   private void addStashParameter(@NotNull GitHandler handler, @NotNull String stash) {
     if (GitVersionSpecialty.NEEDS_QUOTES_IN_STASH_NAME.existsIn(myVcs.getVersion())) {
-      handler.addParameters("\"" + stash + "\"");
-      handler.dontEscapeQuotes();
+      handler.addParameters(GeneralCommandLine.inescapableQuote(stash));
     }
     else {
       handler.addParameters(stash);
@@ -343,7 +340,6 @@ public class GitUnstashDialog extends DialogWrapper {
    */
   private GitLineHandler handler() {
     GitLineHandler h = new GitLineHandler(myProject, getGitRoot(), GitCommand.STASH);
-    h.setNoSSH(true);
     String branch = myBranchTextField.getText();
     if (branch.length() == 0) {
       h.addParameters(myPopStashCheckBox.isSelected() ? "pop" : "apply");

@@ -16,7 +16,7 @@
 
 package com.intellij.codeInspection.ui;
 
-import com.intellij.codeInsight.CodeInsightUtilBase;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ex.*;
@@ -29,17 +29,19 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
-import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
+import com.intellij.profile.codeInspection.InspectionProjectProfileManagerImpl;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -60,7 +62,7 @@ import java.util.List;
 
 class Browser extends JPanel {
   private static final String UNDER_CONSTRUCTION = InspectionsBundle.message("inspection.tool.description.under.construction.text");
-  private final List<ClickListener> myClickListeners;
+  private final List<ClickListener> myClickListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private RefEntity myCurrentEntity;
   private JEditorPane myHTMLViewer;
   private final InspectionResultsView myView;
@@ -172,13 +174,13 @@ class Browser extends JPanel {
     super(new BorderLayout());
     myView = view;
 
-    myClickListeners = new ArrayList<ClickListener>();
     myCurrentEntity = null;
     myCurrentDescriptor = null;
 
     myHTMLViewer = new JEditorPane(UIUtil.HTML_MIME, InspectionsBundle.message("inspection.offline.view.empty.browser.text"));
     myHTMLViewer.setEditable(false);
     myHyperLinkListener = new HyperlinkListener() {
+      @Override
       public void hyperlinkUpdate(HyperlinkEvent e) {
         if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
           JEditorPane pane = (JEditorPane)e.getSource();
@@ -210,7 +212,7 @@ class Browser extends JPanel {
                   if (psiElement == null) return;
                   VirtualFile vFile = psiElement.getContainingFile().getVirtualFile();
                   if (vFile != null) {
-                    TextRange range = ((ProblemDescriptorImpl)myCurrentDescriptor).getTextRange();
+                    TextRange range = ((ProblemDescriptorBase)myCurrentDescriptor).getTextRange();
                     fireClickEvent(vFile, range.getStartOffset(), range.getEndOffset());
                   }
                 }
@@ -274,7 +276,7 @@ class Browser extends JPanel {
     }
 
     StyledDocument styledDocument = (StyledDocument)document;
-    
+
     EditorColorsManager colorsManager = EditorColorsManager.getInstance();
     EditorColorsScheme scheme = colorsManager.getGlobalScheme();
 
@@ -300,6 +302,7 @@ class Browser extends JPanel {
     final StringBuffer buf = new StringBuffer();
     if (refEntity instanceof RefElement) {
       final Runnable action = new Runnable() {
+        @Override
         public void run() {
           tool.getComposer().compose(buf, refEntity);
         }
@@ -330,6 +333,7 @@ class Browser extends JPanel {
   private String generateHTML(final RefEntity refEntity, final CommonProblemDescriptor descriptor) {
     final StringBuffer buf = new StringBuffer();
     final Runnable action = new Runnable() {
+      @Override
       public void run() {
         InspectionTool tool = getTool(refEntity);
         tool.getComposer().compose(buf, refEntity, descriptor);
@@ -355,9 +359,9 @@ class Browser extends JPanel {
     if (refEntity instanceof RefElement){
       PsiElement element = ((RefElement)refEntity).getElement();
       if (element == null) return tool;
-      final InspectionProfileWrapper profileWrapper = InspectionProjectProfileManager.getInstance(manager.getProject()).getProfileWrapper();
-      if (profileWrapper == null) return tool;
-      tool = profileWrapper.getInspectionTool(tool.getShortName(), element);
+      InspectionProfileWrapper profileWrapper = InspectionProjectProfileManagerImpl.getInstanceImpl(manager.getProject()).getProfileWrapper();
+      InspectionToolWrapper toolWrapper = (InspectionToolWrapper)profileWrapper.getInspectionTool(tool.getShortName(), element);
+      tool = toolWrapper;
     }
     return tool;
   }
@@ -415,12 +419,12 @@ class Browser extends JPanel {
     }
   }
 
-  public void showDescription(InspectionTool tool){
-    if (tool.getShortName().length() == 0){
+  public void showDescription(@NotNull InspectionTool tool){
+    if (tool.getShortName().isEmpty()){
       showEmpty();
       return;
     }
-    @NonNls StringBuffer page = new StringBuffer("<html>");
+    @NonNls StringBuffer page = new StringBuffer();
     page.append("<table border='0' cellspacing='0' cellpadding='0' width='100%'>");
     page.append("<tr><td colspan='2'>");
     HTMLComposer.appendHeading(page, InspectionsBundle.message("inspection.tool.in.browser.id.title"));
@@ -444,9 +448,10 @@ class Browser extends JPanel {
       page.append(UIUtil.getHtmlBody(description));
 
       page.append("</td></tr></table>");
-      myHTMLViewer.setText(page.toString());
+      myHTMLViewer.setText(XmlStringUtil.wrapInHtml(page));
       setupStyle();
-    } finally {
+    }
+    finally {
       myCurrentEntity = null;
     }
   }
@@ -484,7 +489,7 @@ class Browser extends JPanel {
       if (element instanceof RefElement) {
         PsiElement psiElement = ((RefElement)element).getElement();
         if (psiElement != null && psiElement.isValid()) {
-          if (!CodeInsightUtilBase.preparePsiElementForWrite(psiElement)) return;
+          if (!FileModificationService.getInstance().preparePsiElementForWrite(psiElement)) return;
           performFix(element, descriptor, idx, fixes[idx]);
         }
       }
@@ -499,6 +504,7 @@ class Browser extends JPanel {
       @Override
       public void run() {
         ApplicationManager.getApplication().runWriteAction(new Runnable() {
+          @Override
           public void run() {
             final PsiModificationTracker tracker = PsiManager.getInstance(myView.getProject()).getModificationTracker();
             final long startCount = tracker.getModificationCount();
@@ -506,7 +512,7 @@ class Browser extends JPanel {
             //CCE here means QuickFix was incorrectly inherited
             fix.applyFix(myView.getProject(), descriptor);
             if (startCount != tracker.getModificationCount()) {
-              final DescriptorProviderInspection tool = ((DescriptorProviderInspection)myView.getTree().getSelectedTool());
+              final DescriptorProviderInspection tool = (DescriptorProviderInspection)myView.getTree().getSelectedTool();
               if (tool != null) {
                 tool.ignoreProblem(element, descriptor, idx);
               }

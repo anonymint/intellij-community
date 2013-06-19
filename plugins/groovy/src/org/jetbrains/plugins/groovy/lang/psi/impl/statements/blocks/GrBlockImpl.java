@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,11 +28,11 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
-import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
 import org.jetbrains.plugins.groovy.lang.psi.GrControlFlowOwner;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyElementVisitor;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrStatement;
@@ -45,10 +45,9 @@ import org.jetbrains.plugins.groovy.lang.psi.controlFlow.Instruction;
 import org.jetbrains.plugins.groovy.lang.psi.controlFlow.impl.ControlFlowBuilder;
 import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyPsiElementImpl;
 import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
+import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
-
-import java.util.ArrayList;
-import java.util.List;
+import org.jetbrains.plugins.groovy.util.ResolveProfiler;
 
 /**
  * @author ven
@@ -104,12 +103,19 @@ public abstract class GrBlockImpl extends LazyParseablePsiElement implements GrC
       controlFlow = CachedValuesManager.getManager(getProject()).createCachedValue(new CachedValueProvider<Instruction[]>() {
         @Override
         public Result<Instruction[]> compute() {
-          return Result.create(new ControlFlowBuilder(getProject()).buildControlFlow(GrBlockImpl.this), getContainingFile());
+          try {
+            ResolveProfiler.start();
+            final Instruction[] flow = new ControlFlowBuilder(getProject()).buildControlFlow(GrBlockImpl.this);
+            return Result.create(flow, getContainingFile(), PsiModificationTracker.JAVA_STRUCTURE_MODIFICATION_COUNT);
+          }
+          finally {
+            final long time = ResolveProfiler.finish();
+            ResolveProfiler.write("flow " + GrBlockImpl.this.toString() + " : " + time);
+          }
         }
       }, false);
       controlFlow = putUserDataIfAbsent(CONTROL_FLOW, controlFlow);
     }
-
     return ControlFlowBuilder.assertValidPsi(controlFlow.getValue());
   }
 
@@ -137,11 +143,7 @@ public abstract class GrBlockImpl extends LazyParseablePsiElement implements GrC
 
   @NotNull
   public GrStatement[] getStatements() {
-    List<GrStatement> result = new ArrayList<GrStatement>();
-    for (PsiElement cur = getFirstChild(); cur != null; cur = cur.getNextSibling()) {
-      if (cur instanceof GrStatement) result.add((GrStatement)cur);
-    }
-    return result.toArray(new GrStatement[result.size()]);
+    return  PsiImplUtil.getStatements(this);
   }
 
   @NotNull
@@ -162,7 +164,7 @@ public abstract class GrBlockImpl extends LazyParseablePsiElement implements GrC
       if (prev instanceof GrParameterList && prev.getTextLength() == 0 && prev.getPrevSibling() != null) {
         prev = prev.getPrevSibling();
       }
-      if (!isNls(prev)) {
+      if (!PsiUtil.isLineFeed(prev)) {
         addBefore(nls.getPsi(), actualAnchor);
       }
     }
@@ -174,11 +176,6 @@ public abstract class GrBlockImpl extends LazyParseablePsiElement implements GrC
       addBefore(Factory.createSingleLeafElement(GroovyTokenTypes.mNLS, "\n", 0, 1, null, getManager()).getPsi(), actualAnchor);
     }
     return element;
-  }
-  private static boolean isNls(PsiElement element) {
-    if (!TokenSets.WHITE_SPACES_SET.contains(element.getNode().getElementType())) return false;
-    String text = element.getText();
-    return text.contains("\n") || text.contains("\r");
   }
 
   public PsiElement getLBrace() {

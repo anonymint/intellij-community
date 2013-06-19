@@ -69,10 +69,12 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     myNamedScopeManager = namedScopeManager;
     myScopeListener = new NamedScopesHolder.ScopeListener() {
       Alarm refreshProjectViewAlarm = new Alarm();
+      @Override
       public void scopesChanged() {
         // amortize batch scope changes
         refreshProjectViewAlarm.cancelAllRequests();
         refreshProjectViewAlarm.addRequest(new Runnable(){
+          @Override
           public void run() {
             if (myProject.isDisposed()) return;
             final String subId = getSubId();
@@ -94,31 +96,38 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     myNamedScopeManager.addScopeListener(myScopeListener);
   }
 
+  @Override
   public String getTitle() {
     return IdeBundle.message("scope.view.title");
   }
 
+  @Override
   public Icon getIcon() {
     return AllIcons.Ide.LocalScope;
   }
 
+  @Override
   @NotNull
   public String getId() {
     return ID;
   }
 
+  @Override
   public JComponent createComponent() {
-    myViewPanel = new ScopeTreeViewPanel(myProject);
-    Disposer.register(this, myViewPanel);
-    myViewPanel.initListeners();
-    myViewPanel.selectScope(NamedScopesHolder.getScope(myProject, getSubId()));
-    myTree = myViewPanel.getTree();
-    PopupHandler.installPopupHandler(myTree, IdeActions.GROUP_SCOPE_VIEW_POPUP, ActionPlaces.SCOPE_VIEW_POPUP);
-    enableDnD();
+    if (myViewPanel == null) {
+      myViewPanel = new ScopeTreeViewPanel(myProject);
+      Disposer.register(this, myViewPanel);
+      myViewPanel.initListeners();
+      myTree = myViewPanel.getTree();
+      PopupHandler.installPopupHandler(myTree, IdeActions.GROUP_SCOPE_VIEW_POPUP, ActionPlaces.SCOPE_VIEW_POPUP);
+      enableDnD();
+    }
 
+    myViewPanel.selectScope(NamedScopesHolder.getScope(myProject, getSubId()));
     return myViewPanel.getPanel();
   }
 
+  @Override
   public void dispose() {
     myViewPanel = null;
     myDependencyValidationManager.removeScopeListener(myScopeListener);
@@ -126,6 +135,7 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     super.dispose();
   }
 
+  @Override
   @NotNull
   public String[] getSubIds() {
     NamedScope[] scopes = myDependencyValidationManager.getScopes();
@@ -139,11 +149,13 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     return ids;
   }
 
+  @Override
   @NotNull
   public String getPresentableSubIdName(@NotNull final String subId) {
     return subId;
   }
 
+  @Override
   public void addToolbarActions(DefaultActionGroup actionGroup) {
     actionGroup.add(ActionManager.getInstance().getAction("ScopeView.EditScopes"));
     actionGroup.addAction(new ShowModulesAction(myProject){
@@ -154,6 +166,7 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     }).setAsSecondary(true);
   }
 
+  @Override
   public ActionCallback updateFromRoot(boolean restoreExpandedPaths) {
     saveExpandedPaths();
     myViewPanel.selectScope(NamedScopesHolder.getScope(myProject, getSubId()));
@@ -161,6 +174,7 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     return new ActionCallback.Done();
   }
 
+  @Override
   public void select(Object element, VirtualFile file, boolean requestFocus) {
     if (file == null) return;
     PsiFileSystemItem psiFile = file.isDirectory() ? PsiManager.getInstance(myProject).findDirectory(file)
@@ -191,7 +205,7 @@ public class ScopeViewPane extends AbstractProjectViewPane {
 
   private boolean changeView(final PackageSet packageSet, final PsiElement element, final PsiFileSystemItem psiFileSystemItem, final String name, final NamedScopesHolder holder,
                              boolean requestFocus) {
-    if ((packageSet instanceof PackageSetBase && ((PackageSetBase)packageSet).contains(psiFileSystemItem.getVirtualFile(), holder)) ||
+    if ((packageSet instanceof PackageSetBase && ((PackageSetBase)packageSet).contains(psiFileSystemItem.getVirtualFile(), myProject, holder)) ||
         (psiFileSystemItem instanceof PsiFile && packageSet.contains((PsiFile)psiFileSystemItem, holder))) {
       if (!name.equals(getSubId())) {
         myProjectView.changeView(getId(), name);
@@ -204,18 +218,22 @@ public class ScopeViewPane extends AbstractProjectViewPane {
 
 
 
+  @Override
   public int getWeight() {
     return 3;
   }
 
+  @Override
   public void installComparator() {
     myViewPanel.setSortByType();
   }
 
+  @Override
   public SelectInTarget createSelectInTarget() {
     return new ScopePaneSelectInTarget(myProject);
   }
 
+  @Override
   protected Object exhumeElementFromNode(final DefaultMutableTreeNode node) {
     if (node instanceof PackageDependenciesNode) {
       return ((PackageDependenciesNode)node).getPsiElement();
@@ -223,6 +241,7 @@ public class ScopeViewPane extends AbstractProjectViewPane {
     return super.exhumeElementFromNode(node);
   }
 
+  @Override
   public Object getData(final String dataId) {
     final Object data = super.getData(dataId);
     if (data != null) {

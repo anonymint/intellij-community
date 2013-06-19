@@ -15,7 +15,8 @@
  */
 package com.intellij.uiDesigner.propertyInspector;
 
-import com.intellij.codeInsight.daemon.impl.SeverityRegistrar;
+import com.intellij.codeInsight.daemon.impl.SeverityUtil;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.LafManagerListener;
 import com.intellij.lang.annotation.HighlightSeverity;
@@ -81,8 +82,8 @@ public final class PropertyInspectorTable extends Table implements DataProvider{
 
   public static final DataKey<PropertyInspectorTable> DATA_KEY = DataKey.create(PropertyInspectorTable.class.getName());
 
-  private static final Color SYNTETIC_PROPERTY_BACKGROUND = Gray._230;
-  private static final Color SYNTETIC_SUBPROPERTY_BACKGROUND = Gray._240;
+  private static final Color SYNTETIC_PROPERTY_BACKGROUND = new JBColor(Gray._230, UIUtil.getPanelBackground().brighter());
+  private static final Color SYNTETIC_SUBPROPERTY_BACKGROUND = new JBColor(Gray._240, UIUtil.getPanelBackground().brighter());
 
   private final ComponentTree myComponentTree;
   private final ArrayList<Property> myProperties;
@@ -805,7 +806,7 @@ public final class PropertyInspectorTable extends Table implements DataProvider{
         for(IntrospectedProperty otherProperty: props) {
           if (otherProperty.getName().equals(property.getName())) {
             otherValue = otherProperty.getValue(mySelection.get(i));
-            break;            
+            break;
           }
         }
       }
@@ -999,10 +1000,10 @@ public final class PropertyInspectorTable extends Table implements DataProvider{
         }
       };
 
-      myExpandIcon= UIDesignerIcons.ExpandNode;
-      myCollapseIcon= UIDesignerIcons.CollapseNode;
+      myExpandIcon= UIUtil.isUnderDarcula() ? AllIcons.Mac.Tree_white_right_arrow : UIDesignerIcons.ExpandNode;
+      myCollapseIcon=UIUtil.isUnderDarcula() ? AllIcons.Mac.Tree_white_down_arrow : UIDesignerIcons.CollapseNode;
       for(int i=0; i<myIndentIcons.length; i++) {
-        myIndentIcons [i] = new EmptyIcon(9 + 11 * i, 9);
+        myIndentIcons [i] = new EmptyIcon(myExpandIcon.getIconWidth() + 11 * i, myExpandIcon.getIconHeight());
       }
       myIndentedExpandIcon = new IndentedIcon(myExpandIcon, 11);
       myIndentedCollapseIcon = new IndentedIcon(myCollapseIcon, 11);
@@ -1027,7 +1028,7 @@ public final class PropertyInspectorTable extends Table implements DataProvider{
         background = table.getBackground();
       }
       else {
-        // syntetic property 
+        // syntetic property
         background = parent == null ? SYNTETIC_PROPERTY_BACKGROUND : SYNTETIC_SUBPROPERTY_BACKGROUND;
       }
 
@@ -1130,7 +1131,7 @@ public final class PropertyInspectorTable extends Table implements DataProvider{
         Map<HighlightSeverity, SimpleTextAttributes> cache = modified ? myModifiedHighlightAttributes : myHighlightAttributes;
         result = cache.get(severity);
         if (result == null) {
-          final TextAttributesKey attrKey = SeverityRegistrar.getInstance(myProject).getHighlightInfoTypeBySeverity(severity).getAttributesKey();
+          final TextAttributesKey attrKey = SeverityUtil.getSeverityRegistrar(myProject).getHighlightInfoTypeBySeverity(severity).getAttributesKey();
           TextAttributes textAttrs = EditorColorsManager.getInstance().getGlobalScheme().getAttributes(attrKey);
           if (modified) {
             textAttrs = textAttrs.clone();

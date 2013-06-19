@@ -15,7 +15,13 @@
  */
 package com.intellij.psi.util;
 
+import com.intellij.lang.ASTNode;
+import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Condition;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
+import com.intellij.psi.tree.IElementType;
+import com.intellij.util.containers.HashMap;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -46,6 +52,8 @@ public class PsiTypesUtil {
     ourBoxedTypes.put("double", CommonClassNames.JAVA_LANG_DOUBLE);
     ourBoxedTypes.put("char", CommonClassNames.JAVA_LANG_CHARACTER);
   }
+
+  @NonNls private static final String GET_CLASS_METHOD = "getClass";
 
   private PsiTypesUtil() { }
 
@@ -134,5 +142,101 @@ public class PsiTypesUtil {
       }
     }
     return null;
+  }
+
+  public static PsiType patchMethodGetClassReturnType(@NotNull PsiExpression call,
+                                                      @NotNull PsiReferenceExpression methodExpression,
+                                                      @NotNull PsiMethod method,
+                                                      @Nullable Condition<IElementType> condition,
+                                                      @NotNull LanguageLevel languageLevel) {
+    //JLS3 15.8.2
+    if (languageLevel.isAtLeast(LanguageLevel.JDK_1_5) &&
+        GET_CLASS_METHOD.equals(method.getName()) &&
+        CommonClassNames.JAVA_LANG_OBJECT.equals(method.getContainingClass().getQualifiedName())) {
+      PsiExpression qualifier = methodExpression.getQualifierExpression();
+      PsiType qualifierType = null;
+      final Project project = call.getProject();
+      if (qualifier != null) {
+        qualifierType = TypeConversionUtil.erasure(qualifier.getType());
+      }
+      else if (condition != null) {
+        ASTNode parent = call.getNode().getTreeParent();
+        while (parent != null && condition.value(parent.getElementType())) {
+          parent = parent.getTreeParent();
+        }
+        if (parent != null) {
+          qualifierType = JavaPsiFacade.getInstance(project).getElementFactory().createType((PsiClass)parent.getPsi());
+        }
+      }
+      if (qualifierType != null) {
+        PsiClass javaLangClass = JavaPsiFacade.getInstance(project).findClass(CommonClassNames.JAVA_LANG_CLASS, call.getResolveScope());
+        if (javaLangClass != null && javaLangClass.getTypeParameters().length == 1) {
+          Map<PsiTypeParameter, PsiType> map = new HashMap<PsiTypeParameter, PsiType>();
+          map.put(javaLangClass.getTypeParameters()[0], PsiWildcardType.createExtends(call.getManager(), qualifierType));
+          PsiSubstitutor substitutor = JavaPsiFacade.getInstance(project).getElementFactory().createSubstitutor(map);
+          final PsiClassType classType = JavaPsiFacade.getInstance(project).getElementFactory()
+            .createType(javaLangClass, substitutor, languageLevel);
+          final PsiElement parent = call.getParent();
+          return parent instanceof PsiReferenceExpression && parent.getParent() instanceof PsiMethodCallExpression || parent instanceof PsiExpressionList
+                 ? PsiUtil.captureToplevelWildcards(classType, methodExpression) : classType;
+        }
+      }
+    }
+    return null;
+  }
+
+  @Nullable
+  public static PsiType getExpectedTypeByParent(PsiExpression methodCall) {
+    final PsiElement parent = PsiUtil.skipParenthesizedExprUp(methodCall.getParent());
+    if (parent instanceof PsiVariable) {
+      if (checkSameExpression(methodCall, ((PsiVariable)parent).getInitializer())) {
+        return ((PsiVariable)parent).getType();
+      }
+    }
+    else if (parent instanceof PsiAssignmentExpression) {
+      if (checkSameExpression(methodCall, ((PsiAssignmentExpression)parent).getRExpression())) {
+        return ((PsiAssignmentExpression)parent).getLExpression().getType();
+      }
+    }
+    else if (parent instanceof PsiIfStatement) {
+      if (checkSameExpression(methodCall, ((PsiIfStatement)parent).getCondition())) {
+        return PsiType.BOOLEAN.getBoxedType(parent);
+      }
+    }
+    else if (parent instanceof PsiWhileStatement) {
+      if (checkSameExpression(methodCall, ((PsiWhileStatement)parent).getCondition())) {
+        return PsiType.BOOLEAN.getBoxedType(parent);
+      }
+    }
+    else if (parent instanceof PsiForStatement) {
+      if (checkSameExpression(methodCall, ((PsiForStatement)parent).getCondition())) {
+        return PsiType.BOOLEAN.getBoxedType(parent);
+      }
+    }
+    else if (parent instanceof PsiDoWhileStatement) {
+      if (checkSameExpression(methodCall, ((PsiDoWhileStatement)parent).getCondition())) {
+        return PsiType.BOOLEAN.getBoxedType(parent);
+      }
+    }
+    else if (parent instanceof PsiTypeCastExpression) {
+      return ((PsiTypeCastExpression)parent).getType();
+    }
+    else if (parent instanceof PsiReturnStatement) {
+      final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(parent, PsiLambdaExpression.class);
+      if (lambdaExpression != null) {
+        return LambdaUtil.getFunctionalInterfaceReturnType(lambdaExpression.getFunctionalInterfaceType());
+      }
+      else {
+        PsiMethod method = PsiTreeUtil.getParentOfType(parent, PsiMethod.class);
+        if (method != null) {
+          return method.getReturnType();
+        }
+      }
+    }
+    return null;
+  }
+
+  private static boolean checkSameExpression(PsiExpression templateExpr, final PsiExpression expression) {
+    return templateExpr.equals(PsiUtil.skipParenthesizedExprDown(expression));
   }
 }

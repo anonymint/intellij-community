@@ -30,6 +30,7 @@ import com.intellij.openapi.wm.impl.IdeRootPane;
  * @author Konstantin Bulenkov
  */
 public class ActivateNavigationBarAction extends AnAction implements DumbAware {
+  @Override
   public void actionPerformed(AnActionEvent e) {
     final Project project = PlatformDataKeys.PROJECT.getData(e.getDataContext());
     if (project != null && UISettings.getInstance().SHOW_NAVIGATION_BAR){
@@ -40,9 +41,11 @@ public class ActivateNavigationBarAction extends AnAction implements DumbAware {
     }
   }
 
+  @Override
   public void update(AnActionEvent e) {
     final Project project = PlatformDataKeys.PROJECT.getData(e.getDataContext());
-    final boolean enabled = project != null && UISettings.getInstance().SHOW_NAVIGATION_BAR;
+    UISettings settings = UISettings.getInstance();
+    final boolean enabled = project != null && settings.SHOW_NAVIGATION_BAR && !settings.PRESENTATION_MODE;
     e.getPresentation().setEnabled(enabled);
   }
 }

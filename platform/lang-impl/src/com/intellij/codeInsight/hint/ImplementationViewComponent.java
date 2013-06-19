@@ -43,6 +43,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.ui.ScreenUtil;
 import com.intellij.ui.SideBorder;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.usages.UsageView;
@@ -419,12 +420,17 @@ public class ImplementationViewComponent extends JPanel {
   }
 
 
+  @Nullable
   public static String getNewText(PsiElement elt) {
     Project project = elt.getProject();
     PsiFile psiFile = getContainingFile(elt);
 
     final Document doc = PsiDocumentManager.getInstance(project).getDocument(psiFile);
     if (doc == null) return null;
+
+    if (elt.getTextRange() == null) {
+      return null;
+    }
 
     final ImplementationTextSelectioner implementationTextSelectioner =
       LanguageImplementationTextSelectioner.INSTANCE.forLanguage(elt.getLanguage());
@@ -445,6 +451,8 @@ public class ImplementationViewComponent extends JPanel {
   @Override
   public void removeNotify() {
     super.removeNotify();
+    if (!ScreenUtil.isStandardAddRemoveNotify(this))
+      return;
     EditorFactory.getInstance().releaseEditor(myEditor);
     disposeNonTextEditor();
   }
@@ -550,7 +558,7 @@ public class ImplementationViewComponent extends JPanel {
 
   private class ShowSourceAction extends EditSourceActionBase implements HintManagerImpl.ActionToIgnore {
     public ShowSourceAction() {
-      super(false, AllIcons.Actions.ShowSource, CodeInsightBundle.message("quick.definition.show.source"));
+      super(false, AllIcons.Actions.Preview, CodeInsightBundle.message("quick.definition.show.source"));
     }
   }
 

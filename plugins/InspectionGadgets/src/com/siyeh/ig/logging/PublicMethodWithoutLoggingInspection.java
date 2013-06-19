@@ -20,7 +20,7 @@ import com.intellij.codeInspection.ui.ListWrappingTableModel;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.psi.*;
-import com.intellij.refactoring.psi.PropertyUtils;
+import com.intellij.psi.util.PropertyUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -63,13 +63,13 @@ public class PublicMethodWithoutLoggingInspection extends BaseInspection {
   }
 
   @Override
-  public void readSettings(Element element) throws InvalidDataException {
+  public void readSettings(@NotNull Element element) throws InvalidDataException {
     super.readSettings(element);
     parseString(loggerClassName, loggerClassNames);
   }
 
   @Override
-  public void writeSettings(Element element) throws WriteExternalException {
+  public void writeSettings(@NotNull Element element) throws WriteExternalException {
     loggerClassName = formatString(loggerClassNames);
     super.writeSettings(element);
   }
@@ -97,7 +97,7 @@ public class PublicMethodWithoutLoggingInspection extends BaseInspection {
       if (method.isConstructor()) {
         return;
       }
-      if (PropertyUtils.isSimpleGetter(method) || PropertyUtils.isSimpleSetter(method)) {
+      if (PropertyUtil.isSimpleGetter(method) || PropertyUtil.isSimpleSetter(method)) {
         return;
       }
       if (containsLoggingCall(body)) {

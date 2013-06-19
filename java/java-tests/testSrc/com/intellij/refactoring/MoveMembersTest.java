@@ -2,7 +2,9 @@ package com.intellij.refactoring;
 
 import com.intellij.JavaTestUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMember;
@@ -51,6 +53,10 @@ public class MoveMembersTest extends MultiFileTestCase {
 
   public void testIDEADEV11416() throws Exception {
     doTest("Y", "X", false, 0);
+  }
+
+  public void testDependantConstants() throws Exception {
+    doTest("A", "B", 0, 1);
   }
 
   public void testTwoMethods() throws Exception {
@@ -118,9 +124,31 @@ public class MoveMembersTest extends MultiFileTestCase {
       assertEquals("Field <b><code>B.ONE</code></b> has write access but is moved to an interface", e.getMessage());
     }
   }
+  
+  public void testFinalFieldWithInitializer() throws Exception {
+    try {
+      doTest("B", "A", 0);
+      fail("conflict expected");
+    }
+    catch (BaseRefactoringProcessor.ConflictsInTestsException e) {
+      assertEquals("final variable initializer won't be available after move.", e.getMessage());
+    }
+  }
 
   public void testInnerToInterface() throws Exception {
     doTest("A", "B", 0);
+  }
+
+  public void testStaticToInterface() throws Exception {
+    final LanguageLevelProjectExtension levelProjectExtension = LanguageLevelProjectExtension.getInstance(getProject());
+    final LanguageLevel level = levelProjectExtension.getLanguageLevel();
+    try {
+      levelProjectExtension.setLanguageLevel(LanguageLevel.JDK_1_8);
+      doTest("A", "B", 0);
+    }
+    finally {
+      levelProjectExtension.setLanguageLevel(level);
+    }
   }
   
   public void testEscalateVisibility1() throws Exception {
@@ -129,6 +157,10 @@ public class MoveMembersTest extends MultiFileTestCase {
   
   public void testMultipleWithDependencies() throws Exception {
     doTest("A", "B", true, VisibilityUtil.ESCALATE_VISIBILITY, 0, 1);
+  }
+
+  public void testFromNestedToOuter() throws Exception {
+    doTest("Outer.Inner", "Outer", true, VisibilityUtil.ESCALATE_VISIBILITY, 0);
   }
 
   @Override

@@ -76,9 +76,9 @@ public class PackageNamingConventionInspection extends BaseGlobalInspection {
   @Override
   @Nullable
   public CommonProblemDescriptor[] checkElement(
-    RefEntity refEntity, AnalysisScope analysisScope,
-    InspectionManager inspectionManager,
-    GlobalInspectionContext globalInspectionContext) {
+    @NotNull RefEntity refEntity, @NotNull AnalysisScope analysisScope,
+    @NotNull InspectionManager inspectionManager,
+    @NotNull GlobalInspectionContext globalInspectionContext) {
     if (!(refEntity instanceof RefPackage)) {
       return null;
     }
@@ -115,7 +115,7 @@ public class PackageNamingConventionInspection extends BaseGlobalInspection {
   }
 
   @Override
-  public void readSettings(Element element) throws InvalidDataException {
+  public void readSettings(@NotNull Element element) throws InvalidDataException {
     super.readSettings(element);
     m_regexPattern = Pattern.compile(m_regex);
   }

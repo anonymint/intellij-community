@@ -3,6 +3,7 @@ package com.intellij.xdebugger;
 import com.intellij.util.NotNullFunction;
 import com.intellij.xdebugger.frame.XFullValueEvaluator;
 import com.intellij.xdebugger.frame.XValueNode;
+import com.intellij.xdebugger.frame.XValuePresenter;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,58 +23,68 @@ public class XTestValueNode implements XValueNode {
 
 
   @Override
-    public void setPresentation(@Nullable Icon icon, @NonNls @Nullable String type, @NonNls @NotNull String value, boolean hasChildren) {
-      myType = type;
-      myValue = value;
-      myHasChildren = hasChildren;
+  public void setPresentation(@Nullable Icon icon, @NonNls @Nullable String type, @NonNls @NotNull String value, boolean hasChildren) {
+    myType = type;
+    myValue = value;
+    myHasChildren = hasChildren;
 
-      myFinished.release();
-    }
+    myFinished.release();
+  }
 
-    @Override
-    public void setPresentation(@Nullable Icon icon,
-                                @NonNls @Nullable String type,
-                                @NonNls @NotNull String separator,
-                                @NonNls @NotNull String value,
-                                @Nullable NotNullFunction<String, String> valuePresenter,
-                                boolean hasChildren) {
-      setPresentation(icon, type, value, hasChildren);
-    }
+  @Override
+  public void setGroupingPresentation(@Nullable Icon icon, @NonNls @Nullable String value, @Nullable XValuePresenter valuePresenter, boolean expand) {
+    setPresentation(icon, value, valuePresenter, true);
+  }
 
-    @Override
-    public void setPresentation(@Nullable Icon icon,
-                                @NonNls @Nullable String type,
-                                @NonNls @NotNull String separator,
-                                @NonNls @NotNull String value,
-                                boolean hasChildren) {
-      setPresentation(icon, type, value, hasChildren);
-    }
+  @Override
+  public void setPresentation(@Nullable Icon icon, @NonNls @Nullable String value, @Nullable XValuePresenter valuePresenter, boolean hasChildren) {
+    setPresentation(icon, null, value, hasChildren);
+  }
 
-    @Override
-    public void setPresentation(@Nullable Icon icon,
-                                @NonNls @Nullable String type,
-                                @NonNls @NotNull String value,
-                                @Nullable NotNullFunction<String, String> valuePresenter,
-                                boolean hasChildren) {
-      setPresentation(icon, type, value, hasChildren);
-    }
+  @Override
+  public void setPresentation(@Nullable Icon icon,
+                              @NonNls @Nullable String type,
+                              @NonNls @NotNull String separator,
+                              @NonNls @NotNull String value,
+                              @Nullable NotNullFunction<String, String> valuePresenter,
+                              boolean hasChildren) {
+    setPresentation(icon, type, value, hasChildren);
+  }
 
-    public void setPresentation(@NonNls @NotNull String name,
-                                @Nullable Icon icon,
-                                @NonNls @Nullable String type,
-                                @NonNls @NotNull String value,
-                                boolean hasChildren) {
-      setPresentation(icon, type, value, hasChildren);
-    }
+  @Override
+  public void setPresentation(@Nullable Icon icon,
+                              @NonNls @Nullable String type,
+                              @NonNls @NotNull String separator,
+                              @NonNls @NotNull String value,
+                              boolean hasChildren) {
+    setPresentation(icon, type, value, hasChildren);
+  }
 
-    public void setPresentation(@NonNls @NotNull String name,
-                                @Nullable Icon icon,
-                                @NonNls @Nullable String type,
-                                @NonNls @NotNull String separator,
-                                @NonNls @NotNull String value,
-                                boolean hasChildren) {
-      setPresentation(icon, type, value, hasChildren);
-    }
+  @Override
+  public void setPresentation(@Nullable Icon icon,
+                              @NonNls @Nullable String type,
+                              @NonNls @NotNull String value,
+                              @Nullable NotNullFunction<String, String> valuePresenter,
+                              boolean hasChildren) {
+    setPresentation(icon, type, value, hasChildren);
+  }
+
+  public void setPresentation(@NonNls @NotNull String name,
+                              @Nullable Icon icon,
+                              @NonNls @Nullable String type,
+                              @NonNls @NotNull String value,
+                              boolean hasChildren) {
+    setPresentation(icon, type, value, hasChildren);
+  }
+
+  public void setPresentation(@NonNls @NotNull String name,
+                              @Nullable Icon icon,
+                              @NonNls @Nullable String type,
+                              @NonNls @NotNull String separator,
+                              @NonNls @NotNull String value,
+                              boolean hasChildren) {
+    setPresentation(icon, type, value, hasChildren);
+  }
 
   public void setFullValueEvaluator(@NotNull XFullValueEvaluator fullValueEvaluator) {
     myFullValueEvaluator = fullValueEvaluator;

@@ -3,6 +3,7 @@ package com.intellij.diagnostic;
 import com.intellij.CommonBundle;
 import com.intellij.ExtensionPoints;
 import com.intellij.diagnostic.errordialog.*;
+import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.impl.DataManagerImpl;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
@@ -29,7 +30,6 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
-import com.intellij.openapi.ui.ShadowAction;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Ref;
@@ -45,6 +45,7 @@ import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.DateFormatUtil;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -191,6 +192,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   public void entryWasRead() {
   }
 
+  @NotNull
   @Override
   protected Action[] createActions() {
     if (SystemInfo.isMac) {
@@ -209,8 +211,12 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
   private class ForwardAction extends AnAction implements DumbAware {
     public ForwardAction() {
-      super("");
-      new ShadowAction(this, ActionManager.getInstance().getAction("Forward"), getRootPane());
+      super("Next", null, AllIcons.Actions.Forward);
+      AnAction forward = ActionManager.getInstance().getAction("Forward");
+      if (forward != null) {
+        registerCustomShortcutSet(forward.getShortcutSet(), getRootPane(), getDisposable());
+      }
+
     }
 
     public void actionPerformed(AnActionEvent e) {
@@ -225,8 +231,11 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
   private class BackAction extends AnAction implements DumbAware {
     public BackAction() {
-      super("");
-      new ShadowAction(this, ActionManager.getInstance().getAction("Back"), getRootPane());
+      super("Previous", null, AllIcons.Actions.Back);
+      AnAction back = ActionManager.getInstance().getAction("Back");
+      if (back != null) {
+        registerCustomShortcutSet(back.getShortcutSet(), getRootPane(), getDisposable());
+      }
     }
 
     public void actionPerformed(AnActionEvent e) {
@@ -251,7 +260,6 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
 
     DefaultActionGroup goForward = new DefaultActionGroup();
     ForwardAction forward = new ForwardAction();
-    new ShadowAction(forward, ActionManager.getInstance().getAction("Forward"), getRootPane());
     goForward.add(forward);
     ActionToolbar forwardToolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, goForward, true);
     forwardToolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
@@ -514,7 +522,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
   }
 
   private void updateAssigneePane(AbstractMessage message) {
-    final ErrorReportSubmitter submitter = getSubmitter(message.getThrowable());
+    final ErrorReportSubmitter submitter = message != null ? getSubmitter(message.getThrowable()) : null;
     myDetailsTabForm.setAssigneeVisible(submitter instanceof ITNReporter && myInternalMode);
   }
 
@@ -529,8 +537,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
       return;
     }
 
-    StringBuilder text = new StringBuilder("<html>");
-    String url = null;
+    StringBuilder text = new StringBuilder();
     PluginId pluginId = findPluginId(throwable);
     if (pluginId == null || ApplicationInfoEx.getInstanceEx().isEssentialPlugin(pluginId.getIdString())) {
       if (throwable instanceof AbstractMethodError) {
@@ -547,6 +554,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
                                                      DateFormatUtil.formatPrettyDateTime(message.getDate()),
                                                      myMergedMessages.get(myIndex).size()));
 
+    String url = null;
     if (message.isSubmitted()) {
       final SubmittedReportInfo info = message.getSubmissionInfo();
       url = getUrl(info, getSubmitter(throwable) instanceof ITNReporter);
@@ -559,7 +567,7 @@ public class IdeErrorsDialog extends DialogWrapper implements MessagePoolListene
     else if (!message.isRead()) {
       text.append(" ").append(DiagnosticBundle.message("error.list.message.unread"));
     }
-    myInfoLabel.setHtmlText(text.toString());
+    myInfoLabel.setHtmlText(XmlStringUtil.wrapInHtml(text));
     myInfoLabel.setHyperlinkTarget(url);
   }
 

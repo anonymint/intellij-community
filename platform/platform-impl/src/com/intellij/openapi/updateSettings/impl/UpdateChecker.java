@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginId;
-import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -40,8 +39,7 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
-import com.intellij.openapi.wm.IdeFrame;
-import com.intellij.openapi.wm.ex.WindowManagerEx;
+import com.intellij.util.Function;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.UrlConnectionUtil;
@@ -55,7 +53,6 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import java.io.*;
 import java.net.*;
@@ -191,10 +188,16 @@ public final class UpdateChecker {
     }
 
     final Map<String, IdeaPluginDescriptor> toUpdate = new HashMap<String, IdeaPluginDescriptor>();
-    final IdeaPluginDescriptor[] installedPlugins = PluginManager.getPlugins();
+    final IdeaPluginDescriptor[] installedPlugins = PluginManagerCore.getPlugins();
     for (IdeaPluginDescriptor installedPlugin : installedPlugins) {
       if (!installedPlugin.isBundled()) {
         toUpdate.put(installedPlugin.getPluginId().getIdString(), installedPlugin);
+      }
+    }
+
+    for (Iterator<PluginDownloader> iterator = downloaded.iterator(); iterator.hasNext(); ) {
+      if (!toUpdate.containsKey(iterator.next().getPluginId())) {
+        iterator.remove();
       }
     }
 
@@ -203,7 +206,7 @@ public final class UpdateChecker {
       try {
         final String oldInstalledPlugins = FileUtil.loadFile(installedTxt);
         for (String pluginId : oldInstalledPlugins.trim().split("\n")) {
-          if (!toUpdate.containsKey(pluginId)) toUpdate.put(pluginId, null);
+          if (!toUpdate.containsKey(pluginId)) toUpdate.put(pluginId.trim(), null);
         }
       }
       catch (IOException e) {
@@ -216,7 +219,7 @@ public final class UpdateChecker {
     updateSettings.myOutdatedPlugins.clear();
     if (!toUpdate.isEmpty()) {
       try {
-        final ArrayList<IdeaPluginDescriptor> process = RepositoryHelper.process(indicator);
+        final List<IdeaPluginDescriptor> process = RepositoryHelper.loadPluginsFromRepository(indicator);
         for (IdeaPluginDescriptor loadedPlugin : process) {
           final String idString = loadedPlugin.getPluginId().getIdString();
           if (!toUpdate.containsKey(idString)) continue;
@@ -225,9 +228,7 @@ public final class UpdateChecker {
             prepareToInstall(downloaded, loadedPlugin);
           } else if (StringUtil.compareVersionNumbers(loadedPlugin.getVersion(), installedPlugin.getVersion()) > 0) {
             updateSettings.myOutdatedPlugins.add(idString);
-            if (installedPlugin.isEnabled()) {
-              prepareToInstall(downloaded, loadedPlugin);
-            }
+            prepareToInstall(downloaded, loadedPlugin);
           }
         }
       }
@@ -305,7 +306,7 @@ public final class UpdateChecker {
 
     inputStream = loadVersionInfo(host);
     if (inputStream == null) return false;
-    final ArrayList<IdeaPluginDescriptor> descriptors = RepositoryHelper.loadPluginsFromDescription(inputStream, indicator);
+    final List<IdeaPluginDescriptor> descriptors = RepositoryHelper.loadPluginsFromDescription(inputStream, indicator);
     for (IdeaPluginDescriptor descriptor : descriptors) {
       ((PluginNode)descriptor).setRepositoryName(host);
       downloaded.add(PluginDownloader.createDownloader(descriptor));
@@ -353,7 +354,7 @@ public final class UpdateChecker {
             try {
               final ProgressIndicator progressIndicator = ProgressManager.getInstance().getProgressIndicator();
               if (progressIndicator != null) {
-                progressIndicator.setText(finalPluginUrl);
+                progressIndicator.setText2(finalPluginUrl);
               }
               final PluginDownloader downloader = new PluginDownloader(pluginId, finalPluginUrl, pluginVersion);
               if (downloader.prepareToInstall()) {
@@ -467,10 +468,12 @@ public final class UpdateChecker {
     return result;
   }
 
-  public static void showUpdateResult(CheckForUpdateResult checkForUpdateResult,
-                                      List<PluginDownloader> updatedPlugins,
-                                      boolean showConfirmation,
-                                      boolean enableLink,
+  private static boolean ourUpdateInfoDialogShown = false;
+
+  public static void showUpdateResult(final CheckForUpdateResult checkForUpdateResult,
+                                      final List<PluginDownloader> updatedPlugins,
+                                      final boolean showConfirmation,
+                                      final boolean enableLink,
                                       final boolean alwaysShowResults) {
     UpdateChannel channelToPropose = checkForUpdateResult.getChannelToPropose();
     if (channelToPropose != null && channelToPropose.getLatestBuild() != null) {
@@ -478,30 +481,74 @@ public final class UpdateChecker {
       dialog.setModal(alwaysShowResults);
       dialog.show();
     }
-    else if (checkForUpdateResult.hasNewBuildInSelectedChannel()) {
-      UpdateInfoDialog dialog = new UpdateInfoDialog(true, checkForUpdateResult.getUpdatedChannel(), updatedPlugins, enableLink);
-      dialog.setModal(alwaysShowResults);
-      dialog.show();
-    }
-    else if (updatedPlugins != null || alwaysShowResults && ProjectManager.getInstance().getOpenProjects().length == 0) {
-      NoUpdatesDialog dialog = new NoUpdatesDialog(true, updatedPlugins, enableLink);
-      dialog.setShowConfirmation(showConfirmation);
-      dialog.show();
-    } else if (alwaysShowResults) {
-      final String title = IdeBundle.message("updates.info.dialog.title");
-      final String message = "You already have the latest version of " + ApplicationInfo.getInstance().getVersionName() + " installed.<br> " +
-                             "To configure automatic update settings, see the <a href=\"updates\">Updates</a> dialog of your IDE settings";
-      new NotificationGroup("update.available.group", NotificationDisplayType.STICKY_BALLOON, true)
-        .createNotification(title, message, NotificationType.INFORMATION, new NotificationListener() {
-          @Override
-          public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
-            notification.expire();
-            final UpdateSettingsConfigurable configurable = new UpdateSettingsConfigurable();
-            IdeFrame ideFrame = WindowManagerEx.getInstanceEx().findFrameFor(null);
-            ShowSettingsUtil.getInstance().editConfigurable((JFrame)ideFrame, configurable);
+    else {
+      final boolean showBalloonNotification = !alwaysShowResults && ProjectManager.getInstance().getOpenProjects().length > 0;
+      if (checkForUpdateResult.hasNewBuildInSelectedChannel() && !ourUpdateInfoDialogShown) {
+        final Runnable showUpdatesDialogRunnable = new Runnable() {
+          public void run() {
+            UpdateInfoDialog dialog = new UpdateInfoDialog(true, checkForUpdateResult.getUpdatedChannel(), updatedPlugins, enableLink) {
+              @Override
+              protected void dispose() {
+                ourUpdateInfoDialogShown = false;
+                super.dispose();
+              }
+            };
+            dialog.setModal(alwaysShowResults);
+            ourUpdateInfoDialogShown = true;
+            dialog.show();
           }
-        }).notify(null);
+        };
+        if (showBalloonNotification) {
+          final String message = ApplicationInfo.getInstance().getVersionName() + " is ready to <a href=\"update\">update</a>";
+          showBalloonNotification(showUpdatesDialogRunnable, message);
+        }
+        else {
+          showUpdatesDialogRunnable.run();
+        }
+      }
+      else {
+        final Runnable showPluginsUpdateDialogRunnable = new Runnable() {
+          public void run() {
+            final NoUpdatesDialog dialog = new NoUpdatesDialog(true, updatedPlugins, enableLink) {
+              @Override
+              protected void dispose() {
+                ourUpdateInfoDialogShown = false;
+                super.dispose();
+              }
+            };
+            dialog.setShowConfirmation(showConfirmation);
+            ourUpdateInfoDialogShown = true;
+            dialog.show();
+          }
+        };
+        if (showBalloonNotification && updatedPlugins != null) {
+          final String updatedPluginsList = StringUtil.join(updatedPlugins, new Function<PluginDownloader, String>() {
+            @Override
+            public String fun(PluginDownloader downloader) {
+              return downloader.getPluginName();
+            }
+          }, ", ");
+          String message = "You have the latest version of " + ApplicationInfo.getInstance().getVersionName() + " installed.<br> ";
+          message += "The following plugin" + (updatedPlugins.size() == 1 ? " is" : "s are") + " ready to <a href=\"update\">update</a>: " + updatedPluginsList;
+          showBalloonNotification(showPluginsUpdateDialogRunnable, message);
+        }
+        else if ((updatedPlugins != null || alwaysShowResults) && !ourUpdateInfoDialogShown) {
+          showPluginsUpdateDialogRunnable.run();
+        }
+      }
     }
+  }
+
+  private static void showBalloonNotification(final Runnable showUpdatesDialogRunnable, String message) {
+    new NotificationGroup(IdeBundle.message("update.available.group"), NotificationDisplayType.STICKY_BALLOON, true)
+      .createNotification(IdeBundle.message("updates.info.dialog.title"), message, NotificationType.INFORMATION,
+                          new NotificationListener() {
+                            @Override
+                            public void hyperlinkUpdate(@NotNull Notification notification, @NotNull HyperlinkEvent event) {
+                              notification.expire();
+                              showUpdatesDialogRunnable.run();
+                            }
+                          }).notify(null);
   }
 
   public static String prepareUpdateCheckArgs() {
@@ -761,7 +808,7 @@ public final class UpdateChecker {
   public static void saveDisabledToUpdatePlugins() {
     final File plugins = new File(PathManager.getConfigPath(), DISABLED_UPDATE);
     try {
-      PluginManager.savePluginsList(getDisabledToUpdatePlugins(), false, plugins);
+      PluginManagerCore.savePluginsList(getDisabledToUpdatePlugins(), false, plugins);
     }
     catch (IOException e) {
       LOG.error(e);

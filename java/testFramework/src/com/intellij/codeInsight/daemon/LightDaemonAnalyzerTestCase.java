@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,19 @@ import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.annotation.HighlightSeverity;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.testFramework.ExpectedHighlightingData;
 import com.intellij.testFramework.FileTreeAccessFilter;
 import com.intellij.testFramework.HighlightTestInfo;
 import com.intellij.testFramework.LightCodeInsightTestCase;
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
 import com.intellij.util.ArrayUtil;
+import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -116,9 +117,9 @@ public abstract class LightDaemonAnalyzerTestCase extends LightCodeInsightTestCa
   }
 
   protected HighlightTestInfo doTestFile(@NonNls @NotNull String filePath) {
-    return new HighlightTestInfo(getTestRootDisposable(), filePath){
+    return new HighlightTestInfo(getTestRootDisposable(), filePath) {
       @Override
-      public HighlightTestInfo doTest() throws Exception {
+      public HighlightTestInfo doTest() {
         String path = assertOneElement(filePaths);
         configureByFile(path);
         ExpectedHighlightingData data = new ExpectedHighlightingData(myEditor.getDocument(), checkWarnings, checkWeakWarnings, checkInfos, myFile);
@@ -139,14 +140,21 @@ public abstract class LightDaemonAnalyzerTestCase extends LightCodeInsightTestCa
   protected List<HighlightInfo> doHighlighting() {
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
 
-    int[] toIgnore = doFolding() ? ArrayUtil.EMPTY_INT_ARRAY : new int[]{Pass.UPDATE_FOLDING};
+    TIntArrayList toIgnoreList = new TIntArrayList();
+    if (!doFolding()) {
+      toIgnoreList.add(Pass.UPDATE_FOLDING);
+    }
+    if (!doInspections()) {
+      toIgnoreList.add(Pass.LOCAL_INSPECTIONS);
+    }
+    int[] toIgnore = toIgnoreList.isEmpty() ? ArrayUtil.EMPTY_INT_ARRAY : toIgnoreList.toNativeArray();
     Editor editor = getEditor();
     PsiFile file = getFile();
     if (editor instanceof EditorWindow) {
       editor = ((EditorWindow)editor).getDelegate();
-      file = InjectedLanguageUtil.getTopLevelFile(file);
+      file = InjectedLanguageManager.getInstance(file.getProject()).getTopLevelFile(file);
     }
-    
+
     return CodeInsightTestFixtureImpl.instantiateAndRun(file, editor, toIgnore, false);
   }
 
@@ -156,5 +164,9 @@ public abstract class LightDaemonAnalyzerTestCase extends LightCodeInsightTestCa
 
   protected boolean doFolding() {
     return false;
+  }
+
+  protected boolean doInspections() {
+    return true;
   }
 }

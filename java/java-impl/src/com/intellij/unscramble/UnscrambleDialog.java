@@ -45,6 +45,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -207,8 +208,13 @@ public class UnscrambleDialog extends DialogWrapper {
     myEditorPanel.add(myStacktraceEditorPanel, BorderLayout.CENTER);
   }
 
+  @NotNull
   protected Action[] createActions(){
     return new Action[]{createNormalizeTextAction(), getOKAction(), getCancelAction(), getHelpAction()};
+  }
+
+  public JComponent getPreferredFocusedComponent() {
+    return getRootPane().getDefaultButton();
   }
 
   private void createLogFileChooser() {
@@ -413,10 +419,6 @@ public class UnscrambleDialog extends DialogWrapper {
 
   protected String getDimensionServiceKey(){
     return "#com.intellij.unscramble.UnscrambleDialog";
-  }
-
-  public JComponent getPreferredFocusedComponent() {
-    return myStacktraceEditorPanel.getEditorComponent();
   }
 
   @Nullable

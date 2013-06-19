@@ -33,9 +33,9 @@ import java.util.List;
 /**
  * @author peter
  */
-public class GroovyAddImportAction extends ImportClassFixBase<GrReferenceElement> {
-  public GroovyAddImportAction(GrReferenceElement ref) {
-    super(ref);
+public class GroovyAddImportAction extends ImportClassFixBase<GrReferenceElement, GrReferenceElement> {
+  public GroovyAddImportAction(@NotNull GrReferenceElement ref) {
+    super(ref, ref);
   }
 
   @Override
@@ -79,8 +79,9 @@ public class GroovyAddImportAction extends ImportClassFixBase<GrReferenceElement
     return false;
   }
 
+  @NotNull
   @Override
-  protected List<PsiClass> filterByContext(List<PsiClass> candidates, GrReferenceElement ref) {
+  protected List<PsiClass> filterByContext(@NotNull List<PsiClass> candidates, @NotNull GrReferenceElement ref) {
     PsiElement typeElement = ref.getParent();
     if (typeElement instanceof GrTypeElement) {
       PsiElement decl = typeElement.getParent();

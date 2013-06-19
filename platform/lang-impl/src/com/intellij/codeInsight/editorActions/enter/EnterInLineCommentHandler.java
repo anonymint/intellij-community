@@ -49,12 +49,16 @@ public class EnterInLineCommentHandler extends EnterHandlerDelegateAdapter {
           String prefix = commenter.getLineCommentPrefix();
           assert prefix != null: "Line Comment type is set but Line Comment Prefix is null!";
           if (!StringUtil.startsWith(text, offset, prefix)) {
-            if (text.charAt(caretOffset) != ' ') {
+            if (text.charAt(caretOffset) != ' ' && !prefix.endsWith(" ")) {
               prefix += " ";
             }
             document.insertString(caretOffset, prefix);
             return Result.Default;
+          } else {
+            caretOffsetRef.set(offset);
+            caretAdvance.set(-prefix.length() - 1);
           }
+          return Result.Default;
         }
       }
     }

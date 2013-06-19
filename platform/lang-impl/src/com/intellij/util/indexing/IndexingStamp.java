@@ -152,7 +152,7 @@ public class IndexingStamp {
     if (file instanceof NewVirtualFile && file.isValid()) {
       Timestamps timestamps = myTimestampsCache.get(file);
       if (timestamps == null) {
-        synchronized (myTimestampsCache) { // avoid synchroneous reads TODO:
+        synchronized (myTimestampsCache) { // avoid synchronous reads TODO:
           timestamps = myTimestampsCache.get(file);
           if (timestamps == null) {
             final DataInputStream stream = Timestamps.PERSISTENCE.readAttribute(file);
@@ -182,6 +182,11 @@ public class IndexingStamp {
     }
   }
 
+  public static void flushCaches() {
+    flushCache(null);
+    myTimestampsCache.clear();
+  }
+
   public static void flushCache(@Nullable VirtualFile finishedFile) {
     if (finishedFile == null || !myFinishedFiles.offer(finishedFile)) {
       VirtualFile[] files = null;
@@ -198,17 +203,15 @@ public class IndexingStamp {
           synchronized (myTimestampsCache) {
             Timestamps timestamp = myTimestampsCache.remove(file);
             if (timestamp == null) continue;
-            synchronized (myTimestampsCache) {
-              try {
-                if (timestamp.isDirty() && file.isValid()) {
-                  final DataOutputStream sink = Timestamps.PERSISTENCE.writeAttribute(file);
-                  timestamp.writeToStream(sink);
-                  sink.close();
-                }
+            try {
+              if (timestamp.isDirty() && file.isValid()) {
+                final DataOutputStream sink = Timestamps.PERSISTENCE.writeAttribute(file);
+                timestamp.writeToStream(sink);
+                sink.close();
               }
-              catch (IOException e) {
-                throw new RuntimeException(e);
-              }
+            }
+            catch (IOException e) {
+              throw new RuntimeException(e);
             }
           }
         }

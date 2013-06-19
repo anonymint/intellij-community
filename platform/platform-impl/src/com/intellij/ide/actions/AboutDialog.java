@@ -17,8 +17,12 @@ package com.intellij.ide.actions;
 
 import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.IdeBundle;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
+import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.Ref;
@@ -27,6 +31,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.ClickListener;
 import com.intellij.ui.LicensingFacade;
+import com.intellij.ui.UI;
 import com.intellij.util.text.DateFormatUtil;
 import com.intellij.util.ui.UIUtil;
 
@@ -55,6 +60,7 @@ public class AboutDialog extends JDialog {
   private void init(Window window) {
     ApplicationInfoEx appInfo = (ApplicationInfoEx)ApplicationInfo.getInstance();
     JPanel mainPanel = new JPanel(new BorderLayout());
+    mainPanel.setFocusable(true); //doesn't work under Oracle 1.7 if nothing focusable
     final JComponent closeListenerOwner;
     Icon image = IconLoader.getIcon(appInfo.getAboutImageUrl());
     final InfoSurface infoSurface;
@@ -73,26 +79,23 @@ public class AboutDialog extends JDialog {
     setUndecorated(true);
     setContentPane(mainPanel);
     final Ref<Long> showTime = Ref.create(System.currentTimeMillis());
-    addKeyListener(new KeyAdapter() {
-      public void keyPressed(KeyEvent e) {
-        int code = e.getKeyCode();
-        if (code == KeyEvent.VK_ESCAPE && e.getModifiers() == 0) {
-          dispose();
-        }
-        else if (infoSurface != null) {
-          if (code == KeyEvent.VK_CONTROL || code == KeyEvent.VK_META) {
-            showTime.set(System.currentTimeMillis());
-            e.consume();
-          }
-          else if ((code == KeyEvent.VK_C && (e.isControlDown() || e.isMetaDown()))
-                   || (!SystemInfo.isMac && code == KeyEvent.VK_INSERT && e.isControlDown())) {
-            copyInfoToClipboard(infoSurface.getText());
-            showTime.set(System.currentTimeMillis());
-            e.consume();
-          }
+
+    new AnAction() {
+      @Override
+      public void actionPerformed(AnActionEvent e) {
+        if (infoSurface != null) {
+          copyInfoToClipboard(infoSurface.getText());
         }
       }
-    });
+    }.registerCustomShortcutSet(CustomShortcutSet.fromString("meta C", "control C"), mainPanel);
+
+    new AnAction() {
+
+      @Override
+      public void actionPerformed(AnActionEvent e) {
+        dispose();
+      }
+    }.registerCustomShortcutSet(CustomShortcutSet.fromString("ESCAPE"), mainPanel);
 
     //final long delta = Patches.APPLE_BUG_ID_3716865 ? 100 : 0;
     final long delta = 500; //reproducible on Windows too
@@ -133,7 +136,6 @@ public class AboutDialog extends JDialog {
     }
   }
 
-
   private static class InfoSurface extends JPanel {
     final Color col;
     final Color linkCol;
@@ -141,38 +143,49 @@ public class AboutDialog extends JDialog {
     private Font myFont;
     private Font myBoldFont;
     private final List<AboutBoxLine> myLines = new ArrayList<AboutBoxLine>();
-    private int linkX;
-    private int linkY;
-    private int linkWidth;
-    private boolean inLink = false;
     private StringBuilder myInfo = new StringBuilder();
+
+    private static class Link {
+      private final Rectangle rectangle;
+      private final String url;
+
+      private Link(Rectangle rectangle, String url) {
+        this.rectangle = rectangle;
+        this.url = url;
+      }
+    }
+
+    private Link myActiveLink;
+
+    private final List<Link> myLinks = new ArrayList<Link>();
 
     public InfoSurface(Icon image) {
       myImage = image;
 
       setOpaque(false);
       col = Color.white;
-      final ApplicationInfoEx info = ApplicationInfoEx.getInstanceEx();
-      linkCol = info.getSplashTextColor();
+      final ApplicationInfoImpl ideInfo = (ApplicationInfoImpl)ApplicationInfoEx.getInstanceEx();
+      linkCol = ideInfo.getAboutLinkColor() != null ? ideInfo.getAboutLinkColor() : UI.getColor("link.foreground");
       setBackground(col);
-      ApplicationInfoEx ideInfo = (ApplicationInfoEx)ApplicationInfo.getInstance();
       Calendar cal = ideInfo.getBuildDate();
-      myLines.add(new AboutBoxLine(ideInfo.getFullApplicationName(), true, false));
+      myLines.add(new AboutBoxLine(ideInfo.getFullApplicationName(), true, null));
       appendLast();
-      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.build.number", ideInfo.getBuild().asString())));
-      appendLast();
+
+      String buildInfo = IdeBundle.message("aboutbox.build.number", ideInfo.getBuild().asString());
       String buildDate = "";
       if (ideInfo.getBuild().isSnapshot()) {
         buildDate = new SimpleDateFormat("HH:mm, ").format(cal.getTime());
       }
       buildDate += DateFormatUtil.formatAboutDialogDate(cal.getTime());
-      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.build.date", buildDate)));
+      buildInfo += IdeBundle.message("aboutbox.build.date", buildDate);
+      myLines.add(new AboutBoxLine(buildInfo));
       appendLast();
+
       myLines.add(new AboutBoxLine(""));
 
       LicensingFacade provider = LicensingFacade.getInstance();
       if (provider != null) {
-        myLines.add(new AboutBoxLine(provider.getLicensedToMessage(), true, false));
+        myLines.add(new AboutBoxLine(provider.getLicensedToMessage(), true, null));
         for (String message : provider.getLicenseRestrictionsMessages()) {
           myLines.add(new AboutBoxLine(message));
         }
@@ -180,40 +193,48 @@ public class AboutDialog extends JDialog {
       myLines.add(new AboutBoxLine(""));
 
       final Properties properties = System.getProperties();
-      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.jdk", properties.getProperty("java.version", "unknown")), true, false));
+      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.jdk", properties.getProperty("java.version", "unknown")), true, null));
       appendLast();
-      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.vm", properties.getProperty("java.vm.name", "unknown"))));
-      appendLast();
-      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.vendor", properties.getProperty("java.vendor", "unknown"))));
+      myLines.add(new AboutBoxLine(IdeBundle.message("aboutbox.vm", properties.getProperty("java.vm.name", "unknown"),
+                                                     properties.getProperty("java.vendor", "unknown"))));
       appendLast();
 
+      /*
       myLines.add(new AboutBoxLine(""));
-      myLines.add(new AboutBoxLine(info.getCompanyName(), true, false));
-      myLines.add(new AboutBoxLine(info.getCompanyURL(), true, true));
+      myLines.add(new AboutBoxLine(info.getCompanyURL(), true, info.getCompanyURL()));
+      */
+
+      String thirdParty = ideInfo.getThirdPartySoftwareURL();
+      if (thirdParty != null) {
+        myLines.add(new AboutBoxLine(""));
+        myLines.add(new AboutBoxLine(""));
+        myLines.add(new AboutBoxLine("Powered by ").keepWithNext());
+        myLines.add(new AboutBoxLine("open-source software", false, thirdParty).keepWithNext());
+      }
+
       addMouseListener(new MouseAdapter() {
         public void mousePressed(MouseEvent event) {
-          if (inLink) {
+          if (myActiveLink != null) {
             event.consume();
-            BrowserUtil.launchBrowser(info.getCompanyURL());
+            BrowserUtil.launchBrowser(myActiveLink.url);
           }
         }
       });
       addMouseMotionListener(new MouseMotionAdapter() {
         public void mouseMoved(MouseEvent event) {
-          if (
-            event.getPoint().x > linkX && event.getPoint().y >= linkY &&
-            event.getPoint().x < linkX + linkWidth && event.getPoint().y < linkY + 10
-            ) {
-            if (!inLink) {
-              setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-              inLink = true;
+          boolean hadLink = (myActiveLink != null);
+          myActiveLink = null;
+          for (Link link : myLinks) {
+            if (link.rectangle.contains(event.getPoint())) {
+              myActiveLink = link;
+              if (!hadLink) {
+                setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+              }
+              break;
             }
           }
-          else {
-            if (inLink) {
-              setCursor(Cursor.getDefaultCursor());
-              inLink = false;
-            }
+          if (hadLink && myActiveLink == null) {
+            setCursor(Cursor.getDefaultCursor());
           }
         }
       });
@@ -231,6 +252,7 @@ public class AboutDialog extends JDialog {
 
       Font labelFont = UIUtil.getLabelFont();
       for (int labelSize = 10; labelSize != 6; labelSize -= 1) {
+        myLinks.clear();
         g2.setPaint(col);
         myImage.paintIcon(this, g2, 0, 0);
 
@@ -240,11 +262,17 @@ public class AboutDialog extends JDialog {
         myFont = labelFont.deriveFont(Font.PLAIN, labelSize);
         myBoldFont = labelFont.deriveFont(Font.BOLD, labelSize + 1);
         try {
-          renderer.render(75, 0, myLines);
+          renderer.render(30, 0, myLines);
           break;
         }
         catch (TextRenderer.OverflowException ignore) {
         }
+      }
+
+      ApplicationInfo appInfo = ApplicationInfo.getInstance();
+      Rectangle aboutLogoRect = appInfo.getAboutLogoRect();
+      if (aboutLogoRect != null) {
+        myLinks.add(new Link(aboutLogoRect, appInfo.getCompanyURL()));
       }
     }
 
@@ -285,23 +313,19 @@ public class AboutDialog extends JDialog {
         x = indentX;
         y = indentY;
         ApplicationInfoEx appInfo = (ApplicationInfoEx)ApplicationInfo.getInstance();
-        g2.setColor(appInfo.getAboutForeground());
-        for (int i = 0; i < lines.size(); i++) {
-          AboutBoxLine line = lines.get(i);
+        for (AboutBoxLine line : lines) {
           final String s = line.getText();
           setFont(line.isBold() ? myBoldFont : myFont);
-          if (line.isLink()) {
+          if (line.getUrl() != null) {
             g2.setColor(linkCol);
-            linkX = x;
-            linkY = yBase + y - fontAscent;
             FontMetrics metrics = g2.getFontMetrics(font);
-            linkWidth = metrics.stringWidth(s);
+            myLinks.add(new Link(new Rectangle(x, yBase + y - fontAscent, metrics.stringWidth(s), fontHeight), line.getUrl()));
+          }
+          else {
+            g2.setColor(appInfo.getAboutForeground());
           }
           renderString(s, indentX);
-          if (i == lines.size() - 2) {
-            x += 50;
-          }
-          else if (i < lines.size() - 1) {
+          if (!line.isKeepWithNext() && !line.equals(lines.get(lines.size()-1))) {
             lineFeed(indentX, s);
           }
         }
@@ -364,20 +388,20 @@ public class AboutDialog extends JDialog {
   private static class AboutBoxLine {
     private final String myText;
     private final boolean myBold;
-    private final boolean myLink;
+    private final String myUrl;
+    private boolean myKeepWithNext;
 
-    public AboutBoxLine(final String text, final boolean bold, final boolean link) {
-      myLink = link;
+    public AboutBoxLine(final String text, final boolean bold, final String url) {
       myText = text;
       myBold = bold;
+      myUrl = url;
     }
 
     public AboutBoxLine(final String text) {
       myText = text;
       myBold = false;
-      myLink = false;
+      myUrl = null;
     }
-
 
     public String getText() {
       return myText;
@@ -387,8 +411,17 @@ public class AboutDialog extends JDialog {
       return myBold;
     }
 
-    public boolean isLink() {
-      return myLink;
+    public String getUrl() {
+      return myUrl;
+    }
+
+    public boolean isKeepWithNext() {
+      return myKeepWithNext;
+    }
+
+    public AboutBoxLine keepWithNext() {
+      myKeepWithNext = true;
+      return this;
     }
   }
 }

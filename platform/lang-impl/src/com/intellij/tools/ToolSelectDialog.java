@@ -31,10 +31,11 @@ import java.awt.*;
 import java.io.IOException;
 
 class ToolSelectDialog extends DialogWrapper {
-  private final ToolsPanel myToolsPanel = new ToolsPanel();
+  private final BaseToolsPanel myToolsPanel;
 
-  protected ToolSelectDialog(@Nullable Project project, @Nullable String actionIdToSelect) {
+  protected ToolSelectDialog(@Nullable Project project, @Nullable String actionIdToSelect, BaseToolsPanel toolsPanel) {
     super(project);
+    myToolsPanel = toolsPanel;
     myToolsPanel.reset();
     setOKActionEnabled(myToolsPanel.getSingleSelectedTool() != null);
     myToolsPanel.addSelectionListener(new TreeSelectionListener() {
@@ -45,7 +46,7 @@ class ToolSelectDialog extends DialogWrapper {
     });
     init();
     pack();
-    if(actionIdToSelect != null){
+    if (actionIdToSelect != null) {
       myToolsPanel.selectTool(actionIdToSelect);
     }
     setTitle(ToolsBundle.message("tools.dialog.title"));

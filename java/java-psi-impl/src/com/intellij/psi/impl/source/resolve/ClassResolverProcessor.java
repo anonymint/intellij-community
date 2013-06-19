@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.infos.CandidateInfo;
 import com.intellij.psi.infos.ClassCandidateInfo;
 import com.intellij.psi.scope.*;
@@ -34,6 +33,7 @@ import java.util.List;
 public class ClassResolverProcessor extends BaseScopeProcessor implements NameHint, ElementClassHint {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.resolve.ClassResolverProcessor");
   private static final String[] DEFAULT_PACKAGES = new String[]{CommonClassNames.DEFAULT_PACKAGE};
+
   private final String myClassName;
   private final PsiElement myPlace;
   private PsiClass myAccessClass = null;
@@ -43,12 +43,9 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
   private JavaResolveResult[] myResult = JavaResolveResult.EMPTY_ARRAY;
   private PsiElement myCurrentFileContext;
 
-  public ClassResolverProcessor(String className, PsiElement place) {
+  public ClassResolverProcessor(String className, @NotNull PsiElement startPlace, PsiFile containingFile) {
     myClassName = className;
-    final PsiFile file = place.getContainingFile();
-    if (file instanceof JavaCodeFragment) {
-      if (((JavaCodeFragment)file).getVisibilityChecker() != null) place = null;
-    }
+    PsiElement place = containingFile instanceof JavaCodeFragment && ((JavaCodeFragment)containingFile).getVisibilityChecker() != null ? null : startPlace;
     myPlace = place;
     if (place instanceof PsiJavaCodeReferenceElement) {
       final PsiJavaCodeReferenceElement expression = (PsiJavaCodeReferenceElement)place;
@@ -69,6 +66,7 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
     }
   }
 
+  @NotNull
   public JavaResolveResult[] getResult() {
     if (myResult != null) return myResult;
     if (myCandidates == null) return myResult = JavaResolveResult.EMPTY_ARRAY;
@@ -94,14 +92,9 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
     return kind == DeclarationKind.CLASS;
   }
 
-  private boolean myStaticContext = false;
-
   @Override
   public void handleEvent(PsiScopeProcessor.Event event, Object associated) {
-    if (event == JavaScopeProcessorEvent.START_STATIC) {
-      myStaticContext = true;
-    }
-    else if (event == JavaScopeProcessorEvent.SET_CURRENT_FILE_CONTEXT) {
+    if (event == JavaScopeProcessorEvent.SET_CURRENT_FILE_CONTEXT) {
       myCurrentFileContext = (PsiElement)associated;
     }
   }
@@ -165,8 +158,8 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
     }
 
     // everything wins over class from default package
-    boolean isDefault = StringUtil.getPackageName(fqName).length() == 0;
-    boolean otherDefault = otherQName != null && StringUtil.getPackageName(otherQName).length() == 0;
+    boolean isDefault = StringUtil.getPackageName(fqName).isEmpty();
+    boolean otherDefault = otherQName != null && StringUtil.getPackageName(otherQName).isEmpty();
     if (isDefault && !otherDefault) {
       return Domination.DOMINATED_BY;
     }
@@ -249,7 +242,7 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
     if (!accessible) return true;
     if (aClass.hasModifierProperty(PsiModifier.PRIVATE)) {
       final PsiClass containingPlaceClass = PsiTreeUtil.getParentOfType(myPlace, PsiClass.class, false);
-      if (containingPlaceClass != null && !PsiTreeUtil.isAncestor(containingPlaceClass, aClass, true)){
+      if (containingPlaceClass != null && !PsiTreeUtil.isAncestor(containingPlaceClass, aClass, false)){
         return true;
       }
     }
@@ -257,65 +250,15 @@ public class ClassResolverProcessor extends BaseScopeProcessor implements NameHi
   }
 
   private boolean checkAccessibility(final PsiClass aClass) {
-    //We don't care about accessibility in javadoc
-    if (JavaResolveUtil.isInJavaDoc(myPlace)) {
-      return true;
-    }
-
-    if (PsiImplUtil.isInServerPage(aClass.getContainingFile())) {
-      PsiFile file = FileContextUtil.getContextFile(myPlace);
-      if (PsiImplUtil.isInServerPage(file)) {
-        return true;
-      }
-    }
-
-    boolean accessible = true;
-    if (aClass instanceof PsiTypeParameter) {
-      accessible = !myStaticContext;
-    }
-
-    PsiManager manager = aClass.getManager();
-    if (aClass.hasModifierProperty(PsiModifier.PRIVATE)) {
-      PsiElement parent = aClass.getParent();
-      while (true) {
-        PsiElement parentScope = parent.getParent();
-        if (parentScope instanceof PsiJavaFile) break;
-        parent = parentScope;
-        if (!(parentScope instanceof PsiClass)) break;
-      }
-      if (parent instanceof PsiDeclarationStatement) {
-        parent = parent.getParent();
-      }
-      accessible = false;
-      for (PsiElement placeParent = myPlace; placeParent != null; placeParent = placeParent.getContext()) {
-        if (manager.areElementsEquivalent(placeParent, parent)) accessible = true;
-      }
-    }
-    final JavaPsiFacade facade = JavaPsiFacade.getInstance(manager.getProject());
-    if (aClass.hasModifierProperty(PsiModifier.PROTECTED)) {
-      accessible = false;
-      if (myPlace != null && facade.arePackagesTheSame(aClass, myPlace)) {
-        accessible = true;
-      }
-      else {
-        if (aClass.getContainingClass() != null) {
-          accessible = myAccessClass == null || myPlace != null && facade.getResolveHelper().isAccessible(aClass, myPlace, myAccessClass);
-        }
-      }
-    }
-    if (aClass.hasModifierProperty(PsiModifier.PACKAGE_LOCAL)) {
-      if (myPlace == null || !facade.arePackagesTheSame(aClass, myPlace)) {
-        accessible = false;
-      }
-    }
-    return accessible;
+    JavaPsiFacade facade = JavaPsiFacade.getInstance(aClass.getProject());
+    return facade.getResolveHelper().isAccessible(aClass, myPlace, myAccessClass);
   }
 
   @Override
   public <T> T getHint(@NotNull Key<T> hintKey) {
     if (hintKey == ElementClassHint.KEY || hintKey == NameHint.KEY) {
-      //noinspection unchecked
-      return (T)this;
+      @SuppressWarnings("unchecked") T t = (T)this;
+      return t;
     }
     return super.getHint(hintKey);
   }

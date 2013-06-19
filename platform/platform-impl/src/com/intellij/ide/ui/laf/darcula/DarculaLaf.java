@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.ide.ui.laf.darcula;
 
+import com.intellij.ide.ui.laf.DarculaMetalTheme;
 import com.intellij.ide.ui.laf.IdeaLaf;
 import com.intellij.ide.ui.laf.LafManagerImpl;
 import com.intellij.openapi.util.IconLoader;
@@ -46,6 +47,7 @@ import java.util.Properties;
 public final class DarculaLaf extends BasicLookAndFeel {
   public static final String NAME = "Darcula";
   BasicLookAndFeel base;
+
   public DarculaLaf() {
     try {
       if (SystemInfo.isWindows || SystemInfo.isLinux) {
@@ -55,8 +57,8 @@ public final class DarculaLaf extends BasicLookAndFeel {
         base = (BasicLookAndFeel)Class.forName(name).newInstance();
       }
     }
-    catch (Exception ignore) {
-      log(ignore);
+    catch (Exception e) {
+      log(e);
     }
   }
 
@@ -66,8 +68,8 @@ public final class DarculaLaf extends BasicLookAndFeel {
       superMethod.setAccessible(true);
       superMethod.invoke(base, defaults);
     }
-    catch (Exception ignore) {
-      log(ignore);
+    catch (Exception e) {
+      log(e);
     }
   }
 
@@ -82,19 +84,20 @@ public final class DarculaLaf extends BasicLookAndFeel {
     try {
       final Method superMethod = BasicLookAndFeel.class.getDeclaredMethod("getDefaults");
       superMethod.setAccessible(true);
-      final UIDefaults metalDefaults =
-        (UIDefaults)superMethod.invoke(new MetalLookAndFeel());
+      final UIDefaults metalDefaults = (UIDefaults)superMethod.invoke(new MetalLookAndFeel());
       final UIDefaults defaults = (UIDefaults)superMethod.invoke(base);
+
       LafManagerImpl.initInputMapDefaults(defaults);
       initIdeaDefaults(defaults);
       patchStyledEditorKit();
       patchComboBox(metalDefaults, defaults);
       defaults.remove("Spinner.arrowButtonBorder");
       defaults.put("Spinner.arrowButtonSize", new Dimension(16, 5));
+      MetalLookAndFeel.setCurrentTheme(new DarculaMetalTheme());
       return defaults;
     }
-    catch (Exception ignore) {
-      log(ignore);
+    catch (Exception e) {
+      log(e);
     }
     return super.getDefaults();
   }
@@ -270,7 +273,6 @@ public final class DarculaLaf extends BasicLookAndFeel {
     }
   }
 
-
   @Override
   public String getName() {
     return NAME;
@@ -330,7 +332,6 @@ public final class DarculaLaf extends BasicLookAndFeel {
       log(ignore);
     }
   }
-
 
   @Override
   public boolean getSupportsWindowDecorations() {

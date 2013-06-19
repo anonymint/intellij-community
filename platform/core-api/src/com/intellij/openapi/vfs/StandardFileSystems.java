@@ -17,7 +17,6 @@ package com.intellij.openapi.vfs;
 
 import com.intellij.ide.highlighter.ArchiveFileType;
 import com.intellij.openapi.util.NotNullLazyValue;
-import com.intellij.util.StringBuilderSpinAllocator;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,7 +25,9 @@ import org.jetbrains.annotations.Nullable;
  */
 public class StandardFileSystems {
   public static String FILE_PROTOCOL = "file";
+  public static String FILE_PROTOCOL_PREFIX = "file://";
   public static String JAR_PROTOCOL = "jar";
+  public static String JAR_PROTOCOL_PREFIX = "jar://";
   public static String JAR_SEPARATOR = "!/";
   public static String HTTP_PROTOCOL = "http";
 
@@ -58,16 +59,7 @@ public class StandardFileSystems {
   public static VirtualFile getJarRootForLocalFile(@NotNull VirtualFile virtualFile) {
     if (virtualFile.getFileType() != ArchiveFileType.INSTANCE) return null;
 
-    final StringBuilder builder = StringBuilderSpinAllocator.alloc();
-    final String path;
-    try {
-      builder.append(virtualFile.getPath());
-      builder.append(JAR_SEPARATOR);
-      path = builder.toString();
-    }
-    finally {
-      StringBuilderSpinAllocator.dispose(builder);
-    }
+    final String path = virtualFile.getPath() + JAR_SEPARATOR;
     return jar().findFileByPath(path);
   }
 

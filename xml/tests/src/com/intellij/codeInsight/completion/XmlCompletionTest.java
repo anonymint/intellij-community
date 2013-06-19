@@ -6,7 +6,6 @@ import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupManager;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
-import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
 import com.intellij.javaee.ExternalResourceManager;
 import com.intellij.javaee.ExternalResourceManagerEx;
@@ -18,6 +17,8 @@ import com.intellij.psi.statistics.StatisticsManager;
 import com.intellij.psi.statistics.impl.StatisticsManagerImpl;
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase;
 import com.intellij.xml.util.XmlUtil;
+
+import java.util.List;
 
 /**
  * @by Maxim.Mossienko
@@ -168,19 +169,15 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
   }
 
   public void testAttributesTemplateFinishWithSpace() throws Throwable {
-    ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(true);
-    try {
-      configureByFile(getTestName(false) + ".xml");
-      type('b');
-      type('e');
-      type('a');
-      type('n');
-      type(' ');
-      checkResultByFile(getTestName(false) + "_after.xml");
-    }
-    finally {
-      ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(false);
-    }
+    TemplateManagerImpl.setTemplateTesting(getProject(), getTestRootDisposable());
+
+    configureByFile(getTestName(false) + ".xml");
+    type('b');
+    type('e');
+    type('a');
+    type('n');
+    type(' ');
+    checkResultByFile(getTestName(false) + "_after.xml");
   }
 
   private void configureByFile(String s) {
@@ -189,17 +186,13 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
   }
 
   public void testNoAttributesTemplateFinishWithSpace() throws Throwable {
-    ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(true);
-    try {
-      configureByFile(getTestName(false) + ".xml");
-      type('d');
-      type('e');
-      type(' ');
-      checkResultByFile(getTestName(false) + "_after.xml");
-    }
-    finally {
-      ((TemplateManagerImpl)TemplateManager.getInstance(getProject())).setTemplateTesting(false);
-    }
+    TemplateManagerImpl.setTemplateTesting(getProject(), getTestRootDisposable());
+
+    configureByFile(getTestName(false) + ".xml");
+    type('d');
+    type('e');
+    type(' ');
+    checkResultByFile(getTestName(false) + "_after.xml");
   }
 
   private void type(char c) {
@@ -228,8 +221,7 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
     selectItem(myFixture.getLookupElements()[0], (char)0);
     checkResultByFile(baseTestFileName + "_after.dtd");
 
-    configureByFile(baseTestFileName + "2.dtd");
-    checkResultByFile(baseTestFileName + "2_after.dtd");
+    doCompletionTest(baseTestFileName + "2");
 
     configureByFile(baseTestFileName + "3.dtd");
     checkResultByFile(baseTestFileName + "3_after.dtd");
@@ -239,6 +231,14 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
 
     configureByFile(baseTestFileName + "5.dtd");
     checkResultByFile(baseTestFileName + "5_after.dtd");
+
+    // todo uncomment
+//    doCompletionTest("DtdElementCompletion");
+  }
+
+  private void doCompletionTest(String name) {
+    configureByFile(name + ".dtd");
+    checkResultByFile(name + "_after.dtd");
   }
 
   public void testSchemaEnumerationCompletion() throws Exception {
@@ -613,6 +613,38 @@ public class XmlCompletionTest extends LightCodeInsightFixtureTestCase {
   public void testCompleteQualifiedTopLevelTags() throws Exception {
     configureByFiles("foo.xsd", "bar.xsd");
     basicDoTest("");
+  }
+
+  public void testDoNotSuggestExistingAttributes() throws Exception {
+    myFixture.configureByFile("DoNotSuggestExistingAttributes.xml");
+    myFixture.completeBasic();
+    List<String> strings = myFixture.getLookupElementStrings();
+    assertNotNull(strings);
+    assertFalse(strings.contains("xsi:schemaLocation"));
+    assertSameElements(strings, "attributeFormDefault",
+                       "blockDefault",
+                       "elementFormDefault",
+                       "finalDefault",
+                       "id",
+                       "targetNamespace",
+                       "version",
+                       "xml:base",
+                       "xml:id",
+                       "xml:lang",
+                       "xml:space",
+                       "xsi:nill",
+                       "xsi:noNamespaceSchemaLocation",
+                       "xsi:type");
+  }
+
+  public void testRequiredAttributesOnTop() throws Exception {
+    myFixture.configureByText("foo.html", "<img <caret>");
+    myFixture.completeBasic();
+    List<String> strings = myFixture.getLookupElementStrings();
+    assertNotNull(strings);
+    assertEquals("alt", strings.get(0));
+    assertEquals("src", strings.get(1));
+    assertEquals("align", strings.get(2));
   }
 }
 

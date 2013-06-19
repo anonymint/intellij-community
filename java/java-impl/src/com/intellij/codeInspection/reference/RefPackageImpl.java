@@ -19,13 +19,14 @@
  * User: max
  * Date: Nov 15, 2001
  * Time: 5:17:38 PM
- * To change template for new class use 
+ * To change template for new class use
  * Code Style | Class Templates options (Tools | IDE Options).
  */
 package com.intellij.codeInspection.reference;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.util.PlatformIcons;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 
@@ -33,24 +34,28 @@ import javax.swing.*;
 public class RefPackageImpl extends RefEntityImpl implements RefPackage {
   private final String myQualifiedName;
 
-  public RefPackageImpl(String name, RefManager refManager) {
+  public RefPackageImpl(@NotNull String name, @NotNull RefManager refManager) {
     super(getPackageSuffix(name), refManager);
     myQualifiedName = name;
   }
 
+  @NotNull
+  @Override
   public String getQualifiedName() {
     return myQualifiedName;
   }
 
-  private static String getPackageSuffix(String fullName) {
+  private static String getPackageSuffix(@NotNull String fullName) {
     int dotIndex = fullName.lastIndexOf('.');
     return (dotIndex >= 0) ? fullName.substring(dotIndex + 1) : fullName;
   }
 
 
-  public void accept(final RefVisitor visitor) {
+  @Override
+  public void accept(@NotNull final RefVisitor visitor) {
     if (visitor instanceof RefJavaVisitor) {
       ApplicationManager.getApplication().runReadAction(new Runnable() {
+        @Override
         public void run() {
           ((RefJavaVisitor)visitor).visitPackage(RefPackageImpl.this);
         }
@@ -60,6 +65,7 @@ public class RefPackageImpl extends RefEntityImpl implements RefPackage {
     }
   }
 
+  @Override
   public String getExternalName() {
     return getQualifiedName();
   }
@@ -68,10 +74,12 @@ public class RefPackageImpl extends RefEntityImpl implements RefPackage {
     return manager.getExtension(RefJavaManager.MANAGER).getPackage(name);
   }
 
+  @Override
   public boolean isValid() {
     return true;
   }
 
+  @Override
   public Icon getIcon(final boolean expanded) {
     return PlatformIcons.PACKAGE_ICON;
   }

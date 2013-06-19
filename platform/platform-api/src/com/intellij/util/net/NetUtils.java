@@ -16,6 +16,7 @@
 
 package com.intellij.util.net;
 
+import com.intellij.Patches;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -25,9 +26,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.UnknownHostException;
+import java.net.*;
 
 /**
  * @author yole
@@ -36,6 +35,64 @@ public class NetUtils {
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.net.NetUtils");
 
   private NetUtils() {
+  }
+
+  public static boolean canConnectToSocket(String host, int port) {
+    return canConnectToSocket(host, port, false);
+  }
+
+  public static boolean canConnectToSocketOpenedByJavaProcess(String host, int port) {
+    return canConnectToSocket(host, port, Patches.SUN_BUG_ID_7179799);
+  }
+
+  private static boolean canConnectToSocket(String host, int port, boolean alwaysTryToConnectDirectly) {
+    if (isLocalhost(host)) {
+      if (!canBindToLocalSocket(host, port)) {
+        return true;
+      }
+      return alwaysTryToConnectDirectly && canConnectToRemoteSocket(host, port);
+    }
+    else {
+      return canConnectToRemoteSocket(host, port);
+    }
+  }
+
+  private static boolean isLocalhost(String host) {
+    return host.equals("localhost") || host.equals("127.0.0.1");
+  }
+
+  private static boolean canBindToLocalSocket(String host, int port) {
+    try {
+      ServerSocket socket = new ServerSocket();
+      try {
+        //it looks like this flag should be set but it leads to incorrect results for NodeJS under Windows
+        //socket.setReuseAddress(true);
+        socket.bind(new InetSocketAddress(host, port));
+      }
+      finally {
+        try {
+          socket.close();
+        }
+        catch (IOException ignored) {
+        }
+      }
+      return true;
+    }
+    catch (IOException e) {
+      LOG.debug(e);
+      return false;
+    }
+  }
+
+  private static boolean canConnectToRemoteSocket(String host, int port) {
+    try {
+      Socket socket = new Socket(host, port);
+      socket.close();
+      return true;
+    }
+    catch (IOException ignored) {
+      return false;
+    }
   }
 
   public static int findAvailableSocketPort() throws IOException {

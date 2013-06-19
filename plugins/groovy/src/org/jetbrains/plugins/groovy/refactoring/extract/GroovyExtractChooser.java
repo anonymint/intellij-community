@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,9 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpres
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.path.GrMethodCallExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMethod;
 import org.jetbrains.plugins.groovy.lang.psi.api.util.GrStatementOwner;
+import org.jetbrains.plugins.groovy.lang.psi.controlFlow.Instruction;
+import org.jetbrains.plugins.groovy.lang.psi.controlFlow.impl.ControlFlowBuilder;
+import org.jetbrains.plugins.groovy.lang.psi.controlFlow.impl.GrAllVarsInitializedPolicy;
 import org.jetbrains.plugins.groovy.lang.psi.dataFlow.reachingDefs.FragmentVariableInfos;
 import org.jetbrains.plugins.groovy.lang.psi.dataFlow.reachingDefs.ReachingDefinitionsCollector;
 import org.jetbrains.plugins.groovy.lang.psi.dataFlow.reachingDefs.VariableInfo;
@@ -46,6 +49,7 @@ import org.jetbrains.plugins.groovy.refactoring.GrRefactoringError;
 import org.jetbrains.plugins.groovy.refactoring.GroovyRefactoringBundle;
 import org.jetbrains.plugins.groovy.refactoring.inline.GroovyInlineMethodUtil;
 import org.jetbrains.plugins.groovy.refactoring.introduce.GrIntroduceHandlerBase;
+import org.jetbrains.plugins.groovy.refactoring.introduce.StringPartInfo;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -73,6 +77,14 @@ public class GroovyExtractChooser {
 
     SelectionModel selectionModel = editor.getSelectionModel();
     PsiDocumentManager.getInstance(project).commitAllDocuments();
+
+    final StringPartInfo stringPart =
+      StringPartInfo.findStringPart(file, selectionModel.getSelectionStart(), selectionModel.getSelectionEnd());
+
+    if (stringPart != null) {
+      return new InitialInfo(new VariableInfo[0], new VariableInfo[0], PsiElement.EMPTY_ARRAY, GrStatement.EMPTY_ARRAY, new ArrayList<GrStatement>(), stringPart, project);
+    }
+
 
     PsiElement[] elements = getElementsInOffset(file, start, end, forceStatements);
     if (elements.length == 1 && elements[0] instanceof GrExpression) {
@@ -119,7 +131,8 @@ public class GroovyExtractChooser {
     Set<GrStatement> allReturnStatements = new HashSet<GrStatement>();
     GrControlFlowOwner controlFlowOwner = ControlFlowUtils.findControlFlowOwner(statement0);
     LOG.assertTrue(controlFlowOwner != null);
-    allReturnStatements.addAll(ControlFlowUtils.collectReturns(controlFlowOwner, true));
+    final Instruction[] flow = new ControlFlowBuilder(project, GrAllVarsInitializedPolicy.getInstance()).buildControlFlow(controlFlowOwner);
+    allReturnStatements.addAll(ControlFlowUtils.collectReturns(flow, true));
 
     ArrayList<GrStatement> returnStatements = new ArrayList<GrStatement>();
     for (GrStatement returnStatement : allReturnStatements) {
@@ -132,8 +145,8 @@ public class GroovyExtractChooser {
     }
 
     // collect information about variables in selected block
-    FragmentVariableInfos
-      fragmentVariableInfos = ReachingDefinitionsCollector.obtainVariableFlowInformation(statement0, statements[statements.length - 1]);
+    FragmentVariableInfos fragmentVariableInfos =
+      ReachingDefinitionsCollector.obtainVariableFlowInformation(statement0, statements[statements.length - 1], controlFlowOwner, flow);
     VariableInfo[] inputInfos = fragmentVariableInfos.getInputVariableNames();
     VariableInfo[] outputInfos = fragmentVariableInfos.getOutputVariableNames();
     if (outputInfos.length == 1 && returnStatements.size() > 0) {
@@ -158,7 +171,7 @@ public class GroovyExtractChooser {
         GroovyRefactoringBundle.message("refactoring.is.not.supported.when.return.statement.interrupts.the.execution.flow"));
     }
 
-    return new InitialInfo(inputInfos, outputInfos, elements, statements, returnStatements);
+    return new InitialInfo(inputInfos, outputInfos, elements, statements, returnStatements, null, project);
   }
 
   private static boolean isLastStatementOfMethodOrClosure(GrStatement[] statements) {

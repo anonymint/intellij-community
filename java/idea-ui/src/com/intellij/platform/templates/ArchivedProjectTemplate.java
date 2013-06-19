@@ -16,13 +16,16 @@
 package com.intellij.platform.templates;
 
 import com.intellij.ide.util.projectWizard.ModuleBuilder;
+import com.intellij.ide.util.projectWizard.WizardInputField;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.platform.ProjectTemplate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.*;
 import java.io.IOException;
+import java.util.List;
 import java.util.zip.ZipInputStream;
 
 /**
@@ -33,7 +36,7 @@ public abstract class ArchivedProjectTemplate implements ProjectTemplate {
 
   protected final String myDisplayName;
 
-  public ArchivedProjectTemplate(String displayName) {
+  public ArchivedProjectTemplate(@NotNull String displayName) {
     myDisplayName = displayName;
   }
 
@@ -43,13 +46,19 @@ public abstract class ArchivedProjectTemplate implements ProjectTemplate {
     return myDisplayName;
   }
 
+  public Icon getIcon() {
+    return getModuleType().getIcon();
+  }
+
   protected abstract ModuleType getModuleType();
 
   @NotNull
   @Override
   public ModuleBuilder createModuleBuilder() {
-    return new TemplateModuleBuilder(this, getModuleType());
+    return new TemplateModuleBuilder(this, getModuleType(), getInputFields());
   }
+
+  public abstract List<WizardInputField> getInputFields();
 
   @Nullable
   @Override

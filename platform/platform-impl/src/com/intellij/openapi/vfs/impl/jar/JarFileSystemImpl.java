@@ -20,6 +20,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.components.ApplicationComponent;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
@@ -30,6 +31,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.ConcurrentHashSet;
 import com.intellij.util.messages.MessageBus;
+import gnu.trove.THashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -38,16 +40,19 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class JarFileSystemImpl extends JarFileSystem implements ApplicationComponent {
   private static final class JarFileSystemImplLock { }
-  private static final Object LOCK = new JarFileSystemImplLock();
+  private static final JarFileSystemImplLock LOCK = new JarFileSystemImplLock();
 
   private final Set<String> myNoCopyJarPaths =
-    SystemProperties.getBooleanProperty("idea.jars.nocopy", false) ? null : new ConcurrentHashSet<String>(FileUtil.PATH_HASHING_STRATEGY);
+    SystemProperties.getBooleanProperty("idea.jars.nocopy", !SystemInfo.isWindows) ? null : new ConcurrentHashSet<String>(FileUtil.PATH_HASHING_STRATEGY);
   private File myNoCopyJarDir;
-  private final Map<String, JarHandler> myHandlers = new HashMap<String, JarHandler>();
+  private final Map<String, JarHandler> myHandlers = new THashMap<String, JarHandler>(FileUtil.PATH_HASHING_STRATEGY);
   private String[] jarPathsCache;
 
   public JarFileSystemImpl(MessageBus bus) {
@@ -106,7 +111,7 @@ public class JarFileSystemImpl extends JarFileSystem implements ApplicationCompo
   }
 
   @Nullable
-  private VirtualFile markDirty(final String path) {
+  private VirtualFile markDirty(@NotNull String path) {
     final JarHandler handler;
     synchronized (LOCK) {
       handler = myHandlers.remove(path);
@@ -158,20 +163,20 @@ public class JarFileSystemImpl extends JarFileSystem implements ApplicationCompo
   }
 
   @Override
-  public JarFile getJarFile(VirtualFile entryVFile) throws IOException {
+  public JarFile getJarFile(@NotNull VirtualFile entryVFile) throws IOException {
     JarHandler handler = getHandler(entryVFile);
 
     return handler.getJar();
   }
 
   @Nullable
-  public File getMirroredFile(VirtualFile vFile) {
+  public File getMirroredFile(@NotNull VirtualFile vFile) {
     VirtualFile jar = getJarRootForLocalFile(vFile);
     final JarHandler handler = jar != null ? getHandler(jar) : null;
     return handler != null ? handler.getMirrorFile(new File(vFile.getPath())) : null;
   }
 
-  private JarHandler getHandler(final VirtualFile entryVFile) {
+  private JarHandler getHandler(@NotNull VirtualFile entryVFile) {
     final String jarRootPath = extractRootPath(entryVFile.getPath());
 
     JarHandler handler;
@@ -214,6 +219,7 @@ public class JarFileSystemImpl extends JarFileSystem implements ApplicationCompo
     return super.extractPresentableUrl(StringUtil.trimEnd(path, JAR_SEPARATOR));
   }
 
+  @NotNull
   @Override
   protected String extractRootPath(@NotNull final String path) {
     final int jarSeparatorIndex = path.indexOf(JAR_SEPARATOR);
@@ -252,10 +258,10 @@ public class JarFileSystemImpl extends JarFileSystem implements ApplicationCompo
   @NotNull
   public OutputStream getOutputStream(@NotNull final VirtualFile file, final Object requestor, final long modStamp, final long timeStamp)
     throws IOException {
-    return getHandler(file).getOutputStream(file, requestor, modStamp, timeStamp);
+    throw new IOException("Read-only: "+file.getPresentableUrl());
   }
 
-  public boolean isMakeCopyOfJar(File originalJar) {
+  public boolean isMakeCopyOfJar(@NotNull File originalJar) {
     if (myNoCopyJarPaths == null || myNoCopyJarPaths.contains(originalJar.getPath())) return false;
     if (myNoCopyJarDir != null && FileUtil.isAncestor(myNoCopyJarDir, originalJar, false)) return false;
     return true;
@@ -284,12 +290,12 @@ public class JarFileSystemImpl extends JarFileSystem implements ApplicationCompo
 
   @Override
   public void setTimeStamp(@NotNull final VirtualFile file, final long modStamp) throws IOException {
-    getHandler(file).setTimeStamp(file, modStamp);
+    throw new IOException("Read-only: "+file.getPresentableUrl());
   }
 
   @Override
   public void setWritable(@NotNull final VirtualFile file, final boolean writableFlag) throws IOException {
-    getHandler(file).setWritable(file, writableFlag);
+    throw new IOException("Read-only: "+file.getPresentableUrl());
   }
 
   @Override

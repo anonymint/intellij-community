@@ -38,6 +38,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.refactoring.rename.inplace.InplaceRefactoring;
@@ -76,7 +77,9 @@ public class CodeInsightTestUtil {
     fixture.configureByFile(before);
     List<IntentionAction> availableIntentions = fixture.getAvailableIntentions();
     final IntentionAction intentionAction = findIntentionByText(availableIntentions, action);
-    Assert.assertTrue("Action not found: " + action + " among " + availableIntentions, intentionAction != null);
+    if (intentionAction == null) {
+      Assert.fail("Action not found: " + action + " in place: " + fixture.getElementAtCaret() + " among " + availableIntentions);
+    }
     new WriteCommandAction(fixture.getProject()) {
       @Override
       protected void run(Result result) throws Throwable {
@@ -199,7 +202,7 @@ public class CodeInsightTestUtil {
   }
 
   public static void doActionTest(AnAction action, String file, CodeInsightTestFixture fixture) {
-    String extension = FileUtil.getExtension(file);
+    String extension = FileUtilRt.getExtension(file);
     String name = FileUtil.getNameWithoutExtension(file);
     fixture.configureByFile(file);
     fixture.testAction(action);

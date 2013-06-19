@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.patterns.ElementPattern;
 import com.intellij.psi.*;
 import com.intellij.psi.filters.getters.MembersGetter;
+import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.impl.source.tree.JavaElementType;
-import com.intellij.psi.impl.source.tree.java.PsiAnnotationImpl;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PropertyUtil;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -46,7 +46,8 @@ public class PreferByKindWeigher extends LookupElementWeigher {
                       psiElement(PsiVariable.class).withParent(PsiCatchSection.class)))));
   static final ElementPattern<PsiElement> IN_MULTI_CATCH_TYPE =
     or(psiElement().afterLeaf(psiElement().withText("|").withParent(PsiTypeElement.class).withSuperParent(2, PsiCatchSection.class)),
-       psiElement().afterLeaf(psiElement().withText("|").withParent(PsiTypeElement.class).withSuperParent(2, PsiParameter.class).withSuperParent(3, PsiCatchSection.class)));
+       psiElement().afterLeaf(psiElement().withText("|").withParent(PsiTypeElement.class).withSuperParent(2, PsiParameter.class)
+                                .withSuperParent(3, PsiCatchSection.class)));
   static final ElementPattern<PsiElement> INSIDE_METHOD_THROWS_CLAUSE =
     psiElement().afterLeaf(PsiKeyword.THROWS, ",").inside(psiElement(JavaElementType.THROWS_LIST));
   static final ElementPattern<PsiElement> IN_RESOURCE_TYPE =
@@ -55,15 +56,13 @@ public class PreferByKindWeigher extends LookupElementWeigher {
         withParent(or(psiElement(PsiResourceVariable.class), psiElement(PsiResourceList.class)))));
   private final CompletionType myCompletionType;
   private final PsiElement myPosition;
-  private final boolean myLocal;
   private final Set<PsiField> myNonInitializedFields;
   @NotNull private final Condition<PsiClass> myRequiredSuper;
 
-  public PreferByKindWeigher(CompletionType completionType, final PsiElement position, boolean local) {
-    super("kind" + (local ? "Local" : "Global"));
+  public PreferByKindWeigher(CompletionType completionType, final PsiElement position) {
+    super("kind");
     myCompletionType = completionType;
     myPosition = position;
-    myLocal = local;
     myNonInitializedFields = JavaCompletionProcessor.getNonInitializedFields(position);
     myRequiredSuper = createSuitabilityCondition(position);
   }
@@ -93,27 +92,15 @@ public class PreferByKindWeigher extends LookupElementWeigher {
     if (psiElement().withParents(PsiJavaCodeReferenceElement.class, PsiAnnotation.class).accepts(position)) {
       final PsiAnnotation annotation = PsiTreeUtil.getParentOfType(position, PsiAnnotation.class);
       assert annotation != null;
-      PsiAnnotationOwner owner = annotation.getOwner();
-      if (owner instanceof PsiModifierList || owner instanceof PsiTypeElement || owner instanceof PsiTypeParameter) {
-        PsiElement member = (PsiElement)owner;
-        if (member instanceof PsiModifierList) {
-          member = member.getParent();
+      final PsiAnnotation.TargetType[] targets = PsiImplUtil.getTargetsForLocation(annotation.getOwner());
+      return new Condition<PsiClass>() {
+        @Override
+        public boolean value(PsiClass psiClass) {
+          return psiClass.isAnnotationType() && PsiImplUtil.findApplicableTarget(psiClass, targets) != null;
         }
-        if (member instanceof PsiTypeElement && member.getParent() instanceof PsiMethod) {
-          member = member.getParent();
-        }
-        final String[] elementTypeFields = PsiAnnotationImpl.getApplicableElementTypeFields(member);
-        return new Condition<PsiClass>() {
-          @Override
-          public boolean value(PsiClass psiClass) {
-            if (!psiClass.isAnnotationType()) {
-              return false;
-            }
-            return PsiAnnotationImpl.isAnnotationApplicable(false, psiClass, elementTypeFields, position.getResolveScope());
-          }
-        };
-      }
+      };
     }
+
     //noinspection unchecked
     return Condition.FALSE;
   }
@@ -155,10 +142,6 @@ public class PreferByKindWeigher extends LookupElementWeigher {
       }
     }
 
-    if (myLocal) {
-      return MyResult.normal;
-    }
-
     if (object instanceof String && item.getUserData(JavaCompletionUtil.SUPER_METHOD_PARAMETERS) == Boolean.TRUE) {
       return MyResult.superMethodParameters;
     }
@@ -184,7 +167,7 @@ public class PreferByKindWeigher extends LookupElementWeigher {
           return MyResult.qualifiedWithGetter;
         }
       }
-      
+
       return MyResult.normal;
     }
 

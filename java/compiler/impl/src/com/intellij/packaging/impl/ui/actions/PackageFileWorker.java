@@ -28,10 +28,12 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Trinity;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.elements.ArtifactRootElement;
@@ -64,8 +66,17 @@ public class PackageFileWorker {
     myRelativeOutputPath = relativeOutputPath;
   }
 
-  public static void startPackagingFiles(final Project project, final List<VirtualFile> files,
-                                         final Artifact[] artifacts, final Runnable onFinished) {
+  public static void startPackagingFiles(Project project, List<VirtualFile> files, Artifact[] artifacts, final @NotNull Runnable onFinishedInAwt) {
+    startPackagingFiles(project, files, artifacts).doWhenProcessed(new Runnable() {
+      @Override
+      public void run() {
+        ApplicationManager.getApplication().invokeLater(onFinishedInAwt);
+      }
+    });
+  }
+
+  public static ActionCallback startPackagingFiles(final Project project, final List<VirtualFile> files, final Artifact[] artifacts) {
+    final ActionCallback callback = new ActionCallback();
     ProgressManager.getInstance().run(new Task.Backgroundable(project, "Packaging Files") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
@@ -83,19 +94,23 @@ public class PackageFileWorker {
                 }
               }
             }.execute();
+            callback.setDone();
           }
         }
         finally {
-          ApplicationManager.getApplication().invokeLater(onFinished);
+          if (!callback.isDone()) {
+            callback.setRejected();
+          }
         }
       }
     });
+    return callback;
   }
 
   public static void packageFile(@NotNull VirtualFile file, @NotNull Project project, final Artifact[] artifacts) throws IOException {
     LOG.debug("Start packaging file: " + file.getPath());
     final Collection<Trinity<Artifact, PackagingElementPath, String>> items = ArtifactUtil.findContainingArtifactsWithOutputPaths(file, project, artifacts);
-    File ioFile = VfsUtil.virtualToIoFile(file);
+    File ioFile = VfsUtilCore.virtualToIoFile(file);
     for (Trinity<Artifact, PackagingElementPath, String> item : items) {
       final Artifact artifact = item.getFirst();
       final String outputPath = artifact.getOutputPath();
@@ -119,8 +134,14 @@ public class PackageFileWorker {
   private void copyFile(String outputPath, List<CompositePackagingElement<?>> parents) throws IOException {
     if (parents.isEmpty()) {
       final String fullOutputPath = DeploymentUtil.appendToPath(outputPath, myRelativeOutputPath);
-      LOG.debug("  copying to " + fullOutputPath);
-      FileUtil.copy(myFile, new File(FileUtil.toSystemDependentName(fullOutputPath)));
+      File target = new File(fullOutputPath);
+      if (FileUtil.filesEqual(myFile, target)) {
+        LOG.debug("  skipping copying file to itself");
+      }
+      else {
+        LOG.debug("  copying to " + fullOutputPath);
+        FileUtil.copy(myFile, target);
+      }
       return;
     }
 
@@ -136,7 +157,7 @@ public class PackageFileWorker {
   }
 
   private void packFile(String archivePath, String pathInArchive, List<CompositePackagingElement<?>> parents) throws IOException {
-    final File archiveFile = new File(FileUtil.toSystemDependentName(archivePath));
+    final File archiveFile = new File(archivePath);
     if (parents.isEmpty()) {
       LOG.debug("  adding to archive " + archivePath);
       JBZipFile file = getOrCreateZipFile(archiveFile);
@@ -159,7 +180,8 @@ public class PackageFileWorker {
       try {
         final JBZipEntry entry = zipFile.getOrCreateEntry(nextPathInArchive);
         LOG.debug("  extracting to temp file: " + nextPathInArchive + " from " + archivePath);
-        final File tempFile = FileUtil.createTempFile("packageFile" + FileUtil.sanitizeFileName(nextPathInArchive), FileUtil.getExtension(PathUtil.getFileName(nextPathInArchive)));
+        final File tempFile = FileUtil.createTempFile("packageFile" + FileUtil.sanitizeFileName(nextPathInArchive),
+                                                      FileUtilRt.getExtension(PathUtil.getFileName(nextPathInArchive)));
         if (entry.getSize() != -1) {
           FileUtil.writeToFile(tempFile, entry.getData());
         }

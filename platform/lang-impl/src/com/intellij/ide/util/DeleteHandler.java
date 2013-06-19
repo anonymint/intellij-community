@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.ex.MessagesEx;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.WritingAccessProvider;
 import com.intellij.psi.PsiDirectory;
@@ -61,6 +62,7 @@ public class DeleteHandler {
   }
 
   public static class DefaultDeleteProvider implements DeleteProvider {
+    @Override
     public boolean canDeleteElement(@NotNull DataContext dataContext) {
       if (PlatformDataKeys.PROJECT.getData(dataContext) == null) {
         return false;
@@ -87,6 +89,7 @@ public class DeleteHandler {
       return elements;
     }
 
+    @Override
     public void deleteElement(@NotNull DataContext dataContext) {
       PsiElement[] elements = getPsiElements(dataContext);
       if (elements == null) return;
@@ -119,19 +122,23 @@ public class DeleteHandler {
 
     final boolean dumb = DumbService.getInstance(project).isDumb();
     if (safeDeleteApplicable && !dumb) {
+      final Ref<Boolean> exit = Ref.create(false);
       DeleteDialog dialog = new DeleteDialog(project, elements, new DeleteDialog.Callback() {
+        @Override
         public void run(final DeleteDialog dialog) {
           if (!CommonRefactoringUtil.checkReadOnlyStatusRecursively(project, Arrays.asList(elements), true)) return;
           SafeDeleteProcessor.createInstance(project, new Runnable() {
+            @Override
             public void run() {
-              dialog.close(DialogWrapper.CANCEL_EXIT_CODE);
+              exit.set(true);
+              dialog.close(DialogWrapper.OK_EXIT_CODE);
             }
           }, elements, dialog.isSearchInComments(), dialog.isSearchInNonJava(), true).run();
         }
       });
       if (needConfirmation) {
         dialog.show();
-        if (!dialog.isOK()) return;
+        if (!dialog.isOK() || exit.get()) return;
       }
     }
     else {
@@ -171,6 +178,7 @@ public class DeleteHandler {
     }
 
     CommandProcessor.getInstance().executeCommand(project, new Runnable() {
+      @Override
       public void run() {
         if (!CommonRefactoringUtil.checkReadOnlyStatusRecursively(project, Arrays.asList(elements), false)) {
           return;
@@ -230,12 +238,14 @@ public class DeleteHandler {
           }
 
           ApplicationManager.getApplication().runWriteAction(new Runnable() {
+            @Override
             public void run() {
               try {
                 elementToDelete.delete();
               }
               catch (final IncorrectOperationException ex) {
                 ApplicationManager.getApplication().invokeLater(new Runnable() {
+                  @Override
                   public void run() {
                     Messages.showMessageDialog(project, ex.getMessage(), CommonBundle.getErrorTitle(), Messages.getErrorIcon());
                   }
@@ -251,8 +261,10 @@ public class DeleteHandler {
   private static boolean clearReadOnlyFlag(final VirtualFile virtualFile, final Project project) {
     final boolean[] success = new boolean[1];
     CommandProcessor.getInstance().executeCommand(project, new Runnable() {
+      @Override
       public void run() {
         Runnable action = new Runnable() {
+          @Override
           public void run() {
             try {
               ReadOnlyAttributeUtil.setReadOnlyAttribute(virtualFile, false);

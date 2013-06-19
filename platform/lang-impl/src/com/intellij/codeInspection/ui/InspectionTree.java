@@ -59,7 +59,6 @@ import java.util.*;
 public class InspectionTree extends Tree {
   private final HashSet<Object> myExpandedUserObjects;
   private SelectionPath mySelectionPath;
-  private static final RefEntity[] EMPTY_ELEMENTS_ARRAY = new RefEntity[0];
   private static final ProblemDescriptor[] EMPTY_DESCRIPTORS = new ProblemDescriptor[0];
 
   public InspectionTree(final Project project) {
@@ -75,12 +74,14 @@ public class InspectionTree extends Tree {
 
     TreeUtil.installActions(this);
     new TreeSpeedSearch(this, new Convertor<TreePath, String>() {
+      @Override
       public String convert(TreePath o) {
         return InspectionsConfigTreeComparator.getDisplayTextToSort(o.getLastPathComponent().toString());
       }
     });
 
     addTreeSelectionListener(new TreeSelectionListener() {
+      @Override
       public void valueChanged(TreeSelectionEvent e) {
         TreePath newSelection = e.getNewLeadSelectionPath();
         if (newSelection != null) {
@@ -128,7 +129,7 @@ public class InspectionTree extends Tree {
     TreePath[] selectionPaths = getSelectionPaths();
     if (selectionPaths != null) {
       final InspectionTool selectedTool = getSelectedTool();
-      if (selectedTool == null) return EMPTY_ELEMENTS_ARRAY;
+      if (selectedTool == null) return RefEntity.EMPTY_ELEMENTS_ARRAY;
 
       List<RefEntity> result = new ArrayList<RefEntity>();
       for (TreePath selectionPath : selectionPaths) {
@@ -137,7 +138,7 @@ public class InspectionTree extends Tree {
       }
       return result.toArray(new RefEntity[result.size()]);
     }
-    return EMPTY_ELEMENTS_ARRAY;
+    return RefEntity.EMPTY_ELEMENTS_ARRAY;
   }
 
   private static void addElementsInNode(InspectionTreeNode node, List<RefEntity> out) {
@@ -158,7 +159,7 @@ public class InspectionTree extends Tree {
     while (children.hasMoreElements()) {
       InspectionTreeNode child = (InspectionTreeNode)children.nextElement();
       addElementsInNode(child, out);
-    }    
+    }
   }
 
   public CommonProblemDescriptor[] getSelectedDescriptors() {
@@ -187,6 +188,7 @@ public class InspectionTree extends Tree {
   }
 
   private class ExpandListener implements TreeWillExpandListener {
+    @Override
     public void treeWillExpand(TreeExpansionEvent event) throws ExpandVetoException {
       final InspectionTreeNode node = (InspectionTreeNode)event.getPath().getLastPathComponent();
       final Object userObject = node.getUserObject();
@@ -199,6 +201,7 @@ public class InspectionTree extends Tree {
       // Smart expand
       if (node.getChildCount() == 1) {
         ApplicationManager.getApplication().invokeLater(new Runnable() {
+          @Override
           public void run() {
             expandPath(new TreePath(node.getPath()));
           }
@@ -206,6 +209,7 @@ public class InspectionTree extends Tree {
       }
     }
 
+    @Override
     public void treeWillCollapse(TreeExpansionEvent event) throws ExpandVetoException {
       InspectionTreeNode node = (InspectionTreeNode)event.getPath().getLastPathComponent();
       myExpandedUserObjects.remove(node.getUserObject());
@@ -240,6 +244,7 @@ public class InspectionTree extends Tree {
         myManager = (InspectionManagerEx)InspectionManager.getInstance(myProject);
       }*/
 
+    @Override
     public void customizeCellRenderer(JTree tree,
                                       Object value,
                                       boolean selected,

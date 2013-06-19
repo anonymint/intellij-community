@@ -17,7 +17,7 @@
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
-import com.intellij.codeInsight.daemon.impl.analysis.FileHighlighingSetting;
+import com.intellij.codeInsight.daemon.impl.analysis.FileHighlightingSetting;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightLevelUtil;
 import com.intellij.lang.Language;
 import com.intellij.openapi.Disposable;
@@ -36,7 +36,6 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.profile.codeInspection.ui.ErrorsConfigurable;
 import com.intellij.psi.FileViewProvider;
 import com.intellij.psi.PsiElement;
@@ -272,7 +271,7 @@ public class HectorComponent extends JPanel {
         }
       }
       forceDaemonRestart();
-      InspectionProjectProfileManager.getInstance(myFile.getProject()).updateStatusBar();
+      DaemonListeners.getInstance(myFile.getProject()).updateStatusBar();
     }
   }
 
@@ -284,13 +283,13 @@ public class HectorComponent extends JPanel {
       assert root != null : "No root in " + viewProvider + " for " + language;
       int value = slider.getValue();
       if (value == 1) {
-        HighlightLevelUtil.forceRootHighlighting(root, FileHighlighingSetting.SKIP_HIGHLIGHTING);
+        HighlightLevelUtil.forceRootHighlighting(root, FileHighlightingSetting.SKIP_HIGHLIGHTING);
       }
       else if (value == 2) {
-        HighlightLevelUtil.forceRootHighlighting(root, FileHighlighingSetting.SKIP_INSPECTION);
+        HighlightLevelUtil.forceRootHighlighting(root, FileHighlightingSetting.SKIP_INSPECTION);
       }
       else {
-        HighlightLevelUtil.forceRootHighlighting(root, FileHighlighingSetting.FORCE_HIGHLIGHTING);
+        HighlightLevelUtil.forceRootHighlighting(root, FileHighlightingSetting.FORCE_HIGHLIGHTING);
       }
     }
     final DaemonCodeAnalyzer analyzer = DaemonCodeAnalyzer.getInstance(myFile.getProject());

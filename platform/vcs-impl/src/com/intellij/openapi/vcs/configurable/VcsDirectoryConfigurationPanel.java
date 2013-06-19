@@ -28,12 +28,16 @@ import com.intellij.openapi.vcs.impl.VcsDescriptor;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.ui.components.labels.LinkListener;
 import com.intellij.ui.table.TableView;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.*;
+import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.CompoundBorder;
@@ -56,13 +60,13 @@ import static com.intellij.util.ui.UIUtil.DEFAULT_VGAP;
 /**
  * @author yole
  */
-public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements Configurable {
+public class VcsDirectoryConfigurationPanel extends JPanel implements Configurable {
   private final Project myProject;
   private final String myProjectMessage;
   private final ProjectLevelVcsManager myVcsManager;
   private final TableView<VcsDirectoryMapping> myDirectoryMappingTable;
   private final ComboboxWithBrowseButton myVcsComboBox = new ComboboxWithBrowseButton();
-  private final List<ModuleVcsListener> myListeners = new ArrayList<ModuleVcsListener>();
+  private final List<ModuleVcsListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private final MyDirectoryRenderer myDirectoryRenderer;
   private final ColumnInfo<VcsDirectoryMapping, VcsDirectoryMapping> DIRECTORY;
@@ -75,7 +79,9 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
   private final @NotNull Map<String, VcsRootChecker> myCheckers;
   private JCheckBox myShowVcsRootErrorNotification;
   private JCheckBox myShowChangedRecursively;
-  private VcsLimitHistoryConfigurable myLimitHistory;
+  private final VcsLimitHistoryConfigurable myLimitHistory;
+  private final VcsUpdateInfoScopeFilterConfigurable myScopeFilterConfig;
+  private VcsCommitMessageMarginConfigurable myCommitMessageMarginConfigurable;
 
   private class MyDirectoryRenderer extends ColoredTableCellRenderer {
     private final Project myProject;
@@ -176,13 +182,31 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
           }
         };
       }
+
+      @Nullable
+      @Override
+      public String getMaxStringValue() {
+        String maxString = null;
+        for (String name : myAllVcss.keySet()) {
+          if (maxString == null || maxString.length() < name.length()) {
+            maxString = name;
+          }
+        }
+        return maxString;
+      }
+
+      @Override
+      public int getAdditionalWidth() {
+        return DEFAULT_HGAP;
+      }
     };
 
   public VcsDirectoryConfigurationPanel(final Project project) {
     myProject = project;
     myVcsConfiguration = getInstance(myProject);
-    myProjectMessage = "<html>" + StringUtil.escapeXml(VcsDirectoryMapping.PROJECT_CONSTANT) + " - " +
-                       DefaultVcsRootPolicy.getInstance(myProject).getProjectConfigurationMessage(myProject).replace('\n', ' ') + "</html>";
+    myProjectMessage = XmlStringUtil.wrapInHtml(StringUtil.escapeXml(VcsDirectoryMapping.PROJECT_CONSTANT) + " - " +
+                                                DefaultVcsRootPolicy.getInstance(myProject).getProjectConfigurationMessage(myProject)
+                                                  .replace('\n', ' '));
     myIsDisabled = myProject.isDefault();
     myVcsManager = ProjectLevelVcsManager.getInstance(project);
     final VcsDescriptor[] vcsDescriptors = myVcsManager.getAllVcss();
@@ -193,11 +217,15 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
 
     myDirectoryMappingTable = new TableView<VcsDirectoryMapping>();
     myBaseRevisionTexts = new JCheckBox("Store on shelf base revision texts for files under DVCS");
+    myLimitHistory = new VcsLimitHistoryConfigurable(myProject);
+    myScopeFilterConfig = new VcsUpdateInfoScopeFilterConfigurable(myProject, myVcsConfiguration);
 
     myCheckers = new HashMap<String, VcsRootChecker>();
     updateRootCheckers();
 
-    initPanel();
+    setLayout(new BorderLayout());
+    add(createMainComponent());
+
     myDirectoryRenderer = new MyDirectoryRenderer(myProject);
     DIRECTORY = new ColumnInfo<VcsDirectoryMapping, VcsDirectoryMapping>(VcsBundle.message("column.info.configure.vcses.directory")) {
       public VcsDirectoryMapping valueOf(final VcsDirectoryMapping mapping) {
@@ -258,8 +286,10 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
 
     myRecentlyChangedConfigurable.reset();
     myLimitHistory.reset();
+    myScopeFilterConfig.reset();
     myBaseRevisionTexts.setSelected(myVcsConfiguration.INCLUDE_TEXT_INTO_SHELF);
     myShowChangedRecursively.setSelected(myVcsConfiguration.SHOW_DIRTY_RECURSIVELY);
+    myCommitMessageMarginConfigurable.reset();
   }
 
   public static DefaultComboBoxModel buildVcsWrappersModel(final Project project) {
@@ -268,14 +298,6 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
     result[0] = VcsDescriptor.createFictive();
     System.arraycopy(vcsDescriptors, 0, result, 1, vcsDescriptors.length);
     return new DefaultComboBoxModel(result);
-  }
-
-  protected String getLabelText() {
-    return null;
-  }
-
-  protected JButton[] createButtons() {
-    return new JButton[]{};
   }
 
   private void addMapping() {
@@ -331,18 +353,18 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
     GridBag gb = new GridBag()
       .setDefaultInsets(new Insets(0, 0, DEFAULT_VGAP, DEFAULT_HGAP))
       .setDefaultWeightX(1)
-      .setDefaultWeightY(0)
-      .setDefaultFill(GridBagConstraints.BOTH);
+      .setDefaultFill(GridBagConstraints.HORIZONTAL);
 
-    panel.add(createMappingsTable(), gb.nextLine().next().fillCell().weighty(1));
-    panel.add(createProjectMappingDescription(), gb.nextLine().next().fillCellHorizontally());
-    myLimitHistory = new VcsLimitHistoryConfigurable(myProject);
-    panel.add(myLimitHistory.createComponent(), gb.nextLine().next().fillCellHorizontally());
-    panel.add(createErrorList(), gb.nextLine().next().fillCellHorizontally());
-    panel.add(createShowRecursivelyDirtyOption(), gb.nextLine().next().fillCellHorizontally());
-    panel.add(createStoreBaseRevisionOption(), gb.nextLine().next().fillCellHorizontally());
-    panel.add(createShowChangedOption(), gb.nextLine().next().fillCellHorizontally());
-    panel.add(createShowVcsRootErrorNotificationOption(), gb.nextLine().next().fillCellHorizontally());
+    panel.add(createMappingsTable(), gb.nextLine().next().fillCell().weighty(1.0));
+    panel.add(createProjectMappingDescription(), gb.nextLine().next());
+    panel.add(createErrorList(), gb.nextLine().next());
+    panel.add(myLimitHistory.createComponent(), gb.nextLine().next());
+    panel.add(createShowRecursivelyDirtyOption(), gb.nextLine().next());
+    panel.add(createStoreBaseRevisionOption(), gb.nextLine().next());
+    panel.add(createShowChangedOption(), gb.nextLine().next());
+    panel.add(createShowVcsRootErrorNotificationOption(), gb.nextLine().next());
+    panel.add(myScopeFilterConfig.createComponent(), gb.nextLine().next());
+    panel.add(createUseCommitMessageRightMargin(), gb.nextLine().next().fillCellHorizontally());
 
     return panel;
   }
@@ -390,7 +412,10 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
   }
 
   private JComponent createErrorList() {
-    Box box = Box.createVerticalBox();
+    final int DEFAULT_HEIGHT = 200;
+    final JComponent errorPanel = Box.createVerticalBox();
+    final JBScrollPane pane = new JBScrollPane(errorPanel);
+
     for (Map.Entry<String, VcsRootChecker> entry : myCheckers.entrySet()) {
       VcsRootChecker checker = entry.getValue();
       for (final String root : checker.getUnregisteredRoots()) {
@@ -401,13 +426,28 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
           @Override
           public void run() {
             addMapping(new VcsDirectoryMapping(root, vcs));
-            vcsRootErrorLabel.setVisible(false);
+            errorPanel.remove(vcsRootErrorLabel);
+            if (errorPanel.getComponentCount() == 0) {
+              pane.setVisible(false);
+            }
+            pane.setMinimumSize(new Dimension(-1, calcMinHeight(errorPanel, DEFAULT_HEIGHT)));
+            validate();
           }
         });
-        box.add(vcsRootErrorLabel);
+        errorPanel.add(vcsRootErrorLabel);
       }
     }
-    return box;
+    if (errorPanel.getComponentCount() == 0) {
+      pane.setVisible(false);
+    }
+    pane.setMinimumSize(new Dimension(-1, calcMinHeight(errorPanel, DEFAULT_HEIGHT)));
+    pane.setMaximumSize(new Dimension(-1, DEFAULT_HEIGHT));
+    return pane;
+  }
+
+  private static int calcMinHeight(@NotNull JComponent errorPanel, int defaultHeight) {
+    int height = errorPanel.getPreferredSize().height;
+    return height > defaultHeight ? defaultHeight : height;
   }
 
   private JComponent createProjectMappingDescription() {
@@ -444,6 +484,11 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
     return myShowVcsRootErrorNotification;
   }
 
+  private JComponent createUseCommitMessageRightMargin() {
+    myCommitMessageMarginConfigurable = new VcsCommitMessageMarginConfigurable(myProject, myVcsConfiguration);
+    return myCommitMessageMarginConfigurable.createComponent();
+  }
+
   private JComponent createShowRecursivelyDirtyOption() {
     myShowChangedRecursively = new JCheckBox("Show directories with changed descendants", myVcsConfiguration.SHOW_DIRTY_RECURSIVELY);
     return myShowChangedRecursively;
@@ -457,20 +502,26 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
     myVcsManager.setDirectoryMappings(myModel.getItems());
     myRecentlyChangedConfigurable.apply();
     myLimitHistory.apply();
+    myScopeFilterConfig.apply();
     myVcsConfiguration.INCLUDE_TEXT_INTO_SHELF = myBaseRevisionTexts.isSelected();
     myVcsConfiguration.SHOW_VCS_ERROR_NOTIFICATIONS = myShowVcsRootErrorNotification.isSelected();
     myVcsConfiguration.SHOW_DIRTY_RECURSIVELY = myShowChangedRecursively.isSelected();
+    myCommitMessageMarginConfigurable.apply();
     initializeModel();
   }
 
   public boolean isModified() {
     if (myRecentlyChangedConfigurable.isModified()) return true;
     if (myLimitHistory.isModified()) return true;
+    if (myScopeFilterConfig.isModified()) return true;
     if (myVcsConfiguration.INCLUDE_TEXT_INTO_SHELF != myBaseRevisionTexts.isSelected()) return true;
     if (myVcsConfiguration.SHOW_VCS_ERROR_NOTIFICATIONS != myShowVcsRootErrorNotification.isSelected()) {
       return true;
     }
     if (myVcsConfiguration.SHOW_DIRTY_RECURSIVELY != myShowChangedRecursively.isSelected()) {
+      return true;
+    }
+    if (myCommitMessageMarginConfigurable.isModified()) {
       return true;
     }
     return !myModel.getItems().equals(myVcsManager.getDirectoryMappings());
@@ -517,6 +568,8 @@ public class VcsDirectoryConfigurationPanel extends PanelWithButtons implements 
   }
 
   public void disposeUIResources() {
+    myLimitHistory.disposeUIResources();
+    myScopeFilterConfig.disposeUIResources();
   }
 
   private static class VcsRootErrorLabel extends JPanel {

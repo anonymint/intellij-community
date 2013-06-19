@@ -41,7 +41,7 @@ public abstract class ProcessHandler extends UserDataHolderBase {
    */
   public static final Key<Boolean> SILENTLY_DESTROY_ON_CLOSE = Key.create("SILENTLY_DESTROY_ON_CLOSE");
 
-  private final List<ProcessListener> myListeners = ContainerUtil.createEmptyCOWList();
+  private final List<ProcessListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private static final int STATE_INITIAL = 0;
   private static final int STATE_RUNNING = 1;
@@ -149,6 +149,7 @@ public abstract class ProcessHandler extends UserDataHolderBase {
 
   private void notifyTerminated(final int exitCode, final boolean willBeDestroyed) {
     myAfterStartNotifiedRunner.execute(new Runnable() {
+      @Override
       public void run() {
         LOG.assertTrue(isStartNotified(), "Start notify is not called");
 
@@ -157,7 +158,7 @@ public abstract class ProcessHandler extends UserDataHolderBase {
             fireProcessWillTerminate(willBeDestroyed);
           }
           catch (Throwable e) {
-            if (! isCanceledException(e)) {
+            if (!isCanceledException(e)) {
               LOG.error(e);
             }
           }
@@ -166,8 +167,9 @@ public abstract class ProcessHandler extends UserDataHolderBase {
         if (myState.compareAndSet(STATE_TERMINATING, STATE_TERMINATED)) {
           try {
             myEventMulticaster.processTerminated(new ProcessEvent(ProcessHandler.this, exitCode));
-          } catch (Throwable e) {
-            if (! isCanceledException(e)) {
+          }
+          catch (Throwable e) {
+            if (!isCanceledException(e)) {
               LOG.error(e);
             }
           }
@@ -207,8 +209,9 @@ public abstract class ProcessHandler extends UserDataHolderBase {
         for (ProcessListener listener : myListeners) {
           try {
             method.invoke(listener, params);
-          } catch (Throwable e) {
-            if (! isCanceledException(e)) {
+          }
+          catch (Throwable e) {
+            if (!isCanceledException(e)) {
               LOG.error(e);
             }
           }

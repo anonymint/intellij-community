@@ -16,16 +16,17 @@
 package com.intellij.psi.codeStyle.arrangement;
 
 import com.intellij.psi.codeStyle.arrangement.group.ArrangementGroupingRule;
-import com.intellij.psi.codeStyle.arrangement.group.ArrangementGroupingType;
-import com.intellij.psi.codeStyle.arrangement.match.ArrangementEntryType;
 import com.intellij.psi.codeStyle.arrangement.match.StdArrangementEntryMatcher;
 import com.intellij.psi.codeStyle.arrangement.match.StdArrangementMatchRule;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementAtomMatchCondition;
-import com.intellij.psi.codeStyle.arrangement.model.ArrangementSettingType;
-import com.intellij.psi.codeStyle.arrangement.order.ArrangementEntryOrderType;
+import com.intellij.psi.codeStyle.arrangement.std.StdArrangementSettings;
+import com.intellij.psi.codeStyle.arrangement.std.StdRulePriorityAwareSettings;
 import org.jdom.Element;
 import org.junit.Test;
 
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.FIELD;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Grouping.OVERRIDDEN_METHODS;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Order.BY_NAME;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -36,10 +37,10 @@ public class ArrangementSettingsSerializationTest {
 
   @Test
   public void all() {
-    StdArrangementSettings settings = new StdArrangementSettings();
-    settings.addGrouping(new ArrangementGroupingRule(ArrangementGroupingType.OVERRIDDEN_METHODS, ArrangementEntryOrderType.BY_NAME));
-    ArrangementAtomMatchCondition condition = new ArrangementAtomMatchCondition(ArrangementSettingType.TYPE, ArrangementEntryType.FIELD);
-    settings.addRule(new StdArrangementMatchRule(new StdArrangementEntryMatcher(condition), ArrangementEntryOrderType.BY_NAME));
+    StdArrangementSettings settings = new StdRulePriorityAwareSettings();
+    settings.addGrouping(new ArrangementGroupingRule(OVERRIDDEN_METHODS, BY_NAME));
+    ArrangementAtomMatchCondition condition = new ArrangementAtomMatchCondition(FIELD);
+    settings.addRule(new StdArrangementMatchRule(new StdArrangementEntryMatcher(condition), BY_NAME));
 
     Element holder = new Element("holder");
     ArrangementSettingsSerializer instance = DefaultArrangementSettingsSerializer.INSTANCE;

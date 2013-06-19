@@ -149,12 +149,17 @@ public class XDebuggerTestUtil {
 
   @NotNull
   public static XValue findVar(Collection<XValue> vars, String name) {
+    StringBuilder names = new StringBuilder();
     for (XValue each : vars) {
       if (each instanceof XNamedValue) {
-        if (((XNamedValue)each).getName().equals(name)) return each;
+        String eachName = ((XNamedValue)each).getName();
+        if (eachName.equals(name)) return each;
+
+        if (names.length() > 0) names.append(", ");
+        names.append(eachName);
       }
     }
-    throw new AssertionError("var '" + name + "' not found");
+    throw new AssertionError("var '" + name + "' not found among " + names);
   }
 
   public static XTestValueNode computePresentation(@NotNull XValue value) throws InterruptedException {
@@ -191,20 +196,20 @@ public class XDebuggerTestUtil {
 
   public static void assertVariableValueMatches(@NotNull Collection<XValue> vars,
                                                 @Nullable String name,
-                                                @Nullable String valuePattern) throws InterruptedException {
+                                                @Nullable @Language("RegExp") String valuePattern) throws InterruptedException {
     assertVariableValueMatches(findVar(vars, name), name, valuePattern);
   }
 
   public static void assertVariableValueMatches(@NotNull XValue var,
                                                 @Nullable String name,
-                                                @Nullable String valuePattern) throws InterruptedException {
+                                                @Nullable @Language("RegExp") String valuePattern) throws InterruptedException {
     assertVariableValueMatches(var, name, null, valuePattern);
   }
 
   public static void assertVariableValueMatches(@NotNull XValue var,
                                                 @Nullable String name,
                                                 @Nullable String type,
-                                                @Nullable String valuePattern) throws InterruptedException {
+                                                @Nullable @Language("RegExp") String valuePattern) throws InterruptedException {
     XTestValueNode node = computePresentation(var);
     if (name != null) Assert.assertEquals(name, node.myName);
     if (type != null) Assert.assertEquals(type, node.myType);
@@ -403,6 +408,21 @@ public class XDebuggerTestUtil {
         Disposer.dispose(session.getConsoleView());
       }
     }.execute();
+  }
+
+  public static void assertVariable(Pair<XValue, String> varAndErrorMessage,
+                                    @Nullable String name,
+                                    @Nullable String type,
+                                    @Nullable String value,
+                                    @Nullable Boolean hasChildren) throws InterruptedException {
+    Assert.assertNull(varAndErrorMessage.second);
+    assertVariable(varAndErrorMessage.first, name, type, value, hasChildren);
+  }
+
+  public static String assertVariableExpression(XValue desc, String expectedExpression) {
+    String expression = desc.getEvaluationExpression();
+    Assert.assertEquals(expectedExpression, expression);
+    return expression;
   }
 
   public static class XTestStackFrameContainer extends XTestContainer<XStackFrame> implements XExecutionStack.XStackFrameContainer {

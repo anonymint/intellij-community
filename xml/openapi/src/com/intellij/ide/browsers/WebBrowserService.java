@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,6 @@ import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * @author nik
- */
 public abstract class WebBrowserService {
   public static WebBrowserService getInstance() {
     return ServiceManager.getService(WebBrowserService.class);
@@ -31,9 +28,8 @@ public abstract class WebBrowserService {
   public abstract boolean canOpenInBrowser(@NotNull PsiElement psiElement);
 
   @Nullable
-  public abstract String getUrlToOpen(@NotNull PsiElement psiElement);
+  public abstract Url getUrlToOpen(@NotNull PsiElement psiElement);
 
   @Nullable
-  public abstract String getUrlToOpen(@NotNull PsiElement psiElement, boolean preferLocalUrl) throws WebBrowserUrlProvider.BrowserException;
-
+  public abstract Url getUrlToOpen(@NotNull PsiElement psiElement, boolean preferLocalUrl) throws WebBrowserUrlProvider.BrowserException;
 }

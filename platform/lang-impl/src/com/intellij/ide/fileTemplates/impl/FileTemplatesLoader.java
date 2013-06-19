@@ -23,6 +23,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.util.lang.UrlClassLoader;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -65,7 +66,7 @@ public class FileTemplatesLoader {
   public FileTemplatesLoader(@NotNull FileTypeManagerEx typeManager) {
     myTypeManager = typeManager;
     myDefaultTemplatesManager = new FTManager(FileTemplateManager.DEFAULT_TEMPLATES_CATEGORY, ROOT_DIR);
-    myInternalTemplatesManager = new FTManager(FileTemplateManager.INTERNAL_TEMPLATES_CATEGORY, INTERNAL_DIR);
+    myInternalTemplatesManager = new FTManager(FileTemplateManager.INTERNAL_TEMPLATES_CATEGORY, INTERNAL_DIR, true);
     myPatternsManager = new FTManager(FileTemplateManager.INCLUDES_TEMPLATES_CATEGORY, INCLUDES_DIR);
     myCodeTemplatesManager = new FTManager(FileTemplateManager.CODE_TEMPLATES_CATEGORY, CODETEMPLATES_DIR);
     myJ2eeTemplatesManager = new FTManager(FileTemplateManager.J2EE_TEMPLATES_CATEGORY, J2EE_TEMPLATES_DIR);
@@ -162,9 +163,9 @@ public class FileTemplatesLoader {
             final String filename = path.substring(prefix.length(), path.length() - FTManager.TEMPLATE_EXTENSION_SUFFIX.length());
             final String extension = myTypeManager.getExtension(filename);
             final String templateName = filename.substring(0, filename.length() - extension.length() - 1);
-            final URL templateUrl = new URL(root.toExternalForm() + "/" + path);
+            final URL templateUrl = UrlClassLoader.internProtocol(new URL(root.toExternalForm() + "/" + path));
             final String descriptionPath = getDescriptionPath(prefix, templateName, extension, descriptionPaths);
-            final URL descriptionUrl = descriptionPath != null ? new URL(root.toExternalForm() + "/" + descriptionPath) : null;
+            final URL descriptionUrl = descriptionPath != null ? UrlClassLoader.internProtocol(new URL(root.toExternalForm() + "/" + descriptionPath)) : null;
             entry.getValue().addDefaultTemplate(new DefaultTemplate(templateName, extension, templateUrl, descriptionUrl));
           }
           break; // FTManagers loop

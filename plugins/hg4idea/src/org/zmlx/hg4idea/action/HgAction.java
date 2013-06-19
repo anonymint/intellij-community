@@ -15,8 +15,14 @@
  */
 package org.zmlx.hg4idea.action;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.annotations.Nullable;
+import org.zmlx.hg4idea.util.HgUtil;
 
 import javax.swing.*;
 
@@ -38,21 +44,17 @@ public abstract class HgAction extends AnAction {
     if (project == null) {
       return;
     }
-
-    execute(project);
+    VirtualFile file = event.getData(PlatformDataKeys.VIRTUAL_FILE);
+    VirtualFile repo = file != null ? HgUtil.getHgRootOrNull(project, file) : null;
+    execute(project, repo);
   }
 
   @Override
   public void update(AnActionEvent e) {
-    Presentation presentation = e.getPresentation();
-    final DataContext dataContext = e.getDataContext();
-
-    Project project = PlatformDataKeys.PROJECT.getData(dataContext);
-    if (project == null) {
-      presentation.setEnabled(false);
-    }
+    boolean enabled = HgAbstractGlobalAction.isEnabled(e);
+    e.getPresentation().setEnabled(enabled);
   }
 
-  public abstract void execute(Project project);
+  public abstract void execute(Project project, @Nullable VirtualFile selectedRepo);
 
 }

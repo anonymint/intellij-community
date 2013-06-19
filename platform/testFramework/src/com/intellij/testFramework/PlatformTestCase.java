@@ -47,6 +47,8 @@ import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.project.impl.TooManyProjectLeakedException;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import com.intellij.openapi.roots.impl.DirectoryIndex;
+import com.intellij.openapi.roots.impl.DirectoryIndexImpl;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.EmptyRunnable;
@@ -68,6 +70,7 @@ import com.intellij.psi.impl.DocumentCommitThread;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.util.PatchedWeakReference;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.indexing.IndexableSetContributor;
 import com.intellij.util.indexing.IndexedRootsProvider;
 import com.intellij.util.ui.UIUtil;
@@ -139,7 +142,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
-  static void autodetectPlatformPrefix() {
+  public static void autodetectPlatformPrefix() {
     if (ourPlatformPrefixInitialized) {
       return;
     }
@@ -147,7 +150,13 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     if (resource == null) {
       resource = PlatformTestCase.class.getClassLoader().getResource("idea/IdeaApplicationInfo.xml");
       if (resource == null) {
-        setPlatformPrefix("PlatformLangXml");
+        resource = PlatformTestCase.class.getClassLoader().getResource("META-INF/UltimateLangXmlPlugin.xml");
+        if (resource == null) {
+          setPlatformPrefix("PlatformLangXml");
+        }
+        else {
+          setPlatformPrefix("UltimateLangXml");
+        }
       }
       else {
         setPlatformPrefix("Idea");
@@ -214,7 +223,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
 
     File projectFile = getIprFile();
 
-    myProject = createProject(projectFile, getClass().getName() + "." + getName());
+    myProject = doCreateProject(projectFile);
     myProjectManager.openTestProject(myProject);
     LocalFileSystem.getInstance().refreshIoFiles(myFilesToDelete);
 
@@ -225,6 +234,10 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     LightPlatformTestCase.clearUncommittedDocuments(getProject());
 
     runStartupActivities();
+  }
+
+  protected Project doCreateProject(File projectFile) throws Exception {
+    return createProject(projectFile, getClass().getName() + "." + getName());
   }
 
   @NotNull
@@ -251,7 +264,8 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
   }
 
-  public static String getCreationPlace(Project project) {
+  @NotNull
+  public static String getCreationPlace(@NotNull Project project) {
     String place = project.getUserData(CREATION_PLACE);
     Object base;
     try {
@@ -330,14 +344,9 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       ((PsiManagerEx)PsiManager.getInstance(project)).getFileManager().cleanupForNextTest();
     }
 
-    try {
-      LocalFileSystemImpl localFileSystem = (LocalFileSystemImpl)LocalFileSystem.getInstance();
-      if (localFileSystem != null) {
-        localFileSystem.cleanupForNextTest(eternallyLivingFiles());
-      }
-    }
-    catch (IOException e) {
-      // ignore
+    LocalFileSystemImpl localFileSystem = (LocalFileSystemImpl)LocalFileSystem.getInstance();
+    if (localFileSystem != null) {
+      localFileSystem.cleanupForNextTest();
     }
 
     LocalHistoryImpl.getInstanceImpl().cleanupForNextTest();
@@ -406,6 +415,8 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
     try {
       Project project = getProject();
+      DirectoryIndexImpl directoryIndex =
+      project != null ? (DirectoryIndexImpl)DirectoryIndex.getInstance(project) : null;
       disposeProject(result);
 
       if (project != null) {
@@ -458,6 +469,9 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       catch (Throwable error) {
         result.add(error);
       }
+      //if (directoryIndex != null) {
+      //  directoryIndex.assertAncestorConsistent();
+      //}
     }
     finally {
       myProjectManager = null;
@@ -487,8 +501,12 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
             Disposer.dispose(myProject);
             ProjectManagerEx projectManager = ProjectManagerEx.getInstanceEx();
             if (projectManager instanceof ProjectManagerImpl) {
-              projectManager.closeTestProject(myProject);
-              ((ProjectManagerImpl)projectManager).assertTestProjectsClosed();
+              Collection<Project> projectsStillOpen = projectManager.closeTestProject(myProject);
+              if (!projectsStillOpen.isEmpty()) {
+                Project project = projectsStillOpen.iterator().next();
+                projectsStillOpen.clear();
+                throw new AssertionError("Test project is not disposed: " + project+";\n created in: "+getCreationPlace(project));
+              }
             }
           }
         });
@@ -617,17 +635,18 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
             runTest();
             myAssertionsInTestDetected = false;
           }
+          catch (Throwable e) {
+            throwables[0] = e;
+            throw e;
+          }
           finally {
-            try {
-              tearDown();
-            }
-            catch (Throwable th) {
-              th.printStackTrace();
-            }
+            tearDown();
           }
         }
         catch (Throwable throwable) {
-          throwables[0] = throwable;
+          if (throwables[0] == null) {  // report tearDown() problems if only no exceptions thrown from runTest()
+            throwables[0] = throwable;
+          }
         }
         finally {
           ourTestThread = null;
@@ -742,13 +761,15 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     return createTempDir(getTestName(true), refresh);
   }
 
-  protected File createTempFile(String name, String text) throws IOException {
+  protected File createTempFile(String name, @Nullable String text) throws IOException {
     File directory = createTempDirectory();
     File file = new File(directory, name);
     if (!file.createNewFile()) {
       throw new IOException("Can't create " + file);
     }
-    FileUtil.writeToFile(file, text);
+    if (text != null) {
+      FileUtil.writeToFile(file, text);
+    }
     return file;
   }
 
@@ -813,7 +834,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   private static void setPlatformPrefix(String prefix) {
-    System.setProperty("idea.platform.prefix", prefix);
+    System.setProperty(PlatformUtils.PLATFORM_PREFIX_KEY, prefix);
   }
 
   @Retention(RetentionPolicy.RUNTIME)

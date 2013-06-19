@@ -35,7 +35,7 @@ public class TypesDistinctProver {
     return provablyDistinct(type1, type2, 0);
   }
 
-  private static boolean provablyDistinct(PsiType type1, PsiType type2, int level) {
+  protected static boolean provablyDistinct(PsiType type1, PsiType type2, int level) {
     if (type1 instanceof PsiClassType && ((PsiClassType)type1).resolve() instanceof PsiTypeParameter) return false;
     if (type2 instanceof PsiClassType && ((PsiClassType)type2).resolve() instanceof PsiTypeParameter) return false;
     if (type1 instanceof PsiWildcardType) {
@@ -43,9 +43,9 @@ public class TypesDistinctProver {
         return provablyDistinct((PsiWildcardType)type1, (PsiWildcardType)type2);
       }
 
+      if (level > 1) return true;
       if (type2 instanceof PsiCapturedWildcardType) {
-        return ((PsiWildcardType)type1).isExtends() && level > 0 ||
-               provablyDistinct((PsiWildcardType)type1, ((PsiCapturedWildcardType)type2).getWildcard());
+        return provablyDistinct((PsiWildcardType)type1, ((PsiCapturedWildcardType)type2).getWildcard());
       }
 
       if (type2 instanceof PsiClassType) {
@@ -58,6 +58,11 @@ public class TypesDistinctProver {
               proveArrayTypeDistinct(((PsiWildcardType)type1).getManager().getProject(), (PsiArrayType)extendsBound, type2)) return true;
           final PsiClass boundClass1 = PsiUtil.resolveClassInType(extendsBound);
           if (boundClass1 == null) return false;
+
+          if (CommonClassNames.JAVA_LANG_OBJECT.equals(psiClass2.getQualifiedName())) {
+            return !CommonClassNames.JAVA_LANG_OBJECT.equals(boundClass1.getQualifiedName());
+          }
+
           return proveExtendsBoundsDistinct(type1, type2, boundClass1, psiClass2);
         }
 
@@ -141,7 +146,7 @@ public class TypesDistinctProver {
         if (superBoundClass instanceof PsiTypeParameter) return false;
         return !InheritanceUtil.isInheritorOrSelf(superBoundClass, extendsBoundClass, true);
       }
-      return true;
+      return provablyDistinct(extendsBound, superBound);
     }
 
     if (!type1.isBounded() || !type2.isBounded()) {
@@ -154,6 +159,9 @@ public class TypesDistinctProver {
                                                     PsiType type2,
                                                     PsiClass boundClass1,
                                                     PsiClass boundClass2) {
+    if (boundClass1 == null || boundClass2 == null) {
+      return false;
+    }
     if (boundClass1.isInterface() && boundClass2.isInterface()) return false;
     if (boundClass1.isInterface()) {
       return !(boundClass2.hasModifierProperty(PsiModifier.FINAL) ? InheritanceUtil.isInheritorOrSelf(boundClass2, boundClass1, true) : true);

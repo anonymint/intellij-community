@@ -29,7 +29,7 @@ import java.util.List;
  */
 public class CompletionSorterImpl extends CompletionSorter {
   private final List<ClassifierFactory<LookupElement>> myMembers;
-  private int myHashCode;
+  private final int myHashCode;
 
   CompletionSorterImpl(List<ClassifierFactory<LookupElement>> members) {
     myMembers = members;
@@ -47,7 +47,8 @@ public class CompletionSorterImpl extends CompletionSorter {
   }
 
   @Override public CompletionSorterImpl weighBefore(@NotNull final String beforeId, LookupElementWeigher... weighers) {
-    assert weighers.length > 0 : "there should be weighers";
+    if (weighers.length == 0) return this;
+
     CompletionSorterImpl result = this;
     for (LookupElementWeigher weigher : weighers) {
       result = result.withClassifier(beforeId, true, weighingFactory(weigher));
@@ -56,7 +57,8 @@ public class CompletionSorterImpl extends CompletionSorter {
   }
 
   @Override public CompletionSorterImpl weighAfter(@NotNull final String afterId, LookupElementWeigher... weighers) {
-    assert weighers.length > 0 : "there should be weighers";
+    if (weighers.length == 0) return this;
+
     CompletionSorterImpl result = this;
     for (int i = weighers.length - 1; i >= 0; i--) {
       LookupElementWeigher weigher = weighers[i];

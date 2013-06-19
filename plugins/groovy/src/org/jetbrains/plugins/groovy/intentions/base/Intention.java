@@ -25,6 +25,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.groovy.GroovyFileType;
 import org.jetbrains.plugins.groovy.annotator.intentions.QuickfixUtil;
 import org.jetbrains.plugins.groovy.intentions.GroovyIntentionsBundle;
 import org.jetbrains.plugins.groovy.intentions.utils.BoolUtils;
@@ -83,6 +84,10 @@ public abstract class Intention implements IntentionAction {
 
   @Nullable
   PsiElement findMatchingElement(PsiFile file, Editor editor) {
+    if (!file.getViewProvider().getLanguages().contains(GroovyFileType.GROOVY_LANGUAGE)) {
+      return null;
+    }
+
     SelectionModel selectionModel = editor.getSelectionModel();
     if (selectionModel.hasSelection()) {
       TextRange selectionRange = new TextRange(selectionModel.getSelectionStart(), selectionModel.getSelectionEnd());

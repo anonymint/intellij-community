@@ -21,7 +21,7 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testJComponentAdd() throws Throwable {
-    checkPreferredItems(0, "name", "getName", "b", "fooBean239", "foo", "this");
+    checkPreferredItems(0, "name", "b", "fooBean239", "foo", "this");
   }
   
   public void testJComponentAddNew() throws Throwable {
@@ -95,7 +95,7 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testDontPreferKeywords() throws Throwable {
-    checkPreferredItems(0, "o1", "foo", "name", "this", "getClass");
+    checkPreferredItems(0, "o1", "foo", "name", "this");
   }
 
   public void testEnumValueOf() throws Throwable {
@@ -129,11 +129,11 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testSmartEquals2() throws Throwable {
-    checkPreferredItems(0, "foo", "this", "o", "s", "getClass");
+    checkPreferredItems(0, "foo", "this", "o", "s");
   }
 
   public void testSmartEquals3() throws Throwable {
-    checkPreferredItems(0, "b", "this", "a", "z", "getClass");
+    checkPreferredItems(0, "b", "this", "a", "z");
   }
 
   public void testSmartCollectionsNew() throws Throwable {
@@ -222,7 +222,7 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
 
   public void testFactoryMethodForDefaultType() throws Throwable {
-    checkPreferredItems(0, "create", "this", "getClass");
+    checkPreferredItems(0, "create", "this");
   }
 
   public void testLocalVarsBeforeClassLiterals() throws Throwable {
@@ -257,11 +257,11 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
     assertPreferredItems(0, "bar", "foo", "equals", "false", "true");
   }
 
-  public void testFieldNameOutweighsStats() throws Throwable {
+  public void testExpectedNameDependentStats() throws Throwable {
     final LookupImpl lookup = invokeCompletion(getTestName(false) + ".java");
     assertPreferredItems(0, "myFoo", "myBar");
     incUseCount(lookup, 1); //myBar
-    assertPreferredItems(0, "myFoo", "myBar");
+    assertPreferredItems(0, "myBar", "myFoo");
   }
 
   public void testPreferSameNamedMethods() {
@@ -306,6 +306,9 @@ public class SmartTypeCompletionOrderingTest extends CompletionSortingTestCase {
   }
   public void testPreferOtherGetterInSetterCall() {
     checkPreferredItems 0, 'color', 'getColor', 'getZooColor', 'hashCode'
+  }
+  public void testPreferLocalOverFactoryMatchingName() {
+    checkPreferredItems 0, 'e', 'createEvent'
   }
 
   @Override

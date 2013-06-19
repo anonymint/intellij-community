@@ -31,11 +31,12 @@ import git4idea.*;
 import git4idea.branch.GitBranchPair;
 import git4idea.commands.Git;
 import git4idea.commands.GitCommandResult;
+import git4idea.commands.GitLineHandlerListener;
+import git4idea.commands.GitStandardProgressAnalyzer;
 import git4idea.config.GitConfigUtil;
 import git4idea.config.GitVcsSettings;
 import git4idea.config.UpdateMethod;
 import git4idea.history.GitHistoryUtils;
-import git4idea.history.browser.GitCommit;
 import git4idea.jgit.GitHttpAdapter;
 import git4idea.repo.GitBranchTrackInfo;
 import git4idea.repo.GitRemote;
@@ -316,21 +317,18 @@ public final class GitPusher {
     }
 
     GitRemote remote = pushSpec.getRemote();
-    String httpUrl = null;
-    for (String pushUrl : remote.getPushUrls()) {
-      if (GitHttpAdapter.shouldUseJGit(pushUrl)) {
-        httpUrl = pushUrl;
-        break;            // TODO support http and ssh urls in one origin
-      }
+    Collection<String> pushUrls = remote.getPushUrls();
+    if (pushUrls.isEmpty()) {
+      LOG.error("No urls or pushUrls are defined for " + remote);
+      return GitSimplePushResult.error("There are no URLs defined for remote " + remote.getName());
     }
-
+    String url = pushUrls.iterator().next();
     GitSimplePushResult pushResult;
-    boolean pushOverHttp = httpUrl != null;
-    if (pushOverHttp) {
-      pushResult = GitHttpAdapter.push(repository, remote.getName(), httpUrl, formPushSpec(pushSpec, remote));
+    if (GitHttpAdapter.shouldUseJGit(url)) {
+      pushResult = GitHttpAdapter.push(repository, remote.getName(), url, formPushSpec(pushSpec, remote));
     }
     else {
-      pushResult = pushNatively(repository, pushSpec);
+      pushResult = pushNatively(repository, pushSpec, url);
     }
     
     if (pushResult.getType() == GitSimplePushResult.Type.SUCCESS) {
@@ -348,10 +346,12 @@ public final class GitPusher {
       String branchName = source.getName();
       try {
         boolean rebase = getMergeOrRebaseConfig(project, root);
-        String mergeOrRebase = rebase ? ".rebase" : ".merge";
         GitConfigUtil.setValue(project, root, "branch." + branchName + ".remote", remote.getName());
-        GitConfigUtil.setValue(project, root, "branch." + branchName + mergeOrRebase,
+        GitConfigUtil.setValue(project, root, "branch." + branchName + ".merge",
                                GitBranch.REFS_HEADS_PREFIX + dest.getNameForRemoteOperations());
+        if (rebase) {
+          GitConfigUtil.setValue(project, root, "branch." + branchName + ".rebase", "true");
+        }
       }
       catch (VcsException e) {
         LOG.error(String.format("Couldn't set up tracking for source branch %s, target branch %s, remote %s in root %s",
@@ -392,9 +392,10 @@ public final class GitPusher {
   }
 
   @NotNull
-  private GitSimplePushResult pushNatively(GitRepository repository, GitPushSpec pushSpec) {
+  private GitSimplePushResult pushNatively(GitRepository repository, GitPushSpec pushSpec, @NotNull String url) {
     GitPushRejectedDetector rejectedDetector = new GitPushRejectedDetector();
-    GitCommandResult res = myGit.push(repository, pushSpec, rejectedDetector);
+    GitLineHandlerListener progressListener = GitStandardProgressAnalyzer.createListener(myProgressIndicator);
+    GitCommandResult res = myGit.push(repository, pushSpec, url, rejectedDetector, progressListener);
     if (rejectedDetector.rejected()) {
       Collection<String> rejectedBranches = rejectedDetector.getRejectedBranches();
       return GitSimplePushResult.reject(rejectedBranches);

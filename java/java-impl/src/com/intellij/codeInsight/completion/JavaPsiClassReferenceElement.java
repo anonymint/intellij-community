@@ -142,7 +142,9 @@ public class JavaPsiClassReferenceElement extends LookupItem<Object> {
   }
 
   public static void renderClassItem(LookupElementPresentation presentation, LookupItem item, PsiClass psiClass, boolean diamond) {
-    presentation.setIcon(DefaultLookupItemRenderer.getRawIcon(item, presentation.isReal()));
+    if (!(psiClass instanceof PsiTypeParameter)) {
+      presentation.setIcon(DefaultLookupItemRenderer.getRawIcon(item, presentation.isReal()));
+    }
 
     final boolean bold = item.getAttribute(LookupItem.HIGHLIGHTED_ATTR) != null;
     boolean strikeout = JavaElementLookupRenderer.isToStrikeout(item);
@@ -150,12 +152,15 @@ public class JavaPsiClassReferenceElement extends LookupItem<Object> {
     presentation.setStrikeout(strikeout);
     presentation.setItemTextBold(bold);
 
-    String tailText = StringUtil.notNullize((String) item.getAttribute(LookupItem.TAIL_TEXT_ATTR));
+    String tailText = getLocationString(item);
     PsiSubstitutor substitutor = (PsiSubstitutor)item.getAttribute(LookupItem.SUBSTITUTOR);
 
-    if (item instanceof PsiTypeLookupItem && ((PsiTypeLookupItem)item).isIndicateAnonymous() &&
-        (psiClass.isInterface() || psiClass.hasModifierProperty(PsiModifier.ABSTRACT))) {
-      tailText = "{...}" + tailText;
+    if (item instanceof PsiTypeLookupItem) {
+      if (((PsiTypeLookupItem)item).isIndicateAnonymous() &&
+          (psiClass.isInterface() || psiClass.hasModifierProperty(PsiModifier.ABSTRACT)) ||
+          ((PsiTypeLookupItem)item).isAddArrayInitializer()) {
+        tailText = "{...}" + tailText;
+      }
     }
     if (substitutor == null && !diamond && psiClass.getTypeParameters().length > 0) {
       tailText = "<" + StringUtil.join(psiClass.getTypeParameters(), new Function<PsiTypeParameter, String>() {
@@ -166,6 +171,10 @@ public class JavaPsiClassReferenceElement extends LookupItem<Object> {
       }, "," + (showSpaceAfterComma(psiClass) ? " " : "")) + ">" + tailText;
     }
     presentation.setTailText(tailText, true);
+  }
+
+  public static String getLocationString(LookupItem item) {
+    return StringUtil.notNullize((String)item.getAttribute(LookupItem.TAIL_TEXT_ATTR));
   }
 
   private static String getName(final PsiClass psiClass, final LookupItem<?> item, boolean diamond) {

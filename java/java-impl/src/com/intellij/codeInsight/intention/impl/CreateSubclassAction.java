@@ -245,7 +245,7 @@ public class CreateSubclassAction extends BaseIntentionAction {
       }
       if (psiClass.hasTypeParameters() || includeClassName) {
         final Editor editor = CodeInsightUtil.positionCursor(project, targetClass.getContainingFile(), targetClass.getLBrace());
-        final TemplateBuilderImpl templateBuilder = editor != null && !ApplicationManager.getApplication().isUnitTestMode() 
+        final TemplateBuilderImpl templateBuilder = editor != null 
                    ? (TemplateBuilderImpl)TemplateBuilderFactory.getInstance().createTemplateBuilder(targetClass) : null;
         
         if (includeClassName && templateBuilder != null) {
@@ -273,11 +273,14 @@ public class CreateSubclassAction extends BaseIntentionAction {
 
           final TextRange textRange = targetClass.getTextRange();
           final RangeMarker startClassOffset = editor.getDocument().createRangeMarker(textRange.getStartOffset(), textRange.getEndOffset());
+          startClassOffset.setGreedyToLeft(true);
+          startClassOffset.setGreedyToRight(true);
           editor.getDocument().deleteString(textRange.getStartOffset(), textRange.getEndOffset());
           CreateFromUsageBaseFix.startTemplate(editor, template, project, new TemplateEditingAdapter() {
             @Override
             public void templateFinished(Template template, boolean brokenOff) {
               try {
+                LOG.assertTrue(startClassOffset.isValid(), startClassOffset);
                 final PsiElement psiElement = containingFile.findElementAt(startClassOffset.getStartOffset());
                 final PsiClass aTargetClass = PsiTreeUtil.getParentOfType(psiElement, PsiClass.class);
                 LOG.assertTrue(aTargetClass != null, psiElement);
@@ -319,9 +322,11 @@ public class CreateSubclassAction extends BaseIntentionAction {
           baseConstructors.add(new PsiMethodMember(baseConstr, substitutor));
         }
       }
+      final int offset = editor.getCaretModel().getOffset();
       CreateConstructorMatchingSuperFix.chooseConstructor2Delegate(project, editor,
                                                                    substitutor,
                                                                    baseConstructors, constructors, targetClass);
+      editor.getCaretModel().moveToOffset(offset);
     }
 
     OverrideImplementUtil.chooseAndImplementMethods(project, editor, targetClass);

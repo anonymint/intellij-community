@@ -16,13 +16,12 @@
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.CodeInsightUtilBase;
-import com.intellij.openapi.editor.CaretModel;
+import com.intellij.codeInsight.CodeInsightUtilCore;
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -47,13 +46,13 @@ public class CreateCastExpressionFromInstanceofAction extends CreateLocalVarFrom
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) {
-    if (!CodeInsightUtilBase.prepareFileForWrite(file)) return;
+    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
     PsiInstanceOfExpression instanceOfExpression = getInstanceOfExpressionAtCaret(editor, file);
     assert instanceOfExpression.getContainingFile() == file : instanceOfExpression.getContainingFile() + "; file="+file;
     PsiElement decl = createAndInsertCast(instanceOfExpression, editor, file);
     if (decl == null) return;
-    decl = CodeStyleManager.getInstance(project).reformat(CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(decl));
+    decl = CodeStyleManager.getInstance(project).reformat(CodeInsightUtilCore.forcePsiPostprocessAndRestoreElement(decl));
     editor.getCaretModel().moveToOffset(decl.getTextRange().getEndOffset());
   }
 
@@ -68,7 +67,7 @@ public class CreateCastExpressionFromInstanceofAction extends CreateLocalVarFrom
     cast.getCastType().replace(factory.createTypeElement(castType));
     cast.getOperand().replace(instanceOfExpression.getOperand());
 
-    final PsiStatement statementInside = isNegated(instanceOfExpression) ? null : getExpressionStatementInside(file, editor);
+    final PsiStatement statementInside = isNegated(instanceOfExpression) ? null : getExpressionStatementInside(file, editor, instanceOfExpression.getOperand());
     if (statementInside != null) {
       return statementInside.replace(statement);
     }

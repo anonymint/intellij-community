@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.execution.process;
 
+import com.intellij.execution.TaskExecutor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.util.Consumer;
@@ -26,7 +27,9 @@ import java.io.*;
 import java.nio.charset.Charset;
 import java.util.concurrent.*;
 
-public class BaseOSProcessHandler extends ProcessHandler {
+import static com.intellij.util.io.BaseOutputReader.AdaptiveSleepingPolicy;
+
+public class BaseOSProcessHandler extends ProcessHandler implements TaskExecutor {
   private static final Logger LOG = Logger.getInstance("#com.intellij.execution.process.OSProcessHandlerBase");
 
   @NotNull protected final Process myProcess;
@@ -38,7 +41,7 @@ public class BaseOSProcessHandler extends ProcessHandler {
     myProcess = process;
     myCommandLine = commandLine;
     myCharset = charset;
-    myWaitFor = new ProcessWaitFor(process);
+    myWaitFor = new ProcessWaitFor(process, this);
   }
 
   /**
@@ -50,9 +53,22 @@ public class BaseOSProcessHandler extends ProcessHandler {
     return ExecutorServiceHolder.ourThreadExecutorsService.submit(task);
   }
 
+  @Override
+  public Future<?> executeTask(Runnable task) {
+    return executeOnPooledThread(task);
+  }
+
   @NotNull
   public Process getProcess() {
     return myProcess;
+  }
+
+  protected boolean useAdaptiveSleepingPolicyWhenReadingOutput() {
+    return false;
+  }
+
+  protected boolean processHasSeparateErrorStream() {
+    return true;
   }
 
   @Override
@@ -65,19 +81,24 @@ public class BaseOSProcessHandler extends ProcessHandler {
       @Override
       public void startNotified(final ProcessEvent event) {
         try {
-          final BaseOutputReader stdoutReader = new SimpleOutputReader(createProcessOutReader(), ProcessOutputTypes.STDOUT);
-          final BaseOutputReader stderrReader = new SimpleOutputReader(createProcessErrReader(), ProcessOutputTypes.STDERR);
+          BaseOutputReader.SleepingPolicy sleepingPolicy =
+            useAdaptiveSleepingPolicyWhenReadingOutput() ? new AdaptiveSleepingPolicy() : BaseOutputReader.SleepingPolicy.SIMPLE;
+          final BaseOutputReader stdoutReader = new SimpleOutputReader(createProcessOutReader(), ProcessOutputTypes.STDOUT, sleepingPolicy);
+          final BaseOutputReader stderrReader = processHasSeparateErrorStream()
+                                                ? new SimpleOutputReader(createProcessErrReader(), ProcessOutputTypes.STDERR,
+                                                                         sleepingPolicy)
+                                                : null;
 
           myWaitFor.setTerminationCallback(new Consumer<Integer>() {
             @Override
             public void consume(Integer exitCode) {
               try {
                 // tell readers that no more attempts to read process' output should be made
-                stderrReader.stop();
+                if (stderrReader != null) stderrReader.stop();
                 stdoutReader.stop();
 
                 try {
-                  stderrReader.waitFor();
+                  if (stderrReader != null) stderrReader.waitFor();
                   stdoutReader.waitFor();
                 }
                 catch (InterruptedException ignore) {
@@ -153,7 +174,7 @@ public class BaseOSProcessHandler extends ProcessHandler {
       myProcess.getOutputStream().close();
     }
     catch (IOException e) {
-      LOG.error(e);
+      LOG.warn(e);
     }
   }
 
@@ -167,7 +188,9 @@ public class BaseOSProcessHandler extends ProcessHandler {
     return myProcess.getOutputStream();
   }
 
-  /** @deprecated internal use only (to remove in IDEA 13) */
+  /**
+   * @deprecated internal use only (to remove in IDEA 13)
+   */
   @Nullable
   public String getCommandLine() {
     return myCommandLine;
@@ -178,7 +201,7 @@ public class BaseOSProcessHandler extends ProcessHandler {
     return myCharset;
   }
 
-  private static class ExecutorServiceHolder {
+  public static class ExecutorServiceHolder {
     private static final ExecutorService ourThreadExecutorsService = createServiceImpl();
 
     private static ThreadPoolExecutor createServiceImpl() {
@@ -191,47 +214,9 @@ public class BaseOSProcessHandler extends ProcessHandler {
         }
       });
     }
-  }
 
-  protected class ProcessWaitFor {
-    private final Future<?> myWaitForThreadFuture;
-    private final BlockingQueue<Consumer<Integer>> myTerminationCallback = new ArrayBlockingQueue<Consumer<Integer>>(1);
-
-    public void detach() {
-      myWaitForThreadFuture.cancel(true);
-    }
-
-
-    public ProcessWaitFor(final Process process) {
-      myWaitForThreadFuture = executeOnPooledThread(new Runnable() {
-        @Override
-        public void run() {
-          int exitCode = 0;
-          try {
-            while (true) {
-              try {
-                exitCode = process.waitFor();
-                break;
-              }
-              catch (InterruptedException e) {
-                LOG.debug(e);
-              }
-            }
-          }
-          finally {
-            try {
-              myTerminationCallback.take().consume(exitCode);
-            }
-            catch (InterruptedException e) {
-              LOG.info(e);
-            }
-          }
-        }
-      });
-    }
-
-    public void setTerminationCallback(Consumer<Integer> r) {
-      myTerminationCallback.offer(r);
+    public static Future<?> submit(Runnable task) {
+      return ourThreadExecutorsService.submit(task);
     }
   }
 
@@ -239,8 +224,8 @@ public class BaseOSProcessHandler extends ProcessHandler {
 
     private final Key myProcessOutputType;
 
-    private SimpleOutputReader(@NotNull Reader reader, @NotNull Key processOutputType) {
-      super(reader);
+    private SimpleOutputReader(@NotNull Reader reader, @NotNull Key processOutputType, SleepingPolicy sleepingPolicy) {
+      super(reader, sleepingPolicy);
       myProcessOutputType = processOutputType;
       start();
     }

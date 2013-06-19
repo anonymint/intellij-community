@@ -27,8 +27,11 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiUtilBase;
+import org.jetbrains.annotations.NotNull;
 
 public class GotoTestOrCodeAction extends BaseCodeInsightAction {
+  @Override
+  @NotNull
   protected CodeInsightActionHandler getHandler(){
     return new GotoTestOrCodeHandler();
   }

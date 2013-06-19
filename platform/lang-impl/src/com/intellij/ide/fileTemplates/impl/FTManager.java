@@ -45,13 +45,19 @@ class FTManager {
   public static final String CONTENT_ENCODING = CharsetToolkit.UTF8;
 
   private final String myName;
+  private final boolean myInternal;
   private final String myTemplatesDir;
   private final Map<String, FileTemplateBase> myTemplates = new HashMap<String, FileTemplateBase>();
   private volatile List<FileTemplateBase> mySortedTemplates;
   private final List<DefaultTemplate> myDefaultTemplates = new ArrayList<DefaultTemplate>();
 
   FTManager(@NotNull @NonNls String name, @NotNull @NonNls String defaultTemplatesDirName) {
+    this(name, defaultTemplatesDirName, false);
+  }
+
+  FTManager(@NotNull @NonNls String name, @NotNull @NonNls String defaultTemplatesDirName, boolean internal) {
     myName = name;
+    myInternal = internal;
     myTemplatesDir = TEMPLATES_DIR + (defaultTemplatesDirName.equals(".") ? "" : File.separator + defaultTemplatesDirName);
   }
 
@@ -65,17 +71,18 @@ class FTManager {
     if (sorted == null) {
       sorted = new ArrayList<FileTemplateBase>(myTemplates.values());
       Collections.sort(sorted, new Comparator<FileTemplateBase>() {
+        @Override
         public int compare(FileTemplateBase t1, FileTemplateBase t2) {
           return t1.getName().compareToIgnoreCase(t2.getName());
         }
       });
       mySortedTemplates = sorted;
     }
-    
+
     if (includeDisabled) {
       return Collections.unmodifiableCollection(sorted);
     }
-    
+
     final List<FileTemplateBase> list = new ArrayList<FileTemplateBase>(sorted.size());
     for (FileTemplateBase template : sorted) {
       if (template instanceof BundledFileTemplate && !((BundledFileTemplate)template).isEnabled()) {
@@ -169,14 +176,14 @@ class FTManager {
       _template.setReformatCode(template.isReformatCode());
     }
   }
-  
+
   public void addDefaultTemplate(DefaultTemplate template) {
     myDefaultTemplates.add(template);
     createAndStoreBundledTemplate(template);
   }
 
   private BundledFileTemplate createAndStoreBundledTemplate(DefaultTemplate template) {
-    final BundledFileTemplate bundled = new BundledFileTemplate(template);
+    final BundledFileTemplate bundled = new BundledFileTemplate(template, myInternal);
     final String qName = bundled.getQualifiedName();
     final FileTemplateBase previous = myTemplates.put(qName, bundled);
     mySortedTemplates = null;
@@ -301,5 +308,5 @@ class FTManager {
   public String toString() {
     return myName + " file template manager";
   }
-  
+
 }

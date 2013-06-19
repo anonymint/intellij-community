@@ -66,8 +66,6 @@ public class CreateFieldFromUsageFix extends CreateVarFromUsageFix {
     }
     while (parentClass instanceof PsiAnonymousClass);
 
-    final PsiFile targetFile = targetClass.getContainingFile();
-
     ExpectedTypeInfo[] expectedTypes = CreateFromUsageUtils.guessExpectedTypes(myReferenceExpression, false);
 
     String fieldName = myReferenceExpression.getReferenceName();
@@ -78,27 +76,36 @@ public class CreateFieldFromUsageFix extends CreateVarFromUsageFix {
       PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
     }
 
+    if (createConstantField()) {
+      PsiUtil.setModifierProperty(field, PsiModifier.STATIC, true);
+      PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
+    } else {
+      if (!targetClass.isInterface() && shouldCreateStaticMember(myReferenceExpression, targetClass)) {
+        PsiUtil.setModifierProperty(field, PsiModifier.STATIC, true);
+      }
+      if (shouldCreateFinalMember(myReferenceExpression, targetClass)) {
+        PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
+      }
+    }
 
     field = CreateFieldFromUsageHelper.insertField(targetClass, field, myReferenceExpression);
 
     setupVisibility(parentClass, targetClass, field.getModifierList());
 
-    if (shouldCreateStaticMember(myReferenceExpression, targetClass)) {
-      PsiUtil.setModifierProperty(field, PsiModifier.STATIC, true);
-    }
+    createFieldFromUsageTemplate(targetClass, project, expectedTypes, field, createConstantField(), myReferenceExpression);
+  }
 
-    if (shouldCreateFinalMember(myReferenceExpression, targetClass)) {
-      PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
-    }
-
-    if (createConstantField()) {
-      PsiUtil.setModifierProperty(field, PsiModifier.STATIC, true);
-      PsiUtil.setModifierProperty(field, PsiModifier.FINAL, true);
-    }
-
+  public static void createFieldFromUsageTemplate(final PsiClass targetClass,
+                                                  final Project project,
+                                                  final ExpectedTypeInfo[] expectedTypes,
+                                                  final PsiField field,
+                                                  final boolean createConstantField,
+                                                  final PsiElement context) {
+    final PsiFile targetFile = targetClass.getContainingFile();
     final Editor newEditor = positionCursor(project, targetFile, field);
+    if (newEditor == null) return;
     Template template =
-      CreateFieldFromUsageHelper.setupTemplate(field, expectedTypes, targetClass, newEditor, myReferenceExpression, createConstantField());
+      CreateFieldFromUsageHelper.setupTemplate(field, expectedTypes, targetClass, newEditor, context, createConstantField);
 
     startTemplate(newEditor, template, project, new TemplateEditingAdapter() {
       @Override

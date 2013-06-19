@@ -22,6 +22,7 @@ import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.html.HtmlTag;
 import com.intellij.psi.xml.XmlAttribute;
@@ -43,41 +44,48 @@ import org.jetbrains.annotations.NotNull;
 public class HtmlUnknownAttributeInspection extends HtmlUnknownTagInspection {
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.htmlInspections.HtmlUnknownAttributeInspection");
-  @NonNls public static final String ATTRIBUTE_SHORT_NAME = "HtmlUnknownAttribute";
+  public static final Key<HtmlUnknownTagInspection> ATTRIBUTE_KEY = Key.create(ATTRIBUTE_SHORT_NAME);
 
   public HtmlUnknownAttributeInspection() {
     super("");
   }
 
+  @Override
   @Nls
   @NotNull
   public String getDisplayName() {
     return XmlBundle.message("html.inspections.unknown.attribute");
   }
 
+  @Override
   @NonNls
   @NotNull
   public String getShortName() {
     return ATTRIBUTE_SHORT_NAME;
   }
 
+  @Override
   protected String getCheckboxTitle() {
     return XmlBundle.message("html.inspections.unknown.tag.attribute.checkbox.title");
   }
 
+  @Override
   protected String getPanelTitle() {
     return XmlBundle.message("html.inspections.unknown.tag.attribute.title");
   }
 
+  @Override
   @NotNull
   protected Logger getLogger() {
     return LOG;
   }
 
+  @Override
   protected void checkTag(@NotNull final XmlTag tag, @NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
     // does nothing! this method should be overridden empty!
   }
 
+  @Override
   protected void checkAttribute(@NotNull final XmlAttribute attribute, @NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
     final XmlTag tag = attribute.getParent();
 
@@ -100,7 +108,7 @@ public class HtmlUnknownAttributeInspection extends HtmlUnknownTagInspection {
 
           boolean maySwitchToHtml5 = HtmlUtil.isCustomHtml5Attribute(name) && !HtmlUtil.hasNonHtml5Doctype(tag);
           LocalQuickFix[] quickfixes = new LocalQuickFix[maySwitchToHtml5 ? 3 : 2];
-          quickfixes[0] = new AddCustomTagOrAttributeIntentionAction(getShortName(), name, XmlEntitiesInspection.UNKNOWN_ATTRIBUTE);
+          quickfixes[0] = new AddCustomTagOrAttributeIntentionAction(ATTRIBUTE_KEY, name, XmlBundle.message("add.custom.html.attribute", name));
           quickfixes[1] = new RemoveAttributeIntentionAction(name);
           if (maySwitchToHtml5) {
             quickfixes[2] = new SwitchToHtml5WithHighPriorityAction();

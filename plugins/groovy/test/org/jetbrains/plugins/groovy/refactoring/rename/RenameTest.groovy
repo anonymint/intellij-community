@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -169,7 +169,7 @@ class Foo {
   }
 
   public void testPropertyWithFieldCollision() {
-    myFixture.configureByText("a.groovy", """
+    myFixture.configureByText("a.groovy", """\
 class A {
   String na<caret>me;
 
@@ -188,7 +188,8 @@ class A {
     PsiElement field = myFixture.elementAtCaret
     myFixture.renameElement field, "ndame"
 
-    myFixture.checkResult """class A {
+    myFixture.checkResult """\
+class A {
   String ndame;
 
   class X {
@@ -686,6 +687,18 @@ class Inheritor extends Base {
 new Base().bar()
 new Inheritor().bar()
 new Inheritor().bar(2)
+''')
+    }
+  }
+
+  void testRenameScriptFile() {
+    myFixture.with {
+      final PsiFile file = configureByText('Abc.groovy', '''\
+print new Abc()
+''')
+      renameElement(file, 'Abcd.groovy')
+      checkResult('''\
+print new Abcd()
 ''')
     }
   }

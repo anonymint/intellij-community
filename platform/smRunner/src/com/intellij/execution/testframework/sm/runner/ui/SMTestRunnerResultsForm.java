@@ -35,6 +35,8 @@ import com.intellij.openapi.progress.util.ColorProgressBar;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.ui.JBColor;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.DateFormatUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -46,7 +48,6 @@ import javax.swing.event.TreeSelectionListener;
 import java.awt.*;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -58,7 +59,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
   implements TestFrameworkRunningModel, TestResultsViewer, SMTRunnerEventsListener {
   @NonNls private static final String DEFAULT_SM_RUNNER_SPLITTER_PROPERTY = "SMTestRunner.Splitter.Proportion";
 
-  public static final Color DARK_YELLOW = Color.YELLOW.darker();
+  public static final Color DARK_YELLOW = JBColor.YELLOW.darker();
 
   private SMTRunnerTestTreeView myTreeView;
 
@@ -71,7 +72,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
   private SMTRunnerTreeBuilder myTreeBuilder;
   private final TestConsoleProperties myConsoleProperties;
 
-  private final List<EventsListener> myEventListeners = new ArrayList<EventsListener>();
+  private final List<EventsListener> myEventListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private PropagateSelectionHandler myShowStatisticForProxyHandler;
 
@@ -392,6 +393,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
     super.dispose();
     myShowStatisticForProxyHandler = null;
     myEventListeners.clear();
+    myStatisticsPane.doDispose();
   }
 
   public void showStatisticsForSelectedProxy() {
@@ -491,7 +493,7 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
     if (testingFinished) {
       if (myTestsTotal == 0) {
         myStatusLine.setStatusColor(myTestsRootNode.wasLaunched() || !myTestsRootNode.isTestsReporterAttached()
-                                    ? Color.LIGHT_GRAY
+                                    ? JBColor.LIGHT_GRAY
                                     : ColorProgressBar.RED);
       }
       // else color will be according failed/passed tests
@@ -605,37 +607,5 @@ public class SMTestRunnerResultsForm extends TestResultsPanel
   private boolean isModeConsistent(boolean isCustomMessage) {
     // check that we are in consistent mode
     return isCustomMessage != (myCurrentCustomProgressCategory == null);
-  }
-
-
-  private static class MyFocusTraversalPolicy extends FocusTraversalPolicy {
-    final List<Component> myComponents;
-
-    private MyFocusTraversalPolicy(final List<Component> components) {
-      myComponents = components;
-    }
-
-    public Component getComponentAfter(final Container container, final Component component) {
-      return myComponents.get((myComponents.indexOf(component) + 1) % myComponents.size());
-    }
-
-    public Component getComponentBefore(final Container container, final Component component) {
-      final int prevIndex = myComponents.indexOf(component) - 1;
-      final int normalizedIndex = prevIndex < 0 ? myComponents.size() - 1 : prevIndex;
-
-      return myComponents.get(normalizedIndex);
-    }
-
-    public Component getFirstComponent(final Container container) {
-      return myComponents.get(0);
-    }
-
-    public Component getLastComponent(final Container container) {
-      return myComponents.get(myComponents.size() - 1);
-    }
-
-    public Component getDefaultComponent(final Container container) {
-      return getFirstComponent(container);
-    }
   }
 }

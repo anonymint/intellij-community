@@ -180,7 +180,7 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
     if (runner == null)
       return false;
     final ExecutionEnvironment environment = new ExecutionEnvironment(runner, settings, myProject);
-    environment.putUserData(RunContentDescriptor.REUSE_CONTENT_PROHIBITED, env.getUserData(RunContentDescriptor.REUSE_CONTENT_PROHIBITED));
+    environment.setExecutionId(env.getExecutionId());
     if (!ExecutionTargetManager.canRun(settings, env.getExecutionTarget())) {
       return false;
     }
@@ -195,6 +195,7 @@ extends BeforeRunTaskProvider<RunConfigurationBeforeRunProvider.RunConfigurableB
       try {
         ApplicationManager.getApplication().invokeAndWait(new Runnable() {
 
+          @Override
           public void run() {
             targetDone.down();
             try {

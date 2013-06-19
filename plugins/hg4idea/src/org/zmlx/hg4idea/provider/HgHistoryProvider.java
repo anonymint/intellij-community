@@ -15,6 +15,7 @@ package org.zmlx.hg4idea.provider;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.annotate.ShowAllAffectedGenericAction;
 import com.intellij.openapi.vcs.history.*;
@@ -26,8 +27,11 @@ import org.jetbrains.annotations.Nullable;
 import org.zmlx.hg4idea.HgCopyHistoryRevisionNumberAction;
 import org.zmlx.hg4idea.HgFile;
 import org.zmlx.hg4idea.HgFileRevision;
+import org.zmlx.hg4idea.HgVcsMessages;
+import org.zmlx.hg4idea.action.HgCommandResultNotifier;
 import org.zmlx.hg4idea.command.HgLogCommand;
 import org.zmlx.hg4idea.command.HgWorkingCopyRevisionsCommand;
+import org.zmlx.hg4idea.execution.HgCommandException;
 import org.zmlx.hg4idea.util.HgUtil;
 
 import javax.swing.*;
@@ -36,8 +40,6 @@ import java.util.Collections;
 import java.util.List;
 
 public class HgHistoryProvider implements VcsHistoryProvider {
-
-  private static final int DEFAULT_LIMIT = 500;
 
   private final Project myProject;
 
@@ -68,14 +70,14 @@ public class HgHistoryProvider implements VcsHistoryProvider {
       return null;
     }
     final List<VcsFileRevision> revisions = new ArrayList<VcsFileRevision>();
-    revisions.addAll(getHistory(filePath, vcsRoot, myProject, DEFAULT_LIMIT));
+    revisions.addAll(getHistory(filePath, vcsRoot, myProject));
     return createAppendableSession(vcsRoot, revisions, null);
   }
 
   public void reportAppendableHistory(FilePath filePath, final VcsAppendableHistorySessionPartner partner) throws VcsException {
     final VirtualFile vcsRoot = HgUtil.getHgRootOrThrow(myProject, filePath);
 
-    final List<HgFileRevision> history = getHistory(filePath, vcsRoot, myProject, DEFAULT_LIMIT);
+    final List<HgFileRevision> history = getHistory(filePath, vcsRoot, myProject);
     if (history.size() == 0) return;
 
     final VcsAbstractHistorySession emptySession = createAppendableSession(vcsRoot, Collections.<VcsFileRevision>emptyList(), null);
@@ -105,11 +107,20 @@ public class HgHistoryProvider implements VcsHistoryProvider {
     };
   }
 
-  private static List<HgFileRevision> getHistory(FilePath filePath, VirtualFile vcsRoot, Project project, int limit) {
+  private static List<HgFileRevision> getHistory(FilePath filePath, VirtualFile vcsRoot, Project project) {
+    VcsConfiguration vcsConfiguration = VcsConfiguration.getInstance(project);
+    int limit = vcsConfiguration.LIMIT_HISTORY ? vcsConfiguration.MAXIMUM_HISTORY_ROWS : -1;
+
     final HgLogCommand logCommand = new HgLogCommand(project);
     logCommand.setFollowCopies(!filePath.isDirectory());
     logCommand.setIncludeRemoved(true);
-    return logCommand.execute(new HgFile(vcsRoot, filePath), limit, false);
+    try {
+      return logCommand.execute(new HgFile(vcsRoot, filePath), limit, false);
+    }
+    catch (HgCommandException e) {
+      new HgCommandResultNotifier(project).notifyError(null, HgVcsMessages.message("hg4idea.error.log.command.execution"), e.getMessage());
+      return Collections.emptyList();
+    }
   }
 
   public boolean supportsHistoryForDirectories() {

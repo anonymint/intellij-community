@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,12 +35,14 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
+import com.intellij.openapi.util.AsyncResult;
+import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.util.ui.EmptyIcon;
 import org.jetbrains.annotations.NotNull;
@@ -50,7 +52,9 @@ import javax.swing.*;
 import javax.swing.filechooser.FileSystemView;
 import java.awt.*;
 import java.awt.event.MouseEvent;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
@@ -59,19 +63,75 @@ import java.util.regex.Pattern;
 public class ShowFilePathAction extends AnAction {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.actions.ShowFilePathAction");
 
-  private static NotNullLazyValue<Boolean> hasNautilusV3 = new NotNullLazyValue<Boolean>() {
+  private static NotNullLazyValue<Boolean> canUseNautilus = new NotNullLazyValue<Boolean>() {
     @NotNull
     @Override
     protected Boolean compute() {
-      final String version = ExecUtil.execAndReadLine("nautilus", "--version");
+      if (!SystemInfo.isUnix || !SystemInfo.hasXdgMime() || !new File("/usr/bin/nautilus").canExecute()) {
+        return false;
+      }
+
+      String appName = ExecUtil.execAndReadLine("xdg-mime", "query", "default", "inode/directory");
+      if (appName == null || !appName.matches("nautilus.*\\.desktop")) return false;
+
+      String version = ExecUtil.execAndReadLine("nautilus", "--version");
       if (version == null) return false;
-      final Matcher m = Pattern.compile("GNOME nautilus ([0-9.]+)").matcher(version);
+
+      Matcher m = Pattern.compile("GNOME nautilus ([0-9.]+)").matcher(version);
       return m.find() && StringUtil.compareVersionNumbers(m.group(1), "3") >= 0;
     }
   };
 
+  private static final NotNullLazyValue<String> fileManagerName = new AtomicNotNullLazyValue<String>() {
+    @NotNull
+    @Override
+    protected String compute() {
+      if (SystemInfo.isMac) return "Finder";
+      if (SystemInfo.isWindows) return "Explorer";
+      if (SystemInfo.isUnix && SystemInfo.hasXdgMime()) {
+        String name = getUnixFileManagerName();
+        if (name != null) return name;
+      }
+      return "File Manager";
+    }
+  };
+
+  @Nullable
+  private static String getUnixFileManagerName() {
+    String appName = ExecUtil.execAndReadLine("xdg-mime", "query", "default", "inode/directory");
+    if (appName == null || !appName.matches(".+\\.desktop")) return null;
+
+    String dirs = System.getenv("XDG_DATA_DIRS");
+    if (dirs == null) return null;
+
+    try {
+      for (String dir : dirs.split(File.pathSeparator)) {
+        File appFile = new File(dir, "applications/" + appName);
+        if (appFile.exists()) {
+          BufferedReader reader = new BufferedReader(new FileReader(appFile));
+          try {
+            String line;
+            while ((line = reader.readLine()) != null) {
+              if (line.startsWith("Name=")) {
+                return line.substring(5);
+              }
+            }
+          }
+          finally {
+            reader.close();
+          }
+        }
+      }
+    }
+    catch (IOException e) {
+      LOG.info("Cannot read desktop file", e);
+    }
+
+    return null;
+  }
+
   @Override
-  public void update(final AnActionEvent e) {
+  public void update(AnActionEvent e) {
     if (SystemInfo.isMac || !isSupported()) {
       e.getPresentation().setVisible(false);
       return;
@@ -79,11 +139,15 @@ public class ShowFilePathAction extends AnAction {
     e.getPresentation().setEnabled(getFile(e) != null);
   }
 
-  public void actionPerformed(final AnActionEvent e) {
+  public void actionPerformed(AnActionEvent e) {
     show(getFile(e), new ShowAction() {
       public void show(final ListPopup popup) {
-        final DataContext context = DataManager.getInstance().getDataContext();
-        popup.showInBestPositionFor(context);
+        DataManager.getInstance().getDataContextFromFocus().doWhenDone(new AsyncResult.Handler<DataContext>() {
+          @Override
+          public void run(DataContext context) {
+            popup.showInBestPositionFor(context);
+          }
+        });
       }
     });
   }
@@ -91,8 +155,9 @@ public class ShowFilePathAction extends AnAction {
   public static void show(final VirtualFile file, final MouseEvent e) {
     show(file, new ShowAction() {
       public void show(final ListPopup popup) {
-        if (!e.getComponent().isShowing()) return;
-        popup.show(new RelativePoint(e));
+        if (e.getComponent().isShowing()) {
+          popup.show(new RelativePoint(e));
+        }
       }
     });
   }
@@ -180,7 +245,12 @@ public class ShowFilePathAction extends AnAction {
   public static boolean isSupported() {
     return SystemInfo.isWindows ||
            Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN) ||
-           SystemInfo.hasXdgOpen() || SystemInfo.hasNautilus();
+           SystemInfo.hasXdgOpen() || canUseNautilus.getValue();
+  }
+
+  @NotNull
+  public static String getFileManagerName() {
+    return fileManagerName.getValue();
   }
 
   /** @deprecated use {@linkplain #openFile(java.io.File)} (to remove in IDEA 13) */
@@ -214,6 +284,7 @@ public class ShowFilePathAction extends AnAction {
    *
    * @param directory a directory to show in a file manager.
    */
+  @SuppressWarnings("UnusedDeclaration")
   public static void openDirectory(@NotNull final File directory) {
     if (!directory.isDirectory()) return;
     try {
@@ -224,7 +295,7 @@ public class ShowFilePathAction extends AnAction {
     }
   }
 
-  private static void doOpen(@NotNull final File dir, @Nullable final File toSelect) throws IOException, ExecutionException {
+  private static void doOpen(@NotNull File dir, @Nullable File toSelect) throws IOException, ExecutionException {
     if (SystemInfo.isWindows) {
       String cmd;
       if (toSelect != null) {
@@ -253,22 +324,14 @@ public class ShowFilePathAction extends AnAction {
       return;
     }
 
-    if (Registry.is("ide.use.nautilus3") && SystemInfo.hasNautilus() && hasNautilusV3.getValue()) {
-      if (toSelect != null) {
-        new GeneralCommandLine("nautilus", toSelect.getAbsolutePath()).createProcess();
-      }
-      else {
-        new GeneralCommandLine("nautilus", dir.getAbsolutePath()).createProcess();
-      }
+    if (canUseNautilus.getValue()) {
+      new GeneralCommandLine("nautilus", (toSelect != null ? toSelect : dir).getAbsolutePath()).createProcess();
       return;
     }
 
-    final String path = dir.getAbsolutePath();
+    String path = dir.getAbsolutePath();
     if (SystemInfo.hasXdgOpen()) {
       new GeneralCommandLine("/usr/bin/xdg-open", path).createProcess();
-    }
-    else if (SystemInfo.hasNautilus()) {
-      new GeneralCommandLine("nautilus", path).createProcess();
     }
     else if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
       Desktop.getDesktop().open(new File(path));
@@ -328,5 +391,21 @@ public class ShowFilePathAction extends AnAction {
                                     IdeBundle.message("action.close"), Messages.getInformationIcon(), option) == 0) {
       openFile(file);
     }
+  }
+
+  @Nullable
+  public static VirtualFile findLocalFile(@Nullable VirtualFile file) {
+    if (file == null) return null;
+
+    if (file.isInLocalFileSystem()) {
+      return file;
+    }
+
+    VirtualFileSystem fs = file.getFileSystem();
+    if (fs instanceof JarFileSystem && file.getParent() == null) {
+      return  ((JarFileSystem)fs).getLocalVirtualFileFor(file);
+    }
+
+    return null;
   }
 }

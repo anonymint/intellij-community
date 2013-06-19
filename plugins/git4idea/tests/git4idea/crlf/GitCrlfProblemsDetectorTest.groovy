@@ -18,45 +18,49 @@ import com.intellij.dvcs.test.MockVirtualFile
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
-import git4idea.test.GitExecutor
 import git4idea.test.GitLightTest
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
+import static com.intellij.dvcs.test.Executor.cd
+import static git4idea.test.GitExecutor.git
 import static org.junit.Assert.assertFalse
 import static org.junit.Assert.assertTrue
 /**
  *
  * @author Kirill Likhodedov
  */
-@Mixin(GitExecutor)
 class GitCrlfProblemsDetectorTest extends GitLightTest {
 
-  private String myOldCoreAutoCrlfValue
+  private String myOldGlobalAutoCrlfValue
+  private String myOldSystemAutoCrlfValue
 
   @Before
   public void setUp() {
     super.setUp();
     cd myProjectRoot
-    if (isGlobalCommandPossible()) {
-      myOldCoreAutoCrlfValue = git ("config --global core.autocrlf")
+    try {
+      myOldGlobalAutoCrlfValue = git ("config --global core.autocrlf")
       git ("config --global --unset core.autocrlf")
+    } catch (Exception e) {
+      System.out.println("Couldn't operate with global config: " + e.getMessage())
     }
+    myOldSystemAutoCrlfValue = git ("config --system core.autocrlf")
+    git ("config --system --unset core.autocrlf")
 
     createRepository(myProjectRoot)
   }
 
   @After
   public void tearDown() {
-    if (!StringUtil.isEmptyOrSpaces(myOldCoreAutoCrlfValue)) {
-      git ("config --global core.autocrlf " + myOldCoreAutoCrlfValue);
+    if (!StringUtil.isEmptyOrSpaces(myOldGlobalAutoCrlfValue)) {
+      git ("config --global core.autocrlf " + myOldGlobalAutoCrlfValue);
+    }
+    if (!StringUtil.isEmptyOrSpaces(myOldSystemAutoCrlfValue)) {
+      git ("config --global core.autocrlf " + myOldSystemAutoCrlfValue);
     }
     super.tearDown();
-  }
-
-  private static boolean isGlobalCommandPossible() {
-    return System.getenv("HOME") != null;
   }
 
   @Test

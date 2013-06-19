@@ -18,6 +18,7 @@ package com.intellij.refactoring.util;
 import com.intellij.codeInsight.ExpectedTypeInfo;
 import com.intellij.codeInsight.ExpectedTypesProvider;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
+import com.intellij.codeInsight.daemon.impl.analysis.JavaHighlightUtil;
 import com.intellij.codeInsight.highlighting.HighlightManager;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
@@ -373,22 +374,6 @@ public class RefactoringUtil {
     return null;
   }
 
-  public static PsiClass getThisClass(PsiElement place) {
-    PsiElement parent = place.getContext();
-    if (parent == null) return null;
-    PsiElement prev = null;
-    while (true) {
-      if (parent instanceof PsiClass) {
-        if (!(parent instanceof PsiAnonymousClass && ((PsiAnonymousClass)parent).getArgumentList() == prev)) {
-          return (PsiClass)parent;
-        }
-      }
-      prev = parent;
-      parent = parent.getContext();
-      if (parent == null) return null;
-    }
-  }
-
   public static PsiClass getThisResolveClass(final PsiReferenceExpression place) {
     final JavaResolveResult resolveResult = place.advancedResolve(false);
     final PsiElement scope = resolveResult.getCurrentFileResolveScope();
@@ -433,29 +418,6 @@ public class RefactoringUtil {
       .isReassigned(variable, new THashMap<PsiElement, Collection<ControlFlowUtil.VariableInfo>>());
     return !isReassigned;
   }
-
-  public static PsiThisExpression createThisExpression(PsiManager manager, PsiClass qualifierClass) throws IncorrectOperationException {
-    return RefactoringUtil.<PsiThisExpression>createQualifiedExpression(manager, qualifierClass, "this");
-  }
-
-  public static PsiSuperExpression createSuperExpression(PsiManager manager, PsiClass qualifierClass) throws IncorrectOperationException {
-    return RefactoringUtil.<PsiSuperExpression>createQualifiedExpression(manager, qualifierClass, "super");
-  }
-
-  private static <T extends PsiQualifiedExpression> T createQualifiedExpression(PsiManager manager, PsiClass qualifierClass, String qName) throws IncorrectOperationException {
-     PsiElementFactory factory = JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
-     if (qualifierClass != null) {
-       T qualifiedThis = (T)factory.createExpressionFromText("q." + qName, null);
-       qualifiedThis = (T)CodeStyleManager.getInstance(manager.getProject()).reformat(qualifiedThis);
-       PsiJavaCodeReferenceElement thisQualifier = qualifiedThis.getQualifier();
-       LOG.assertTrue(thisQualifier != null);
-       thisQualifier.bindToElement(qualifierClass);
-       return qualifiedThis;
-     }
-     else {
-       return (T)factory.createExpressionFromText(qName, null);
-     }
-   }
 
   /**
    * removes a reference to the specified class from the reference list given
@@ -861,21 +823,6 @@ public class RefactoringUtil {
     return buffer.toString();
   }
 
-  public static boolean isSuperOrThisCall(PsiStatement statement, boolean testForSuper, boolean testForThis) {
-    if (!(statement instanceof PsiExpressionStatement)) return false;
-    PsiExpression expression = ((PsiExpressionStatement)statement).getExpression();
-    if (!(expression instanceof PsiMethodCallExpression)) return false;
-    final PsiReferenceExpression methodExpression = ((PsiMethodCallExpression)expression).getMethodExpression();
-    if (testForSuper) {
-      if ("super".equals(methodExpression.getText())) return true;
-    }
-    if (testForThis) {
-      if ("this".equals(methodExpression.getText())) return true;
-    }
-
-    return false;
-  }
-
   public static void visitImplicitSuperConstructorUsages(PsiClass subClass,
                                                          final ImplicitConstructorUsageVisitor implicitConstructorUsageVistor,
                                                          PsiClass superClass) {
@@ -884,7 +831,7 @@ public class RefactoringUtil {
     if (constructors.length > 0) {
       for (PsiMethod constructor : constructors) {
         final PsiStatement[] statements = constructor.getBody().getStatements();
-        if (statements.length < 1 || !isSuperOrThisCall(statements[0], true, true)) {
+        if (statements.length < 1 || !JavaHighlightUtil.isSuperOrThisCall(statements[0], true, true)) {
           implicitConstructorUsageVistor.visitConstructor(constructor, baseDefaultConstructor);
         }
       }

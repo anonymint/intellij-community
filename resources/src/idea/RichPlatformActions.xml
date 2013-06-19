@@ -26,6 +26,7 @@
   <xi:include href="/idea/PlatformActions.xml" xpointer="xpointer(/component/*)"/>
   <xi:include href="/idea/VcsActions.xml" xpointer="xpointer(/component/*)"/>
   <xi:include href="/idea/LangActions.xml" xpointer="xpointer(/component/*)"/>
+  <xi:include href="/idea/ExternalSystemActions.xml" xpointer="xpointer(/component/*)"/>
 
   <actions>
     <action id="RerunFailedTests" class="com.intellij.execution.testframework.actions.AbstractRerunFailedTestsAction"
@@ -140,7 +141,7 @@
         <action id="CheckVfsSanity" internal="true" class="com.intellij.openapi.vfs.newvfs.persistent.CheckSanityAction" text="Check VFS sanity"/>
         <action id="LoadAllContent" internal="true" class="com.intellij.internal.LoadAllContentsAction" text="Load all files content"/>
         <action id="LoadAllVFSContent" internal="true" class="com.intellij.internal.LoadAllVfsStoredContentsAction" text="Load all VFS stored files content"/>
-        <!--<action id="ComputeVFStatistics" internal="true" class="com.intellij.internal.ComputeVirtualFileNameStatAction"/>-->
+        <action id="ComputeVFStatistics" internal="true" class="com.intellij.internal.ComputeVirtualFileNameStatAction"/>
         <separator/>
         <action internal="true" id="PruneEmptyDirectories" class="com.intellij.ide.actions.PruneEmptyDirectoriesAction" text="Prune Empty Directories"/>
         <action internal="true" id="FixLineSeparators" class="com.intellij.ide.actions.FixLineSeparatorsAction" text="Fix Line Separators"/>
@@ -150,8 +151,7 @@
 
       <action internal="true" id="CompilerTest" class="com.intellij.compiler.impl.javaCompiler.api.CompilerPerfTestAction"
               text="Test Rebuild Performance"/>
-      <action internal="true" id="GenerateDomModel" class="com.intellij.util.dom.generator.GenerateDomModelAction"
-              text="Generate Dom Model"/>
+
       <add-to-group group-id="Internal" anchor="last"/>
     </group>
 
@@ -171,10 +171,6 @@
     <group id="DebuggerActions">
     </group>
 
-    <action id="ConfigureFileDefaultEncoding" class="com.intellij.openapi.vfs.encoding.ConfigureFileDefaultEncodingAction">
-      <add-to-group group-id="ChangeFileEncodingGroup" anchor="last"/>
-    </action>
-
     <action id="AnalyzeStacktraceOnError" class="com.intellij.unscramble.AnalyzeStacktraceOnErrorAction" text="Analyze _Stacktrace"/>
 
     <reference ref="Compile">
@@ -192,6 +188,7 @@
     </group>
 
     <action id="ModuleSettings" class="com.intellij.ide.actions.ShowModulePropertiesAction"/>
+    <action id="OpenModuleSettings" class="com.intellij.ide.actions.OpenModuleSettingsAction" use-shortcut-of="EditSource"/>
     <group id="MoveModuleToGroup" class="com.intellij.ide.projectView.impl.MoveModuleToGroupTopLevel" popup="true"/>
 
     <reference ref="AnalyzeMenu">
@@ -225,8 +222,11 @@
     </action>
 
 
-    <reference ref="MoveModuleToGroup">
+    <reference ref="OpenModuleSettings">
       <add-to-group group-id="ProjectViewPopupMenuSettingsGroup" anchor="first"/>
+    </reference>
+    <reference ref="MoveModuleToGroup">
+      <add-to-group group-id="ProjectViewPopupMenuSettingsGroup" anchor="after" relative-to-action="OpenModuleSettings"/>
     </reference>
 
     <group id="StructureViewCompileGroup">
@@ -248,7 +248,6 @@
       <reference ref="RefactoringMenu"/>
       <separator/>
       <reference ref="AddToFavorites"/>
-      <reference ref="MoveToChangeList"/>
       <separator/>
       <reference ref="RunContextPopupGroup"/>
       <separator/>
@@ -274,7 +273,6 @@
       <reference ref="RefactoringMenu"/>
       <separator/>
       <reference ref="AddToFavorites"/>
-      <reference ref="MoveToChangeList"/>
       <separator/>
       <reference ref="Compile"/>
       <reference ref="RunContextPopupGroup"/>
@@ -297,7 +295,6 @@
       <reference ref="RefactoringMenu"/>
       <separator/>
       <reference ref="AddToFavorites"/>
-      <reference ref="MoveToChangeList"/>
       <separator/>
       <reference ref="Compile"/>
       <reference ref="RunAPT"/>
@@ -333,7 +330,6 @@
       <reference ref="RefactoringMenu"/>
       <separator/>
       <reference ref="AddToFavorites"/>
-      <reference ref="MoveToChangeList"/>
       <separator/>
       <reference ref="TypeHierarchy"/>
       <reference ref="ReformatCode"/>
@@ -367,7 +363,6 @@
     <!--<action id="UsageView.Exclude" class="com.intellij.usages.actions.ExcludeUsageAction"/>-->
     <!--<separator/>-->
     <!--<reference ref="AddToFavorites"/>-->
-    <!--<reference ref="MoveToChangeList"/>-->
     <!--<reference ref="FindUsages"/>-->
     <!--<action id="UsageView.ShowRecentFindUsages" class="com.intellij.find.impl.ShowRecentFindUsagesAction" icon="/actions/back.png"/>-->
     <!--<separator/>-->

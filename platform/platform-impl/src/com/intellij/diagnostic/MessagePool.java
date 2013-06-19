@@ -17,6 +17,7 @@ package com.intellij.diagnostic;
 
 import com.intellij.concurrency.JobScheduler;
 import com.intellij.openapi.diagnostic.IdeaLoggingEvent;
+import com.intellij.util.containers.ContainerUtil;
 import org.apache.log4j.Category;
 import org.apache.log4j.Priority;
 import org.apache.log4j.spi.LoggingEvent;
@@ -24,9 +25,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 public class MessagePool {
@@ -34,14 +33,14 @@ public class MessagePool {
 
   private final List<AbstractMessage> myIdeFatals = new ArrayList<AbstractMessage>();
 
-  private final Set<MessagePoolListener> myListeners = new HashSet<MessagePoolListener>();
+  private final List<MessagePoolListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   private final MessageGrouper myFatalsGrouper;
   private boolean ourJvmIsShuttingDown = false;
 
   MessagePool(int maxGroupSize, int timeout) {
     myFatalsGrouper = new MessageGrouper(timeout, maxGroupSize);
-    JobScheduler.getScheduler().scheduleAtFixedRate(myFatalsGrouper, (long)300, (long)300, TimeUnit.MILLISECONDS);
+    JobScheduler.getScheduler().scheduleWithFixedDelay(myFatalsGrouper, (long)300, (long)300, TimeUnit.MILLISECONDS);
   }
 
   private static class MessagePoolHolder {
@@ -109,22 +108,19 @@ public class MessagePool {
   private void notifyListenersAdd() {
     if (ourJvmIsShuttingDown) return;
 
-    final MessagePoolListener[] messagePoolListeners = myListeners.toArray(new MessagePoolListener[myListeners.size()]);
-    for (MessagePoolListener messagePoolListener : messagePoolListeners) {
+    for (MessagePoolListener messagePoolListener : myListeners) {
       messagePoolListener.newEntryAdded();
     }
   }
 
   private void notifyListenersClear() {
-    final MessagePoolListener[] messagePoolListeners = myListeners.toArray(new MessagePoolListener[myListeners.size()]);
-    for (MessagePoolListener messagePoolListener : messagePoolListeners) {
+    for (MessagePoolListener messagePoolListener : myListeners) {
       messagePoolListener.poolCleared();
     }
   }
 
   void notifyListenersRead() {
-    final MessagePoolListener[] messagePoolListeners = myListeners.toArray(new MessagePoolListener[myListeners.size()]);
-    for (MessagePoolListener messagePoolListener : messagePoolListeners) {
+    for (MessagePoolListener messagePoolListener : myListeners) {
       messagePoolListener.entryWasRead();
     }
   }

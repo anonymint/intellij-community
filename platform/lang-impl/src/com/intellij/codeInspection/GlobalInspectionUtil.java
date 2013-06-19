@@ -19,11 +19,14 @@ package com.intellij.codeInspection;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.reference.RefElement;
+import com.intellij.lang.annotation.ProblemGroup;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -37,7 +40,7 @@ import java.util.List;
 public class GlobalInspectionUtil {
   private static final String LOC_MARKER = " #loc";
 
-  public static RefElement retrieveRefElement(PsiElement element, GlobalInspectionContext globalContext) {
+  public static RefElement retrieveRefElement(@NotNull PsiElement element, @NotNull GlobalInspectionContext globalContext) {
     PsiFile elementFile = element.getContainingFile();
     RefElement refElement = globalContext.getRefManager().getReference(elementFile);
     if (refElement == null) {
@@ -47,15 +50,19 @@ public class GlobalInspectionUtil {
     return refElement;
   }
 
-  public static String createInspectionMessage(String message) {
+  @NotNull
+  public static String createInspectionMessage(@NotNull String message) {
     //TODO: FIXME!
     return message + LOC_MARKER;
   }
 
-  public static void createProblem(PsiElement elt, HighlightInfo info, TextRange range,
-                                   @Nullable String problemGroup,
-                                   InspectionManager manager, ProblemDescriptionsProcessor problemDescriptionsProcessor,
-                                   GlobalInspectionContext globalContext) {
+  public static void createProblem(PsiElement elt,
+                                   @NotNull HighlightInfo info,
+                                   TextRange range,
+                                   @Nullable ProblemGroup problemGroup,
+                                   @NotNull InspectionManager manager,
+                                   @NotNull ProblemDescriptionsProcessor problemDescriptionsProcessor,
+                                   @NotNull GlobalInspectionContext globalContext) {
     List<LocalQuickFix> fixes = new ArrayList<LocalQuickFix>();
     if (info.quickFixActionRanges != null) {
       for (Pair<HighlightInfo.IntentionActionDescriptor, TextRange> actionRange : info.quickFixActionRanges) {
@@ -65,7 +72,7 @@ public class GlobalInspectionUtil {
         }
       }
     }
-    ProblemDescriptor descriptor = manager.createProblemDescriptor(elt, range, createInspectionMessage(info.description),
+    ProblemDescriptor descriptor = manager.createProblemDescriptor(elt, range, createInspectionMessage(StringUtil.notNullize(info.getDescription())),
                                                                    HighlightInfo.convertType(info.type), false,
                                                                    fixes.isEmpty() ? null : fixes.toArray(new LocalQuickFix[fixes.size()]));
     descriptor.setProblemGroup(problemGroup);

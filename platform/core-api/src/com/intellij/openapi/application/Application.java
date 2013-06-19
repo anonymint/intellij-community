@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2013 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,17 @@ public interface Application extends ComponentManager {
    * @return the result returned by the computation.
    */
   <T> T runReadAction(@NotNull Computable<T> computation);
+
+  /**
+   * Runs the specified computation in a read action. Can be called from any thread. The action is executed
+   * immediately if no write action is currently running, or blocked until the currently running write action
+   * completes.
+   *
+   * @param computation the computation to perform.
+   * @return the result returned by the computation.
+   * @exception E re-frown from ThrowableComputable
+   */
+  <T, E extends Throwable> T runReadAction(@NotNull ThrowableComputable<T, E> computation) throws E;
 
   /**
    * Runs the specified write action. Must be called from the Swing dispatch thread. The action is executed
@@ -179,18 +190,26 @@ public interface Application extends ComponentManager {
   ModalityInvokator getInvokator();
 
   /**
-   * Causes <i>runnable.run()</i> to be executed asynchronously on the
-   * AWT event dispatching thread.  This will happen after all
+   * Causes {@code runnable.run()} to be executed asynchronously on the
+   * AWT event dispatching thread. This will happen after all
    * pending AWT events have been processed.
    *
    * @param runnable the runnable to execute.
    */
   void invokeLater(@NotNull Runnable runnable);
 
+  /**
+   * Causes {@code runnable.run()} to be executed asynchronously on the
+   * AWT event dispatching thread - unless the expiration condition is fulfilled.
+   * This will happen after all pending AWT events have been processed.
+   *
+   * @param runnable the runnable to execute.
+   * @param expired  condition to check before execution.
+   */
   void invokeLater(@NotNull Runnable runnable, @NotNull Condition expired);
 
   /**
-   * Causes <i>runnable.run()</i> to be executed asynchronously on the
+   * Causes {@code runnable.run()} to be executed asynchronously on the
    * AWT event dispatching thread, when IDEA is in the specified modality
    * state.
    *
@@ -199,13 +218,26 @@ public interface Application extends ComponentManager {
    */
   void invokeLater(@NotNull Runnable runnable, @NotNull ModalityState state);
 
+  /**
+   * Causes {@code runnable.run()} to be executed asynchronously on the
+   * AWT event dispatching thread, when IDEA is in the specified modality
+   * state - unless the expiration condition is fulfilled.
+   * This will happen after all pending AWT events have been processed.
+   *
+   * @param runnable the runnable to execute.
+   * @param state the state in which the runnable will be executed.
+   * @param expired  condition to check before execution.
+   */
   void invokeLater(@NotNull Runnable runnable, @NotNull ModalityState state, @NotNull Condition expired);
 
   /**
-   * Causes <code>runnable.run()</code> to be executed synchronously on the
+   * <p>Causes {@code runnable.run()} to be executed synchronously on the
    * AWT event dispatching thread, when IDEA is in the specified modality
-   * state.  This call blocks until all pending AWT events have been processed and (then)
-   * <code>runnable.run()</code> returns.
+   * state. This call blocks until all pending AWT events have been processed and (then)
+   * {@code runnable.run()} returns.</p>
+   *
+   * <p>If current thread is an event dispatch thread then {@code runnable.run()}
+   * is executed immediately.</p>
    *
    * @param runnable the runnable to execute.
    * @param modalityState the state in which the runnable will be executed.
@@ -299,6 +331,7 @@ public interface Application extends ComponentManager {
    * @param action to be executed
    * @return future result
    */
+  @NotNull
   Future<?> executeOnPooledThread(@NotNull Runnable action);
 
   /**
@@ -306,6 +339,7 @@ public interface Application extends ComponentManager {
    * @param action to be executed
    * @return future result
    */
+  @NotNull
   <T> Future<T> executeOnPooledThread(@NotNull Callable<T> action);
 
   /**
@@ -323,7 +357,7 @@ public interface Application extends ComponentManager {
 
   /**
    * Exits and restarts IDEA. If the current platform is not restart capable, only exits.
-   * 
+   *
    * @since 8.1
    */
   void restart();
@@ -338,11 +372,13 @@ public interface Application extends ComponentManager {
   /**
    * Returns lock used for read operations, should be closed in finally block
    */
+  @NotNull
   AccessToken acquireReadActionLock();
 
   /**
    * Returns lock used for write operations, should be closed in finally block
    */
+  @NotNull
   AccessToken acquireWriteActionLock(@Nullable Class marker);
 
   boolean isInternal();
